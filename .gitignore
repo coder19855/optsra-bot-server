@@ -44,3 +44,15 @@ Thumbs.db
 .claude/settings.local.json
 
 test-output
+
+.env
+.env.local
+.env.test
+.env.test.local
+.env.development
+.env.development.local
+
+# Logs
+*.log
+*.log.*
+logs/
