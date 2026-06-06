@@ -4,9 +4,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @optra-bot-server/OptraBot with Nx",
+      "name": "Debug @optra-bot/server with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@optra-bot-server/OptraBot"],
+      "runtimeArgs": ["nx", "serve", "@optra-bot/server"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },
@@ -15,7 +15,7 @@
       "skipFiles": ["<node_internals>/**"],
       "sourceMaps": true,
       "outFiles": [
-        "${workspaceFolder}/apps/OptraBot/dist/**/*.(m|c|)js",
+        "${workspaceFolder}/apps/server/dist/**/*.(m|c|)js",
         "!**/node_modules/**"
       ]
     }

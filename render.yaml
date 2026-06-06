@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: opstra-bot-server
+    runtime: node
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /api
+    envVars:
+      - key: NODE_VERSION
+        value: '20'
+      - key: HOST
+        value: 0.0.0.0
+      - key: TELEGRAM_NOTIFICATIONS_ENABLED
+        value: 'true'
+      - key: MONGODB_URL
+        sync: false
+      - key: FYERS_API_KEY
+        sync: false
+      - key: FYERS_API_SECRET
+        sync: false
+      - key: FYERS_REDIRECT_URL
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false

@@ -41,7 +41,7 @@
       "options": {
         "targetName": "test"
       },
-      "exclude": ["apps/OptraBot-e2e/**/*"]
+      "exclude": ["apps/server-e2e/**/*"]
     }
   ],
   "targetDefaults": {

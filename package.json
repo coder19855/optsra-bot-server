@@ -1,8 +1,11 @@
 {
-  "name": "@optra-bot-server/source",
+  "name": "@opstra-bot-server/source",
   "version": "0.0.0",
   "license": "MIT",
-  "scripts": {},
+  "scripts": {
+    "build": "nx build @opstra-bot/server",
+    "start": "node apps/server/dist/main.js"
+  },
   "private": true,
   "dependencies": {
     "@fastify/autoload": "~6.0.3",
