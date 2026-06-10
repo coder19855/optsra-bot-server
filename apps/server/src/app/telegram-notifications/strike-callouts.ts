@@ -6,8 +6,6 @@ import {
 import {
   formatSectionHeader,
   iconLine,
-  paletteToken,
-  scenarioForGammaLevel,
   tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
@@ -137,8 +135,7 @@ function gammaBurstIcon(level: GreeksStrikeProfile['gammaLevel']): string {
 }
 
 export function gammaRowPrefix(profile: GreeksStrikeProfile): string {
-  const token = paletteToken(scenarioForGammaLevel(profile.gammaLevel));
-  return `${token.dot}${gammaBurstIcon(profile.gammaLevel)} `;
+  return `${gammaBurstIcon(profile.gammaLevel)} `;
 }
 
 export function formatGreeksSectionHeader(optionSide: 'CE' | 'PE'): string {

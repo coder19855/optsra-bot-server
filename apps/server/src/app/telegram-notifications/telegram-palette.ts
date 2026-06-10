@@ -3,7 +3,7 @@ import { CoachVerdict } from '../types/trading-coach';
 import { FyersUsageHealth } from '../types/fyers-usage';
 import { TpAlertKind, TpHoldAdvice } from '../types/telegram-notifications';
 
-/** Telegram HTML has no real colours — we use a fixed emoji + border palette. */
+/** Telegram HTML has no real colours — we use emoji accents + text borders. */
 export type TelegramScenario =
   | 'bullish'
   | 'bearish'
@@ -20,34 +20,31 @@ export type TelegramScenario =
   | 'api';
 
 export interface PaletteToken {
-  /** Colour square — scan anchor */
-  dot: string;
   /** Callout top/bottom border */
   edge: string;
-  /** Title emoji */
+  /** Title / line emoji */
   accent: string;
 }
 
 export const TELEGRAM_PALETTE: Record<TelegramScenario, PaletteToken> = {
-  bullish: { dot: '🟢', edge: '🟢▰▰▰▰▰▰▰▰▰▰▰▰🟢', accent: '📈' },
-  bearish: { dot: '🔴', edge: '🔴▰▰▰▰▰▰▰▰▰▰▰▰🔴', accent: '📉' },
-  neutral: { dot: '🟡', edge: '🟡┉┉┉┉┉┉┉┉┉┉┉┉🟡', accent: '⏸' },
-  muted: { dot: '⚪', edge: '⚪────────────⚪', accent: '💤' },
-  gamma: { dot: '🟠', edge: '🟠▰▰▰▰▰▰▰▰▰▰▰▰🟠', accent: '🤯' },
-  pick: { dot: '🔵', edge: '🔵▰▰▰▰▰▰▰▰▰▰▰▰🔵', accent: '🎯' },
-  success: { dot: '🟢', edge: '🟢▰▰▰▰▰▰▰▰▰▰▰▰🟢', accent: '✅' },
-  warning: { dot: '🟡', edge: '🟡┉┉┉┉┉┉┉┉┉┉┉┉🟡', accent: '⚠️' },
-  danger: { dot: '🔴', edge: '🔴▰▰▰▰▰▰▰▰▰▰▰▰🔴', accent: '🚨' },
-  info: { dot: '🔵', edge: '🔵┈┈┈┈┈┈┈┈┈┈┈┈🔵', accent: 'ℹ️' },
-  coach: { dot: '🟣', edge: '🟣▰▰▰▰▰▰▰▰▰▰▰▰🟣', accent: '📚' },
-  learning: { dot: '🟧', edge: '🟧▰▰▰▰▰▰▰▰▰▰▰▰🟧', accent: '🧠' },
-  api: { dot: '🟦', edge: '🟦▰▰▰▰▰▰▰▰▰▰▰▰🟦', accent: '🌡' },
+  bullish: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '📈' },
+  bearish: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '📉' },
+  neutral: { edge: '┉┉┉┉┉┉┉┉┉┉┉┉', accent: '⏸' },
+  muted: { edge: '────────────', accent: '💤' },
+  gamma: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '🤯' },
+  pick: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '🎯' },
+  success: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '✅' },
+  warning: { edge: '┉┉┉┉┉┉┉┉┉┉┉┉', accent: '⚠️' },
+  danger: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '🚨' },
+  info: { edge: '┈┈┈┈┈┈┈┈┈┈┈┈', accent: 'ℹ️' },
+  coach: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '📚' },
+  learning: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '🧠' },
+  api: { edge: '▰▰▰▰▰▰▰▰▰▰▰▰', accent: '🌡' },
 };
 
-/** Thin divider between sections (scenario-tinted). */
-export function scenarioRule(scenario: TelegramScenario = 'muted'): string {
-  const { dot } = TELEGRAM_PALETTE[scenario];
-  return `${dot}${'─'.repeat(11)}${dot}`;
+/** Thin divider between sections. */
+export function scenarioRule(_scenario: TelegramScenario = 'muted'): string {
+  return '┉┉┉┉┉┉┉┉┉┉┉┉';
 }
 
 export function paletteToken(scenario: TelegramScenario): PaletteToken {
@@ -60,25 +57,25 @@ export function wrapScenarioCallout(
   titleHtml: string,
   bodyLines: string[],
 ): string {
-  const { edge, dot, accent } = TELEGRAM_PALETTE[scenario];
+  const { edge, accent } = TELEGRAM_PALETTE[scenario];
   const body = bodyLines.filter(Boolean);
   return [
     edge,
-    `${dot} ${accent} ${titleHtml}`,
+    `${accent} ${titleHtml}`,
     ...body,
     edge,
   ].join('\n');
 }
 
-/** Section header with colour dot + scenario icon (never strip these). */
+/** Section header with scenario icon. */
 export function formatSectionHeader(
   scenario: TelegramScenario,
   title: string,
   icon?: string,
 ): string {
-  const { dot, accent } = TELEGRAM_PALETTE[scenario];
+  const { accent } = TELEGRAM_PALETTE[scenario];
   const lead = icon ?? accent;
-  return `${dot} ${lead} <b>${title}</b>`;
+  return `${lead} <b>${title}</b>`;
 }
 
 /** Top-of-message scenario banner. */
@@ -86,14 +83,14 @@ export function formatScenarioBanner(
   scenario: TelegramScenario,
   headlineHtml: string,
 ): string {
-  const { dot, accent } = TELEGRAM_PALETTE[scenario];
-  return `${dot} ${accent} <b>${headlineHtml}</b>`;
+  const { accent } = TELEGRAM_PALETTE[scenario];
+  return `${accent} <b>${headlineHtml}</b>`;
 }
 
-/** Prefix a line with colour dot + icon — keeps body emojis intact. */
+/** Prefix a line with a scenario icon — keeps body emojis intact. */
 export function tintLine(scenario: TelegramScenario, line: string): string {
-  const { dot, accent } = TELEGRAM_PALETTE[scenario];
-  return `${dot} ${accent} ${line}`;
+  const { accent } = TELEGRAM_PALETTE[scenario];
+  return `${accent} ${line}`;
 }
 
 /** Free-form icon prefix (when a specific emoji fits better than the palette). */

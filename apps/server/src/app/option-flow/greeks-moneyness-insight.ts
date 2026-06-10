@@ -1,4 +1,5 @@
 import { FyersAPI } from 'fyers-api-v3';
+import { FYERS_OPTION_INDEX_SYMBOLS } from '../constants/fyers-symbols';
 import { OptionType } from '../types/options';
 import { TradingStyle } from '../types/trading-style';
 import {
@@ -6,6 +7,14 @@ import {
   GreeksStrikeInsight,
   GreeksStrikeProfile,
 } from '../types/greeks-strike-insight';
+
+const THETA_API_MIN = 0.01;
+const RISK_FREE_RATE = 0.065;
+
+export interface GreeksStrikeContext {
+  indexSymbol?: string;
+  expiryData?: FyersAPI.ExpiryData[];
+}
 
 function sortedStrikes(chain: FyersAPI.OptionChainData[]): number[] {
   return [...new Set(chain.map((row) => row.strike_price))].sort((a, b) => a - b);
@@ -38,12 +47,187 @@ function gammaLevel(
   return 'low';
 }
 
-function formatTheta(theta: number | null): string | null {
-  if (theta == null) return null;
-  const abs = Math.abs(theta);
-  if (abs >= 100) return `₹${abs.toFixed(0)}/day`;
-  if (abs >= 10) return `₹${abs.toFixed(1)}/day`;
-  return `₹${abs.toFixed(2)}/day`;
+function resolveLotSize(indexSymbol: string | undefined): number {
+  if (!indexSymbol) return 1;
+  const meta = FYERS_OPTION_INDEX_SYMBOLS.find((row) => row.symbol === indexSymbol);
+  return meta?.lotSize ?? 1;
+}
+
+function daysToNearestExpiry(
+  expiryData: FyersAPI.ExpiryData[] | undefined,
+): number | null {
+  if (!expiryData?.length) return null;
+
+  const now = Date.now();
+  let bestDays: number | null = null;
+
+  for (const row of expiryData) {
+    const epochMs = Number(row.expiry) * 1000;
+    if (!Number.isFinite(epochMs)) continue;
+    const days = (epochMs - now) / 86_400_000;
+    if (days <= 0) continue;
+    if (bestDays == null || days < bestDays) bestDays = days;
+  }
+
+  return bestDays;
+}
+
+function normPdf(x: number): number {
+  return Math.exp(-0.5 * x * x) / Math.sqrt(2 * Math.PI);
+}
+
+function normCdf(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp((-x * x) / 2);
+  const p =
+    d *
+    t *
+    (0.3193815 +
+      t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+
+function ivToSigma(iv: number | null | undefined): number | null {
+  if (iv == null || !Number.isFinite(iv) || iv <= 0) return null;
+  return iv > 1 ? iv / 100 : iv;
+}
+
+function bsPrice(params: {
+  spot: number;
+  strike: number;
+  years: number;
+  sigma: number;
+  optionSide: 'CE' | 'PE';
+}): number | null {
+  const { spot, strike, years, sigma, optionSide } = params;
+  if (spot <= 0 || strike <= 0 || years <= 0 || sigma <= 0) return null;
+
+  const d1 =
+    (Math.log(spot / strike) +
+      (RISK_FREE_RATE + 0.5 * sigma * sigma) * years) /
+    (sigma * Math.sqrt(years));
+  const d2 = d1 - sigma * Math.sqrt(years);
+
+  if (optionSide === 'CE') {
+    return (
+      spot * normCdf(d1) -
+      strike * Math.exp(-RISK_FREE_RATE * years) * normCdf(d2)
+    );
+  }
+
+  return (
+    strike * Math.exp(-RISK_FREE_RATE * years) * normCdf(-d2) -
+    spot * normCdf(-d1)
+  );
+}
+
+function bsDailyTheta(params: {
+  spot: number;
+  strike: number;
+  years: number;
+  sigma: number;
+  optionSide: 'CE' | 'PE';
+}): number | null {
+  const { spot, strike, years, sigma, optionSide } = params;
+  if (spot <= 0 || strike <= 0 || years <= 0 || sigma <= 0) return null;
+
+  const d1 =
+    (Math.log(spot / strike) +
+      (RISK_FREE_RATE + 0.5 * sigma * sigma) * years) /
+    (sigma * Math.sqrt(years));
+  const d2 = d1 - sigma * Math.sqrt(years);
+  const nd1 = normPdf(d1);
+
+  const annual =
+    optionSide === 'CE'
+      ? -(spot * nd1 * sigma) / (2 * Math.sqrt(years)) -
+        RISK_FREE_RATE *
+          strike *
+          Math.exp(-RISK_FREE_RATE * years) *
+          normCdf(d2)
+      : -(spot * nd1 * sigma) / (2 * Math.sqrt(years)) +
+        RISK_FREE_RATE *
+          strike *
+          Math.exp(-RISK_FREE_RATE * years) *
+          normCdf(-d2);
+
+  return annual / 365;
+}
+
+function readApiTheta(row: FyersAPI.OptionChainData): number | null {
+  const raw = row.greeks?.theta;
+  if (raw == null || !Number.isFinite(raw)) return null;
+  if (Math.abs(raw) < THETA_API_MIN) return null;
+  return raw;
+}
+
+function estimateThetaPerUnit(params: {
+  row: FyersAPI.OptionChainData;
+  spot: number;
+  optionSide: 'CE' | 'PE';
+  daysToExpiry: number | null;
+}): number | null {
+  const { row, spot, optionSide, daysToExpiry } = params;
+  if (daysToExpiry == null || daysToExpiry <= 0 || spot <= 0) return null;
+
+  const sigma = ivToSigma(row.greeks?.iv);
+  if (sigma == null) return null;
+
+  const years = Math.max(daysToExpiry / 365, 1 / (365 * 24));
+  const modelPrice = bsPrice({
+    spot,
+    strike: row.strike_price,
+    years,
+    sigma,
+    optionSide,
+  });
+  const modelTheta = bsDailyTheta({
+    spot,
+    strike: row.strike_price,
+    years,
+    sigma,
+    optionSide,
+  });
+
+  if (modelTheta == null) return null;
+
+  const marketPremium = row.ltp > 0 ? row.ltp : null;
+  if (
+    marketPremium != null &&
+    modelPrice != null &&
+    modelPrice > 0.05
+  ) {
+    return modelTheta * (marketPremium / modelPrice);
+  }
+
+  return modelTheta;
+}
+
+function resolveThetaPerUnit(params: {
+  row: FyersAPI.OptionChainData;
+  spot: number;
+  optionSide: 'CE' | 'PE';
+  daysToExpiry: number | null;
+}): number | null {
+  return (
+    readApiTheta(params.row) ??
+    estimateThetaPerUnit(params)
+  );
+}
+
+/** Per-lot daily decay label — Fyers often returns 0 for theta in the chain API. */
+export function formatThetaDecayLabel(
+  thetaPerUnit: number | null,
+  lotSize = 1,
+): string | null {
+  if (thetaPerUnit == null || lotSize <= 0) return null;
+
+  const perLot = Math.abs(thetaPerUnit * lotSize);
+  if (perLot < 0.5) return null;
+
+  if (perLot >= 100) return `₹${perLot.toFixed(0)}/lot·day`;
+  if (perLot >= 10) return `₹${perLot.toFixed(1)}/lot·day`;
+  return `₹${perLot.toFixed(2)}/lot·day`;
 }
 
 function consequenceFor(
@@ -118,12 +302,20 @@ function buildProfile(
   atmGamma: number | null,
   optionSide: 'CE' | 'PE',
   ivRegime: string | undefined,
+  spot: number,
+  daysToExpiry: number | null,
+  lotSize: number,
 ): GreeksStrikeProfile | null {
   if (!row) return null;
 
   const delta = row.greeks?.delta ?? null;
   const gamma = row.greeks?.gamma ?? null;
-  const theta = row.greeks?.theta ?? null;
+  const theta = resolveThetaPerUnit({
+    row,
+    spot,
+    optionSide,
+    daysToExpiry,
+  });
   const level = gammaLevel(gamma, atmGamma);
 
   return {
@@ -134,7 +326,7 @@ function buildProfile(
     gamma,
     theta,
     gammaLevel: level,
-    thetaLabel: formatTheta(theta),
+    thetaLabel: formatThetaDecayLabel(theta, lotSize),
     consequence: consequenceFor(
       moneyness,
       optionSide,
@@ -152,12 +344,16 @@ export function buildGreeksStrikeInsight(
   tradingStyle: TradingStyle,
   ivRegime?: string,
   convictionHint: 'low' | 'normal' = 'normal',
+  context?: GreeksStrikeContext,
 ): GreeksStrikeInsight | null {
   if (chain.length === 0 || spot <= 0) return null;
 
   const optionType = optionSide === 'CE' ? OptionType.CE : OptionType.PE;
   const sideChain = chain.filter((row) => row.option_type === optionType);
   if (sideChain.length === 0) return null;
+
+  const lotSize = resolveLotSize(context?.indexSymbol);
+  const daysToExpiry = daysToNearestExpiry(context?.expiryData);
 
   const strikes = sortedStrikes(sideChain);
   const atmStrike = nearestAtmStrike(strikes, spot);
@@ -179,7 +375,16 @@ export function buildGreeksStrikeInsight(
   const atmGamma = atmRow?.greeks?.gamma ?? null;
 
   const profiles = [
-    buildProfile('ATM', atmRow, atmGamma, optionSide, ivRegime),
+    buildProfile(
+      'ATM',
+      atmRow,
+      atmGamma,
+      optionSide,
+      ivRegime,
+      spot,
+      daysToExpiry,
+      lotSize,
+    ),
     itmStrike != null
       ? buildProfile(
           'ITM',
@@ -187,6 +392,9 @@ export function buildGreeksStrikeInsight(
           atmGamma,
           optionSide,
           ivRegime,
+          spot,
+          daysToExpiry,
+          lotSize,
         )
       : null,
     otmStrike != null
@@ -196,6 +404,9 @@ export function buildGreeksStrikeInsight(
           atmGamma,
           optionSide,
           ivRegime,
+          spot,
+          daysToExpiry,
+          lotSize,
         )
       : null,
   ].filter((p): p is GreeksStrikeProfile => p != null);
@@ -220,6 +431,7 @@ export function buildGreeksStrikeInsightPair(
   tradingStyle: TradingStyle,
   ivRegime?: string,
   convictionHint: 'low' | 'normal' = 'normal',
+  context?: GreeksStrikeContext,
 ): { CE: GreeksStrikeInsight | null; PE: GreeksStrikeInsight | null } {
   return {
     CE: buildGreeksStrikeInsight(
@@ -229,6 +441,7 @@ export function buildGreeksStrikeInsightPair(
       tradingStyle,
       ivRegime,
       convictionHint,
+      context,
     ),
     PE: buildGreeksStrikeInsight(
       chain,
@@ -237,6 +450,7 @@ export function buildGreeksStrikeInsightPair(
       tradingStyle,
       ivRegime,
       convictionHint,
+      context,
     ),
   };
 }

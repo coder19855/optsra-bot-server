@@ -124,6 +124,8 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
           spotLtp || 0,
           activeStyle,
           ivRegime,
+          'normal',
+          { indexSymbol: symbol, expiryData: response.data.expiryData },
         );
 
         reply.send({

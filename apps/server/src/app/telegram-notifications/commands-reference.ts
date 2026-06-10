@@ -83,8 +83,8 @@ export function formatCommandsReferenceMessage(
     '',
     `👀 <b>On watch:</b> ${ctx.watchedSymbols.map((s) => s.split(':')[1]?.replace('-INDEX', '') ?? s).join(', ')} · ${ctx.watchedStyles.join(', ')}`,
     '',
-    '🎨 <b>Colour key</b> (emoji dots)',
-    '🟢 bullish / wins · 🔴 bearish / danger · 🟡 caution · 🟠 gamma blast · 🔵 engine pick · 🟣 coach · 🟧 learning',
+    '🎨 <b>Icon key</b>',
+    '📈 bullish · 📉 bearish · ✅ wins · ⚠️ caution · 🤯 gamma blast · 🎯 engine pick · 📚 coach · 🧠 learning',
   ].join('\n');
 }
 

@@ -15,7 +15,6 @@ import {
 import { scenarioRule } from './message-layout';
 import {
   formatScenarioBanner,
-  paletteToken,
   scenarioForAction,
   tintLine,
 } from './telegram-palette';
@@ -196,7 +195,7 @@ export async function buildBestStrikeTelegramMessage(
     );
     lines.push(
       '',
-      `${paletteToken('gamma').dot} <b>GAMMA BLAST</b> = fastest premium mover. ${paletteToken('pick').dot} <b>ENGINE PICK</b> = what we’d actually trade.`,
+      `🤯 <b>GAMMA BLAST</b> = fastest premium mover. 🎯 <b>ENGINE PICK</b> = what we’d actually trade.`,
     );
     return { message: lines.join('\n') };
   }
@@ -226,8 +225,8 @@ export async function buildBestStrikeTelegramMessage(
   } else {
     lines.push(
       '',
-      `${paletteToken('pick').dot} <b>ENGINE PICK</b> → style + conviction + IV (what to trade).`,
-      `${paletteToken('gamma').dot} <b>GAMMA BLAST</b> → highest Γ near spot (fastest premium if spot runs).`,
+      `🎯 <b>ENGINE PICK</b> → style + conviction + IV (what to trade).`,
+      `🤯 <b>GAMMA BLAST</b> → highest Γ near spot (fastest premium if spot runs).`,
     );
   }
 

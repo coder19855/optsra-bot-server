@@ -34,7 +34,7 @@ function formatPatterns(
   return items
     .map(
       (item) =>
-        `${paletteToken(scenario).dot} <b>${escapeHtml(item.label)}</b> ×${item.count}\n   ↳ ${escapeHtml(item.reminder)}`,
+        `${paletteToken(scenario).accent} <b>${escapeHtml(item.label)}</b> ×${item.count}\n   ↳ ${escapeHtml(item.reminder)}`,
     )
     .join('\n');
 }
@@ -66,7 +66,7 @@ export function formatLearningTelegramMessage(params: {
 
   const tradeSummary =
     profile.totalTrades > 0
-      ? `Last ${profile.lookbackDays} days · ${profile.totalTrades} coached trades · ${paletteToken('success').dot} ✅ ${profile.verdicts.good} · ${paletteToken('warning').dot} ⚠️ ${profile.verdicts.bad} · ${paletteToken('danger').dot} 🚨 ${profile.verdicts.ugly}`
+      ? `Last ${profile.lookbackDays} days · ${profile.totalTrades} coached trades · ✅ ${profile.verdicts.good} · ⚠️ ${profile.verdicts.bad} · 🚨 ${profile.verdicts.ugly}`
       : `Last ${profile.lookbackDays} days · no closed trades yet — fresh slate today.`;
 
   const sections = [

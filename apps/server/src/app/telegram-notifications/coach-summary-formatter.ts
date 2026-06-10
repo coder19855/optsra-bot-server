@@ -50,13 +50,12 @@ function formatIstDateLabel(sessionDate: string): string {
   return `${Number(day)} ${m} ${year}`;
 }
 
-function pnlDot(pnl: number): string {
-  return paletteToken(scenarioForPnl(pnl)).dot;
+function pnlIcon(pnl: number): string {
+  return paletteToken(scenarioForPnl(pnl)).accent;
 }
 
 function verdictPrefix(verdict: CoachVerdict): string {
-  const token = paletteToken(scenarioForCoachVerdict(verdict));
-  return `${token.dot} ${token.accent}`;
+  return paletteToken(scenarioForCoachVerdict(verdict)).accent;
 }
 
 function formatTradeLine(report: TradingCoachTradeReport): string {
@@ -69,7 +68,7 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
 
   return [
     `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${trade.direction} · ${time}`,
-    `   ${pnlDot(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
+    `   ${pnlIcon(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
     analysis.systemApproved
       ? tintLine('pick', 'Engine gave the thumbs-up at entry')
       : tintLine('warning', 'You went off-script at entry'),
@@ -86,7 +85,7 @@ function formatSignalRecap(snapshots: SignalSnapshot[]): string {
       const readyScenario = scenarioForTradeReady(snap.shouldConsiderTrade);
       const ready =
         readyScenario === 'success' ? 'green light' : 'below bar';
-      return `${paletteToken('info').dot} <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${paletteToken(scenarioForAction(snap.action)).dot} ${snap.action} · ${snap.conviction}% · ${paletteToken(readyScenario).dot} ${ready}`;
+      return `📡 <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${paletteToken(scenarioForAction(snap.action)).accent} ${snap.action} · ${snap.conviction}% · ${paletteToken(readyScenario).accent} ${ready}`;
     })
     .join('\n\n');
 }
@@ -140,7 +139,7 @@ function formatStyleSection(
       'info',
       `🏁 ${summary.winCount}W / ${summary.lossCount}L · ✅ ${summary.systemApprovedCount} approved`,
     ),
-    `${paletteToken('success').dot} ✅ ${summary.verdicts.good} · ${paletteToken('warning').dot} ⚠️ ${summary.verdicts.bad} · ${paletteToken('danger').dot} 🚨 ${summary.verdicts.ugly}`,
+    `✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
     '',
     formatSectionHeader('coach', 'Trade-by-trade replay', '🎬'),
     tradeLines + more,
@@ -223,7 +222,7 @@ export function formatTelegramCoachOnDemandMessage(params: {
   const headerPnl =
     totalTrades > 0
       ? [
-          `${pnlDot(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
           `🏁 ${totalTrades} round trip(s)`,
         ].join('\n')
       : anyFills
@@ -261,7 +260,7 @@ export function formatTelegramCoachSummaryMessage(params: {
   const headerPnl =
     totalTrades > 0
       ? [
-          `${pnlDot(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
           `🏁 ${totalTrades} round trip(s)`,
         ].join('\n')
       : '📭 No closed trades across your watched styles.';

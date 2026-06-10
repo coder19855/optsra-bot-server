@@ -70,15 +70,15 @@ function actionBanner(action: DecisionAction, flipped: boolean): string {
 }
 
 function actionEmoji(action: DecisionAction): string {
-  return paletteToken(scenarioForAction(action)).dot;
+  return paletteToken(scenarioForAction(action)).accent;
 }
 
 function biasEmoji(bias: TradeBias): string {
-  if (bias === 'Strong Bullish') return '🟢🟢';
-  if (bias === 'Moderate Bullish') return '🟢';
-  if (bias === 'Strong Bearish') return '🔴🔴';
-  if (bias === 'Moderate Bearish') return '🔴';
-  return '🟡';
+  if (bias === 'Strong Bullish') return '📈📈';
+  if (bias === 'Moderate Bullish') return '📈';
+  if (bias === 'Strong Bearish') return '📉📉';
+  if (bias === 'Moderate Bearish') return '📉';
+  return '⏸';
 }
 
 function convictionMeter(conviction: number): string {
@@ -96,10 +96,10 @@ function paEmoji(action: string): string {
 
 function riskEmoji(risk?: string): string {
   const r = (risk || '').toLowerCase();
-  if (r.includes('low')) return '🟢';
-  if (r.includes('high')) return '🔴';
-  if (r.includes('medium') || r.includes('med')) return '🟡';
-  return '⚪';
+  if (r.includes('low')) return '✅';
+  if (r.includes('high')) return '🚨';
+  if (r.includes('medium') || r.includes('med')) return '⚠️';
+  return '💤';
 }
 
 function strategyRankEmoji(index: number): string {
