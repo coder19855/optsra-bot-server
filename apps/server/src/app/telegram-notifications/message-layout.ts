@@ -1,2 +1,6 @@
-/** Short rule line — sized for Telegram mobile bubble width (~32–36 chars). */
-export const TELEGRAM_MSG_RULE = '────────────';
+import { scenarioRule } from './telegram-palette';
+
+/** Short neutral divider — sized for Telegram mobile bubble width. */
+export const TELEGRAM_MSG_RULE = scenarioRule('muted');
+
+export { scenarioRule };

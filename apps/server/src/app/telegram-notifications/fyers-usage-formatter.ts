@@ -4,7 +4,14 @@ import {
   FyersUsageHealth,
   FyersUsageResponse,
 } from '../types/fyers-usage';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
+import {
+  formatScenarioBanner,
+  formatSectionHeader,
+  scenarioForFyersHealth,
+  tintLine,
+  wrapScenarioCallout,
+} from './telegram-palette';
 
 const METHOD_SHORT: Partial<Record<FyersTrackedMethod, string>> = {
   getHistory: 'history',
@@ -33,14 +40,17 @@ function formatInr(n: number): string {
   return n.toLocaleString('en-IN');
 }
 
-function healthLine(health: FyersUsageHealth): string {
-  if (health === 'critical') {
-    return '🔴 <b>Hot</b> — you’re brushing the Fyers rate ceiling';
-  }
-  if (health === 'warning') {
-    return '🟡 <b>Warm</b> — pace yourself, limits are getting close';
-  }
-  return '🟢 <b>Cool</b> — plenty of headroom';
+function healthCallout(health: FyersUsageHealth): string {
+  const scenario = scenarioForFyersHealth(health);
+  const text =
+    health === 'critical'
+      ? 'Hot — you’re brushing the Fyers rate ceiling'
+      : health === 'warning'
+        ? 'Warm — pace yourself, limits are getting close'
+        : 'Cool — plenty of headroom';
+  const healthIcon =
+    health === 'critical' ? '🔥' : health === 'warning' ? '🌡' : '❄️';
+  return wrapScenarioCallout(scenario, `<b>${healthIcon} API health</b>`, [text]);
 }
 
 function padEnd(text: string, width: number): string {
@@ -117,7 +127,7 @@ function formatMethodTable(
   if (entries.length > maxRows) {
     table += `\n… +${entries.length - maxRows} more endpoint(s)`;
   }
-  return `<b>${title}</b>\n<pre>${escapePre(table)}</pre>`;
+  return `${formatSectionHeader('api', title)}\n<pre>${escapePre(table)}</pre>`;
 }
 
 function formatPollTime(iso: string): string {
@@ -143,7 +153,7 @@ function formatRecentPollsTable(polls: FyersPollUsageSnapshot[]): string | null 
     ]),
   ];
 
-  return `<b>Recent poll bursts</b>\n<pre>${escapePre(buildTable(rows))}</pre>`;
+  return `${formatSectionHeader('api', 'Recent poll bursts', '📡')}\n<pre>${escapePre(buildTable(rows))}</pre>`;
 }
 
 function formatLastPollDetail(poll: FyersPollUsageSnapshot | null): string | null {
@@ -161,31 +171,34 @@ function formatLastPollDetail(poll: FyersPollUsageSnapshot | null): string | nul
 
   const duration =
     poll.durationMs != null ? `${poll.durationMs}ms` : '—';
-  return `⚡ <b>Last poll:</b> ${poll.total} calls in ${duration}${topMethods ? `\n↳ ${topMethods}` : ''}`;
+  return wrapScenarioCallout('api', '<b>⚡ Last poll burst</b>', [
+    tintLine('api', `${poll.total} calls in ${duration}`),
+    topMethods ? tintLine('api', topMethods) : null,
+  ].filter((line): line is string => line != null));
 }
 
 export function formatFyersUsageTelegramMessage(
   stats: FyersUsageResponse,
 ): string {
   const sections = [
-    '🌡 <b>Fyers API meter</b>',
-    `📅 IST session ${stats.istSessionDate}`,
-    TELEGRAM_MSG_RULE,
-    healthLine(stats.health),
+    formatScenarioBanner('api', 'Fyers API meter'),
+    tintLine('info', `📅 IST session ${stats.istSessionDate}`),
+    scenarioRule('api'),
+    healthCallout(stats.health),
     '',
-    '<b>Limits vs usage</b>',
+    formatSectionHeader('api', 'Limits vs usage', '📊'),
     `<pre>${escapePre(formatLimitsTable(stats))}</pre>`,
   ];
 
   const sessionMethods = formatMethodTable(
     stats.totals.byMethodSession,
-    'Today by endpoint',
+    '📋 Today by endpoint',
   );
   if (sessionMethods) sections.push('', sessionMethods);
 
   const last60Methods = formatMethodTable(
     stats.rolling.last60SecondsByMethod,
-    'Last 60s by endpoint',
+    '⏱ Last 60s by endpoint',
     8,
   );
   if (last60Methods) sections.push('', last60Methods);
@@ -195,7 +208,10 @@ export function formatFyersUsageTelegramMessage(
 
   if (stats.rolling.estimatedPerMinuteFromLastPoll != null) {
     sections.push(
-      `📈 If every poll matched the last one: ~${stats.rolling.estimatedPerMinuteFromLastPoll} calls/min`,
+      tintLine(
+        'warning',
+        `If every poll matched the last one: ~${stats.rolling.estimatedPerMinuteFromLastPoll} calls/min`,
+      ),
     );
   }
 
@@ -204,9 +220,9 @@ export function formatFyersUsageTelegramMessage(
 
   sections.push(
     '',
-    TELEGRAM_MSG_RULE,
-    '💡 REST calls only — local token checks don’t count.',
-    `🌐 Full JSON: <code>/api/notifications/fyers-usage</code>`,
+    scenarioRule('muted'),
+    tintLine('muted', 'REST calls only — local token checks don’t count.'),
+    tintLine('info', 'Full JSON: /api/notifications/fyers-usage'),
   );
 
   const body = sections.join('\n');

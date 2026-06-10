@@ -57,7 +57,7 @@ export function formatCommandsReferenceMessage(
     `<i>Try:</i> <code>/rr ${sym} ${style}</code>`,
     '<code>/size</code> — lots from balance + stop risk',
     `<i>Try:</i> <code>/size</code> · <code>/size ${sym} ${style}</code>`,
-    '<code>/beststrike</code> — strike pick, gamma pop watch &amp; Greeks',
+    '<code>/beststrike</code> — 🤯 gamma blast + 🎯 engine pick &amp; Greeks',
     `<i>Try:</i> <code>/beststrike ${sym} ${style}</code> · <code>/beststrike CE</code>`,
     '',
     '🔐 <b>Fyers session</b>',
@@ -82,6 +82,9 @@ export function formatCommandsReferenceMessage(
     '• After 15:30 IST → end-of-day coach',
     '',
     `👀 <b>On watch:</b> ${ctx.watchedSymbols.map((s) => s.split(':')[1]?.replace('-INDEX', '') ?? s).join(', ')} · ${ctx.watchedStyles.join(', ')}`,
+    '',
+    '🎨 <b>Colour key</b> (emoji dots)',
+    '🟢 bullish / wins · 🔴 bearish / danger · 🟡 caution · 🟠 gamma blast · 🔵 engine pick · 🟣 coach · 🟧 learning',
   ].join('\n');
 }
 
@@ -96,7 +99,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'conviction', description: 'Your enter threshold' },
   { command: 'rr', description: 'Risk / reward map' },
   { command: 'size', description: 'How many lots?' },
-  { command: 'beststrike', description: 'Strike scout & Greeks' },
+  { command: 'beststrike', description: 'Gamma blast & engine pick' },
   { command: 'help', description: 'Command cheat sheet' },
   { command: 'commands', description: 'Re-send cheat sheet' },
 ] as const;

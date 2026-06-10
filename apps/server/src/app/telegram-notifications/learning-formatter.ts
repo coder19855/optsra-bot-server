@@ -1,6 +1,12 @@
 import { MarketNewsHeadline } from './market-news';
 import { LearningInsightProfile } from './learning-insights';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
+import {
+  formatScenarioBanner,
+  paletteToken,
+  tintLine,
+  wrapScenarioCallout,
+} from './telegram-palette';
 
 function escapeHtml(text: string): string {
   return text
@@ -22,27 +28,30 @@ function formatIstDateLabel(sessionDate: string): string {
 function formatPatterns(
   items: LearningInsightProfile['leaks'],
   emptyLabel: string,
+  scenario: 'warning' | 'success',
 ): string {
-  if (!items.length) return emptyLabel;
+  if (!items.length) return tintLine(scenario, emptyLabel.replace(/^•\s*/, ''));
   return items
     .map(
       (item) =>
-        `• <b>${escapeHtml(item.label)}</b> ×${item.count}\n   ↳ ${escapeHtml(item.reminder)}`,
+        `${paletteToken(scenario).dot} <b>${escapeHtml(item.label)}</b> ×${item.count}\n   ↳ ${escapeHtml(item.reminder)}`,
     )
     .join('\n');
 }
 
 export function formatMarketNewsSection(headlines: MarketNewsHeadline[]): string | null {
   if (!headlines.length) {
-    return '📰 <b>Market mood</b>\n↳ Headlines MIA — peek at NSE / economic calendar before you size up.';
+    return wrapScenarioCallout('info', '<b>📰 Market mood</b>', [
+      '📭 Headlines MIA — peek at NSE / economic calendar before you size up.',
+    ]);
   }
 
   const lines = headlines.slice(0, 5).map((item) => {
     const source = item.source ? ` · ${escapeHtml(item.source)}` : '';
-    return `• ${escapeHtml(item.title)}${source}`;
+    return tintLine('info', `${escapeHtml(item.title)}${source}`);
   });
 
-  return ['📰 <b>What the tape is whispering</b>', ...lines].join('\n');
+  return wrapScenarioCallout('info', '<b>📰 What the tape is whispering</b>', lines);
 }
 
 export function formatLearningTelegramMessage(params: {
@@ -54,44 +63,49 @@ export function formatLearningTelegramMessage(params: {
 }): string {
   const { profile, sessionDate, preamble } = params;
   const dateLabel = formatIstDateLabel(sessionDate);
-  const title = preamble
-    ? '🌅 <b>Before the bell — your homework</b>'
-    : '🧠 <b>Lessons from your own trades</b>';
 
   const tradeSummary =
     profile.totalTrades > 0
-      ? `Last <b>${profile.lookbackDays} days</b> · <b>${profile.totalTrades}</b> coached trades · ✅ ${profile.verdicts.good} · ⚠️ ${profile.verdicts.bad} · 🚨 ${profile.verdicts.ugly}`
-      : `Last <b>${profile.lookbackDays} days</b> · no closed trades to learn from yet — fresh slate today.`;
+      ? `Last ${profile.lookbackDays} days · ${profile.totalTrades} coached trades · ${paletteToken('success').dot} ✅ ${profile.verdicts.good} · ${paletteToken('warning').dot} ⚠️ ${profile.verdicts.bad} · ${paletteToken('danger').dot} 🚨 ${profile.verdicts.ugly}`
+      : `Last ${profile.lookbackDays} days · no closed trades yet — fresh slate today.`;
 
   const sections = [
-    title,
-    `📅 ${dateLabel}`,
-    TELEGRAM_MSG_RULE,
+    preamble
+      ? formatScenarioBanner('learning', '🌅 Before the bell — your homework')
+      : formatScenarioBanner('learning', 'Lessons from your own trades'),
+    tintLine('info', `📅 ${dateLabel}`),
+    scenarioRule('learning'),
     tradeSummary,
     '',
-    '🕳️ <b>Leaks that keep biting you</b>',
-    formatPatterns(
-      profile.leaks,
-      '• No repeat offenders tagged — stay sharp anyway; one bad hour can cluster.',
-    ),
+    wrapScenarioCallout('warning', '<b>🕳️ Leaks that keep biting you</b>', [
+      formatPatterns(
+        profile.leaks,
+        'No repeat offenders tagged — stay sharp anyway; one bad hour can cluster.',
+        'warning',
+      ),
+    ]),
     '',
-    '💪 <b>Habits worth keeping</b>',
-    formatPatterns(
-      profile.strengths,
-      '• Not enough green patterns yet — stick to engine-approved entries only.',
-    ),
+    wrapScenarioCallout('success', '<b>💪 Habits worth keeping</b>', [
+      formatPatterns(
+        profile.strengths,
+        'Not enough green patterns yet — stick to engine-approved entries only.',
+        'success',
+      ),
+    ]),
     '',
-    '🎯 <b>One intention for today</b>',
-    escapeHtml(profile.intention),
+    wrapScenarioCallout('pick', '<b>🎯 One intention for today</b>', [
+      escapeHtml(profile.intention),
+    ]),
   ];
 
   if (profile.recentMistakeNotes.length) {
     sections.push(
       '',
-      '📝 <b>Fresh reminders from ugly trades</b>',
-      ...profile.recentMistakeNotes
-        .slice(0, 3)
-        .map((note) => `• ${escapeHtml(note)}`),
+      wrapScenarioCallout('danger', '<b>📝 Fresh reminders from ugly trades</b>', [
+        ...profile.recentMistakeNotes
+          .slice(0, 3)
+          .map((note) => tintLine('danger', escapeHtml(note))),
+      ]),
     );
   }
 
@@ -103,11 +117,14 @@ export function formatLearningTelegramMessage(params: {
   }
 
   if (preamble) {
-    sections.push('', '💬 Want the full breakdown? <code>/learning</code>');
+    sections.push('', tintLine('info', 'Want the full breakdown? <code>/learning</code>'));
   } else {
     sections.push(
       '',
-      '💡 Pulled from <i>your</i> Fyers book + engine replay — not random guru quotes.',
+      tintLine(
+        'muted',
+        'Pulled from your Fyers book + engine replay — not random guru quotes.',
+      ),
     );
   }
 

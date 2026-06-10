@@ -495,7 +495,7 @@ export class TelegramCommandPoller {
         insight.overallWinRate != null
           ? `🏆 Win rate: ${insight.overallWinRate}% across ${insight.sampleSize} closed alerts`
           : `📊 Samples so far: ${insight.sampleSize}`,
-        bucketLines ? `\n<b>By conviction bucket</b>\n${bucketLines}` : '',
+        bucketLines ? `\n📊 <b>By conviction bucket</b>\n${bucketLines}` : '',
       ]
         .filter(Boolean)
         .join('\n'),

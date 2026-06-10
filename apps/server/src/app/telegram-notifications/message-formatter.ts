@@ -10,7 +10,22 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
+import {
+  formatEnginePickCallout,
+  formatGreeksSectionHeader,
+  gammaRowPrefix,
+} from './strike-callouts';
+import {
+  formatScenarioBanner,
+  formatSectionHeader,
+  paletteToken,
+  scenarioForAction,
+  scenarioForSignalFlip,
+  scenarioForTradeReady,
+  tintLine,
+  wrapScenarioCallout,
+} from './telegram-palette';
 
 function escapeHtml(text: string): string {
   return text
@@ -36,24 +51,26 @@ function isSignalFlip(
 }
 
 function actionBanner(action: DecisionAction, flipped: boolean): string {
-  if (flipped) return '🚨 <b>Plot twist — direction flipped!</b>';
+  if (flipped) {
+    return formatScenarioBanner(
+      scenarioForSignalFlip(),
+      'Plot twist — direction flipped!',
+    );
+  }
   switch (action) {
     case 'CE-BUY':
-      return '🟢📈 <b>Calls are cooking</b>';
+      return formatScenarioBanner('bullish', 'Calls are cooking');
     case 'PE-BUY':
-      return '🔴📉 <b>Puts have the mic</b>';
+      return formatScenarioBanner('bearish', 'Puts have the mic');
     case 'NEUTRAL':
-      return '🟡 <b>Chop zone — sit tight</b>';
+      return formatScenarioBanner('neutral', 'Chop zone — sit tight');
     default:
-      return '⚪ <b>Nothing to chase</b>';
+      return formatScenarioBanner('muted', 'Nothing to chase');
   }
 }
 
 function actionEmoji(action: DecisionAction): string {
-  if (action === 'CE-BUY') return '🟢';
-  if (action === 'PE-BUY') return '🔴';
-  if (action === 'NEUTRAL') return '🟡';
-  return '⚪';
+  return paletteToken(scenarioForAction(action)).dot;
 }
 
 function biasEmoji(bias: TradeBias): string {
@@ -162,10 +179,12 @@ export function formatPositionSizingTelegramSection(
   if (!sizing) return null;
 
   if (sizing.unavailableReason && sizing.availableBalance == null) {
-    return `🏦 <b>Wallet check</b>\n⚠️ ${escapeHtml(sizing.unavailableReason)}`;
+    return wrapScenarioCallout('warning', '<b>🏦 Wallet check</b>', [
+      `⚠️ ${escapeHtml(sizing.unavailableReason)}`,
+    ]);
   }
 
-  const lines: string[] = ['🏦 <b>Wallet check (Fyers)</b>'];
+  const lines: string[] = [];
 
   if (sizing.availableBalance != null) {
     lines.push(
@@ -177,8 +196,8 @@ export function formatPositionSizingTelegramSection(
   }
 
   if (sizing.unavailableReason) {
-    lines.push(`⚠️ ${escapeHtml(sizing.unavailableReason)}`);
-    return lines.join('\n');
+    lines.push(tintLine('warning', escapeHtml(sizing.unavailableReason)));
+    return wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines);
   }
 
   if (
@@ -187,7 +206,9 @@ export function formatPositionSizingTelegramSection(
     sizing.riskPoints == null ||
     sizing.riskPercent == null
   ) {
-    return lines.join('\n');
+    return lines.length
+      ? wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines)
+      : null;
   }
 
   const qtyPerLot = sizing.lotSize;
@@ -242,10 +263,12 @@ export function formatPositionSizingTelegramSection(
   }
 
   if (sizing.recommendedLots < 1) {
-    lines.push('⛔ Not enough room for even 1 lot at this stop — pass or top up.');
+    lines.push(
+      tintLine('danger', 'Not enough room for even 1 lot at this stop — pass or top up.'),
+    );
   }
 
-  return lines.join('\n');
+  return wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines);
 }
 
 function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
@@ -259,16 +282,8 @@ function formatExactStrikeSection(
 ): string | null {
   if (!strike) return null;
 
-  const move =
-    strike.expectedPremiumMove50Pts != null
-      ? ` · ~₹${strike.expectedPremiumMove50Pts.toFixed(1)}/50pts`
-      : '';
-
   return [
-    '🎯 <b>Strike ticket</b>',
-    `<code>${escapeHtml(strike.fyersSymbol)}</code>`,
-    `${strike.moneyness} @ ${formatInr(strike.strike)} · prem ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
-    `↳ ${escapeHtml(strike.rationale)}`,
+    formatEnginePickCallout(strike, '<b>🎯 STRIKE TICKET</b>'),
     '💬 Curious? Hit <code>/why</code> for the full story',
   ].join('\n');
 }
@@ -280,8 +295,14 @@ function formatAdaptiveConvictionLine(
   if (!adaptive || adaptive.dataSource === 'defaults') return null;
 
   const meets = conviction >= adaptive.recommendedEnterThreshold;
-  const icon = meets ? '✅' : '⚠️';
-  return `${icon} <b>Your enter bar:</b> ${adaptive.recommendedEnterThreshold}% (from your alert history)\n↳ ${adaptive.overallWinRate}% win rate · ${adaptive.sampleSize} past alerts`;
+  const scenario = meets ? 'success' : 'warning';
+  return wrapScenarioCallout(scenario, '<b>📈 Your enter bar</b>', [
+    tintLine(scenario, `${adaptive.recommendedEnterThreshold}% from your alert history`),
+    tintLine(
+      scenario,
+      `🏆 ${adaptive.overallWinRate}% win rate · ${adaptive.sampleSize} past alerts`,
+    ),
+  ]);
 }
 
 export function formatGreeksStrikeSection(
@@ -290,8 +311,8 @@ export function formatGreeksStrikeSection(
   if (!insight?.profiles.length) return null;
 
   const lines: string[] = [
-    `📐 <b>Greeks cheat sheet · ${insight.optionSide}</b>`,
-    TELEGRAM_MSG_RULE,
+    formatGreeksSectionHeader(insight.optionSide),
+    scenarioRule(insight.optionSide === 'CE' ? 'bullish' : 'bearish'),
   ];
 
   for (const profile of insight.profiles) {
@@ -305,7 +326,7 @@ export function formatGreeksStrikeSection(
         : '';
 
     lines.push(
-      `<b>${profile.moneyness}</b> ${formatInr(profile.strike)} · ${delta} · ${gamma} · ${theta}${premium}`,
+      `${gammaRowPrefix(profile)}<b>${profile.moneyness}</b> ${formatInr(profile.strike)} · ${delta} · ${gamma} · ${theta}${premium}`,
     );
     lines.push(`↳ ${escapeHtml(profile.consequence)}`);
   }
@@ -373,14 +394,21 @@ export function formatTelegramAlertMessage(params: {
   const meter = convictionMeter(payload.conviction);
   const biasIcon = biasEmoji(payload.bias);
 
-  const tradeReady = payload.tradeGuidance.shouldConsiderTrade
-    ? '✅ Green light — conviction clears your bar'
-    : '⏸ Yellow light — below bar, size down or wait';
+  const readyScenario = scenarioForTradeReady(
+    payload.tradeGuidance.shouldConsiderTrade,
+  );
+  const tradeReady = tintLine(
+    readyScenario,
+    readyScenario === 'success'
+      ? 'Green light — conviction clears your bar'
+      : 'Yellow light — below bar, size down or wait',
+  );
+  const actionScenario = scenarioForAction(payload.action);
 
   return [
     banner,
     `${emoji} <b>${escapeHtml(label)} · ${escapeHtml(payload.tradingStyle)} · ${payload.action}</b>`,
-    TELEGRAM_MSG_RULE,
+    scenarioRule(actionScenario),
     `${meter} <b>Conviction:</b> ${payload.conviction}%`,
     `${biasIcon} <b>Vibe:</b> ${escapeHtml(payload.bias)}`,
     `💰 <b>Spot:</b> ${payload.lastPrice.toLocaleString('en-IN')}`,
@@ -388,8 +416,8 @@ export function formatTelegramAlertMessage(params: {
     ofBias ? `🌊 <b>Options desk:</b> ${escapeHtml(ofBias)}` : null,
     iv ? `🌡 <b>IV mood:</b> ${escapeHtml(iv)}` : null,
     adaptiveLine,
-    TELEGRAM_MSG_RULE,
-    `🧭 <b>Should you pull the trigger?</b>`,
+    scenarioRule(readyScenario),
+    formatSectionHeader(readyScenario, 'Should you pull the trigger?', '🧭'),
     tradeReady,
     payload.tradeGuidance.sizeRecommendation
       ? `📏 ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}`
@@ -401,13 +429,13 @@ export function formatTelegramAlertMessage(params: {
     greeksStrike ? '' : null,
     exactStrike,
     exactStrike ? '' : null,
-    `🎲 <b>Playbook picks</b>`,
+    formatSectionHeader('info', 'Playbook picks', '🎲'),
     strategies,
     '',
-    `🧠 <b>TL;DR</b>`,
+    formatSectionHeader(actionScenario, 'TL;DR', '🧠'),
     escapeHtml(payload.humanSummary),
-    TELEGRAM_MSG_RULE,
-    `🔄 <b>What just shifted</b>`,
+    scenarioRule('info'),
+    formatSectionHeader('info', 'What just shifted', '🔄'),
     change,
   ]
     .filter((line) => line !== null)

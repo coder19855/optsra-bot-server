@@ -5,7 +5,18 @@ import {
 } from '../types/trading-coach';
 import { SignalSnapshot } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { TELEGRAM_MSG_RULE, scenarioRule } from './message-layout';
+import {
+  formatScenarioBanner,
+  formatSectionHeader,
+  paletteToken,
+  scenarioForAction,
+  scenarioForCoachVerdict,
+  scenarioForPnl,
+  scenarioForTradeReady,
+  tintLine,
+  wrapScenarioCallout,
+} from './telegram-palette';
 
 function escapeHtml(text: string): string {
   return text
@@ -39,16 +50,13 @@ function formatIstDateLabel(sessionDate: string): string {
   return `${Number(day)} ${m} ${year}`;
 }
 
-function pnlEmoji(pnl: number): string {
-  if (pnl > 0) return '🟢';
-  if (pnl < 0) return '🔴';
-  return '⚪';
+function pnlDot(pnl: number): string {
+  return paletteToken(scenarioForPnl(pnl)).dot;
 }
 
-function verdictEmoji(verdict: CoachVerdict): string {
-  if (verdict === 'good') return '✅';
-  if (verdict === 'bad') return '⚠️';
-  return '🚨';
+function verdictPrefix(verdict: CoachVerdict): string {
+  const token = paletteToken(scenarioForCoachVerdict(verdict));
+  return `${token.dot} ${token.accent}`;
 }
 
 function formatTradeLine(report: TradingCoachTradeReport): string {
@@ -60,9 +68,11 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
   const optionLabel = trade.optionSymbol.split(':').pop() ?? trade.optionSymbol;
 
   return [
-    `${verdictEmoji(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${trade.direction} · ${time}`,
-    `   ${pnlEmoji(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
-    analysis.systemApproved ? '   🎯 Engine gave the thumbs-up at entry' : '   🎲 You went off-script at entry',
+    `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${trade.direction} · ${time}`,
+    `   ${pnlDot(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
+    analysis.systemApproved
+      ? tintLine('pick', 'Engine gave the thumbs-up at entry')
+      : tintLine('warning', 'You went off-script at entry'),
     `   💡 ${escapeHtml(coaching)}`,
   ].join('\n');
 }
@@ -73,8 +83,10 @@ function formatSignalRecap(snapshots: SignalSnapshot[]): string {
   return snapshots
     .map((snap) => {
       const label = shortSymbol(snap.symbol);
-      const ready = snap.shouldConsiderTrade ? '✅ green light' : '⏸ below bar';
-      return `📊 <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${snap.action} · ${snap.conviction}% conviction · ${ready}`;
+      const readyScenario = scenarioForTradeReady(snap.shouldConsiderTrade);
+      const ready =
+        readyScenario === 'success' ? 'green light' : 'below bar';
+      return `${paletteToken('info').dot} <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${paletteToken(scenarioForAction(snap.action)).dot} ${snap.action} · ${snap.conviction}% · ${paletteToken(readyScenario).dot} ${ready}`;
     })
     .join('\n\n');
 }
@@ -95,10 +107,10 @@ function formatStyleSection(
           ? '📭 Tradebook’s empty so far — the market owes you nothing yet.'
           : '📭 No fills on this date.';
     return [
-      `🎯 <b>${escapeHtml(style)}</b>`,
-      emptyTradeHint,
+      formatSectionHeader('coach', String(style), '📊'),
+      tintLine('muted', emptyTradeHint),
       '',
-      '<b>How the day ended (signals)</b>',
+      formatSectionHeader('info', 'How the day ended (signals)', '📡'),
       formatSignalRecap(styleSnapshots),
     ].join('\n');
   }
@@ -117,19 +129,27 @@ function formatStyleSection(
 
   const takeaway = buildSessionTakeaway(coach);
 
+  const pnlScenario = scenarioForPnl(pnl);
   return [
-    `🎯 <b>${escapeHtml(style)}</b>`,
-    `${pnlEmoji(pnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-    `🏁 ${summary.winCount}W / ${summary.lossCount}L · ${summary.systemApprovedCount} approved`,
-    `📋 ✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
+    formatSectionHeader('coach', String(style), '📊'),
+    tintLine(
+      pnlScenario,
+      `💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+    ),
+    tintLine(
+      'info',
+      `🏁 ${summary.winCount}W / ${summary.lossCount}L · ✅ ${summary.systemApprovedCount} approved`,
+    ),
+    `${paletteToken('success').dot} ✅ ${summary.verdicts.good} · ${paletteToken('warning').dot} ⚠️ ${summary.verdicts.bad} · ${paletteToken('danger').dot} 🚨 ${summary.verdicts.ugly}`,
     '',
-    '<b>Trade-by-trade replay</b>',
+    formatSectionHeader('coach', 'Trade-by-trade replay', '🎬'),
     tradeLines + more,
     '',
-    '<b>Real talk — what to fix tomorrow</b>',
-    escapeHtml(takeaway),
+    wrapScenarioCallout('warning', '<b>💬 Real talk — what to fix tomorrow</b>', [
+      escapeHtml(takeaway),
+    ]),
     '',
-    '<b>End-of-day signal snapshot</b>',
+    formatSectionHeader('info', 'End-of-day signal snapshot', '📡'),
     formatSignalRecap(styleSnapshots),
   ].join('\n');
 }
@@ -203,17 +223,17 @@ export function formatTelegramCoachOnDemandMessage(params: {
   const headerPnl =
     totalTrades > 0
       ? [
-          `${pnlEmoji(totalPnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-          `${totalTrades} round trip(s)`,
+          `${pnlDot(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `🏁 ${totalTrades} round trip(s)`,
         ].join('\n')
       : anyFills
         ? '📭 Fills on the book — nothing squared off yet.\nClose a round trip and I’ll grade it.'
         : '📭 No closed trades today — sometimes the best trade is no trade.';
 
   const body = [
-    '📚 <b>Coach mode</b>',
-    `📅 ${dateLabel} · straight from your tradebook`,
-    TELEGRAM_MSG_RULE,
+    formatScenarioBanner('coach', 'Coach mode'),
+    tintLine('info', `📅 ${dateLabel} · straight from your tradebook`),
+    scenarioRule('coach'),
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
@@ -241,15 +261,15 @@ export function formatTelegramCoachSummaryMessage(params: {
   const headerPnl =
     totalTrades > 0
       ? [
-          `${pnlEmoji(totalPnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-          `${totalTrades} round trip(s)`,
+          `${pnlDot(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `🏁 ${totalTrades} round trip(s)`,
         ].join('\n')
       : '📭 No closed trades across your watched styles.';
 
   const body = [
-    '🏁 <b>Day’s wrap</b>',
-    `📅 ${dateLabel} · bell rang at NSE close`,
-    TELEGRAM_MSG_RULE,
+    formatScenarioBanner('coach', 'Day’s wrap'),
+    tintLine('info', `📅 ${dateLabel} · bell rang at NSE close`),
+    scenarioRule('coach'),
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
@@ -300,7 +320,7 @@ export function formatTelegramCoachErrorMessage(params: {
     TELEGRAM_MSG_RULE,
     `😬 Trade review hit a wall: ${escapeHtml(params.error)}`,
     '',
-    '<b>End-of-day signal snapshot</b>',
+    '📡 <b>End-of-day signal snapshot</b>',
     formatSignalRecap(params.snapshots),
   ].join('\n');
 }

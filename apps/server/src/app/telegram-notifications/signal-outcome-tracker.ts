@@ -3,7 +3,8 @@ import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notificati
 import { SignalOutcomeRecord } from '../types/alert-intelligence';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
+import { formatScenarioBanner, tintLine } from './telegram-palette';
 import { getIstSessionClock } from './signal-tracker';
 
 const COLLECTION = 'signal-outcomes';
@@ -200,7 +201,10 @@ export function formatSignalOutcomesSummary(
     return '📭 No paper scores yet — they kick in after directional alerts with a strike pick.';
   }
 
-  const lines = ['📊 <b>Paper scoreboard</b>', TELEGRAM_MSG_RULE];
+  const lines = [
+    formatScenarioBanner('info', '📊 Paper scoreboard'),
+    scenarioRule('info'),
+  ];
 
   for (const r of records.slice(0, 8)) {
     const icon =
@@ -212,7 +216,10 @@ export function formatSignalOutcomesSummary(
       minute: '2-digit',
     });
     lines.push(
-      `${icon} ${r.action} ${r.strike} @ ${when} · conv ${r.conviction}% · ${pct} ${r.status === 'open' ? '(live)' : ''}`,
+      tintLine(
+        'info',
+        `${icon} ${r.action} ${r.strike} @ ${when} · 🎯 conv ${r.conviction}% · ${pct} ${r.status === 'open' ? '(live)' : ''}`,
+      ),
     );
   }
 

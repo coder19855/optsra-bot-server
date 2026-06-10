@@ -2,10 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { buildExactStrikeRecommendationPair } from '../option-flow/exact-strike-recommender';
 import { OptionMetricsResponse } from '../types/options';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
-import {
-  GreeksStrikeInsight,
-  GreeksStrikeProfile,
-} from '../types/greeks-strike-insight';
+import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
 import { DecisionAction } from '../types/trade-decision';
 import { TradingStyle } from '../types/trading-style';
 import {
@@ -15,7 +12,17 @@ import {
 import {
   formatGreeksStrikeSection,
 } from './message-formatter';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
+import {
+  formatScenarioBanner,
+  paletteToken,
+  scenarioForAction,
+  tintLine,
+} from './telegram-palette';
+import {
+  formatEnginePickCallout,
+  formatGammaBlastCallout,
+} from './strike-callouts';
 
 function escapeHtml(text: string): string {
   return text
@@ -69,72 +76,10 @@ function resolveActiveSide(
   return null;
 }
 
-function gammaRank(level: GreeksStrikeProfile['gammaLevel']): number {
-  if (level === 'high') return 3;
-  if (level === 'moderate') return 2;
-  return 1;
-}
-
-function formatExplosionWatch(
-  insight: GreeksStrikeInsight | null | undefined,
-): string | null {
-  if (!insight?.profiles.length) return null;
-
-  const ranked = [...insight.profiles].sort(
-    (a, b) => gammaRank(b.gammaLevel) - gammaRank(a.gammaLevel),
-  );
-  const top = ranked[0];
-  if (!top) return null;
-
-  const icon = top.gammaLevel === 'high' ? '⚡' : top.gammaLevel === 'moderate' ? '〰️' : '💤';
-  const speed =
-    top.gammaLevel === 'high'
-      ? 'Rocket fuel gamma — premium can pop hard if spot breaks.'
-      : top.gammaLevel === 'moderate'
-        ? 'Decent gamma — needs a clean push to pay.'
-        : 'Sleepy gamma — slower premium; better for grindy trends or ITM carry.';
-
-  const lines = [
-    `${icon} <b>About to pop? · ${insight.optionSide}</b>`,
-    `<b>${top.moneyness}</b> ${formatInr(top.strike)} · ${speed}`,
-    `↳ ${escapeHtml(top.consequence)}`,
-  ];
-
-  const runner = ranked.find(
-    (profile) =>
-      profile.moneyness !== top.moneyness && profile.gammaLevel === 'high',
-  );
-  if (runner) {
-    lines.push(
-      `↳ Also hot: <b>${runner.moneyness}</b> ${formatInr(runner.strike)} (${runner.gammaLevel} gamma)`,
-    );
-  }
-
-  return lines.join('\n');
-}
-
-function formatExactStrikePick(
-  strike: ExactStrikeRecommendation | null | undefined,
-  label: string,
-): string | null {
-  if (!strike) return null;
-
-  const move =
-    strike.expectedPremiumMove50Pts != null
-      ? ` · ~₹${strike.expectedPremiumMove50Pts.toFixed(1)}/50pts`
-      : '';
-
-  return [
-    `📌 <b>${label}</b>`,
-    `<code>${escapeHtml(strike.fyersSymbol)}</code>`,
-    `${strike.moneyness} @ ${formatInr(strike.strike)} · prem ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
-    `↳ ${escapeHtml(strike.rationale)}`,
-  ].join('\n');
-}
-
 function formatNeutralStrikeOverview(params: {
   greeksInsights: { CE: GreeksStrikeInsight | null; PE: GreeksStrikeInsight | null };
   exactStrikes: { CE: ExactStrikeRecommendation | null; PE: ExactStrikeRecommendation | null };
+  spot: number;
 }): string[] {
   const sections: string[] = [
     '🤷 No clear CE/PE lean — scouting both sides below.',
@@ -143,14 +88,19 @@ function formatNeutralStrikeOverview(params: {
 
   for (const side of ['CE', 'PE'] as const) {
     const insight = params.greeksInsights[side];
-    const explosion = formatExplosionWatch(insight);
-    const pick = formatExactStrikePick(
-      params.exactStrikes[side],
-      `If ${side} rips · engine’s pick`,
-    );
+    const blast =
+      insight != null
+        ? formatGammaBlastCallout({ insight, spot: params.spot })
+        : null;
+    const pick = params.exactStrikes[side]
+      ? formatEnginePickCallout(
+          params.exactStrikes[side],
+          `🎯 <b>ENGINE PICK · if ${side} rips</b>`,
+        )
+      : null;
     const greeks = formatGreeksStrikeSection(insight ?? undefined);
 
-    if (explosion) sections.push('', explosion);
+    if (blast) sections.push('', blast);
     if (pick) sections.push('', pick);
     if (greeks) sections.push('', greeks);
   }
@@ -222,21 +172,31 @@ export async function buildBestStrikeTelegramMessage(
   }
 
   const activeSide = resolveActiveSide(payload.action, side);
+  const actionScenario = scenarioForAction(payload.action);
   const lines: string[] = [
-    `🎯 <b>Strike scout · ${escapeHtml(label)} · ${escapeHtml(style)}</b>`,
-    TELEGRAM_MSG_RULE,
-    `${payload.action} · <b>${payload.conviction}%</b> conviction · spot ${formatInr(payload.lastPrice)}`,
+    formatScenarioBanner(actionScenario, `Strike scout · ${escapeHtml(label)} · ${escapeHtml(style)}`),
+    scenarioRule(actionScenario),
+    tintLine(
+      actionScenario,
+      `${payload.action} · <b>${payload.conviction}%</b> conviction · spot ${formatInr(payload.lastPrice)}`,
+    ),
   ];
 
   if (rawOption?.ivRegime) {
-    lines.push(`🌡 IV: ${escapeHtml(rawOption.ivRegime)}`);
+    lines.push(tintLine('info', `🌡 IV: ${escapeHtml(rawOption.ivRegime)}`));
   }
 
   if (!activeSide) {
-    lines.push(...formatNeutralStrikeOverview({ greeksInsights: greeksPair, exactStrikes }));
+    lines.push(
+      ...formatNeutralStrikeOverview({
+        greeksInsights: greeksPair,
+        exactStrikes,
+        spot: payload.lastPrice,
+      }),
+    );
     lines.push(
       '',
-      '💡 ATM / ITM / OTM near spot — high gamma ⚡ = fastest premium fireworks.',
+      `${paletteToken('gamma').dot} <b>GAMMA BLAST</b> = fastest premium mover. ${paletteToken('pick').dot} <b>ENGINE PICK</b> = what we’d actually trade.`,
     );
     return { message: lines.join('\n') };
   }
@@ -245,18 +205,20 @@ export async function buildBestStrikeTelegramMessage(
     greeksPair[activeSide] ??
     payload.optionFlow?.greeksStrikeInsight ??
     null;
-  const explosion = formatExplosionWatch(insight);
-  const enginePick = formatExactStrikePick(
-    exactStrikes[activeSide],
-    'Engine’s pick for this read',
-  );
+  const blast =
+    insight != null
+      ? formatGammaBlastCallout({ insight, spot: payload.lastPrice })
+      : null;
+  const enginePick = exactStrikes[activeSide]
+    ? formatEnginePickCallout(exactStrikes[activeSide])
+    : null;
   const greeks = formatGreeksStrikeSection(insight ?? undefined);
 
-  if (explosion) lines.push('', explosion);
+  if (blast) lines.push('', blast);
   if (enginePick) lines.push('', enginePick);
   if (greeks) lines.push('', greeks);
 
-  if (!explosion && !enginePick && !greeks) {
+  if (!blast && !enginePick && !greeks) {
     lines.push(
       '',
       '⚠️ Chain or Greeks ghosted us — retry in market hours with Fyers logged in.',
@@ -264,8 +226,8 @@ export async function buildBestStrikeTelegramMessage(
   } else {
     lines.push(
       '',
-      '💡 <b>Doing well</b> → engine pick above (your style + conviction + IV).',
-      '💡 <b>About to pop</b> → high gamma ⚡ — first to dance if spot breaks clean.',
+      `${paletteToken('pick').dot} <b>ENGINE PICK</b> → style + conviction + IV (what to trade).`,
+      `${paletteToken('gamma').dot} <b>GAMMA BLAST</b> → highest Γ near spot (fastest premium if spot runs).`,
     );
   }
 

@@ -6,8 +6,15 @@ import {
   parseSymbolStyleCommandArgs,
   shortIndexLabel,
 } from './command-args';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { scenarioRule } from './message-layout';
 import { formatPositionSizingTelegramSection } from './message-formatter';
+import {
+  formatScenarioBanner,
+  formatSectionHeader,
+  scenarioForAction,
+  tintLine,
+  wrapScenarioCallout,
+} from './telegram-palette';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
 
 function escapeHtml(text: string): string {
@@ -45,16 +52,18 @@ export function formatRiskRewardTelegramMessage(params: {
   const setup = params.priceData.tradeSetup;
   const signal = params.priceData.signal;
 
+  const actionScenario = scenarioForAction(mapSignalToDecisionAction(signal.action));
+
   if (!setup || setup.risk <= 0 || !setup.takeProfits?.length) {
     return [
-      `📐 <b>RR map · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
-      TELEGRAM_MSG_RULE,
-      `😴 No live CE/PE setup — need a directional signal with entry + stop first.`,
-      `${signal.action} · ${signal.confidence}% confidence`,
-      signal.vetoReason ? `↳ ${escapeHtml(signal.vetoReason)}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
+      formatScenarioBanner(actionScenario, `RR map · ${escapeHtml(label)} · ${params.tradingStyle}`),
+      scenarioRule(actionScenario),
+      wrapScenarioCallout('muted', '<b>💤 No live setup</b>', [
+        'Need a directional signal with entry + stop first.',
+        tintLine(actionScenario, `${signal.action} · ${signal.confidence}% confidence`),
+        signal.vetoReason ? escapeHtml(signal.vetoReason) : null,
+      ].filter((line): line is string => line != null)),
+    ].join('\n');
   }
 
   const tpLines = setup.takeProfits.map((tp) => {
@@ -64,14 +73,14 @@ export function formatRiskRewardTelegramMessage(params: {
   });
 
   const lines = [
-    `📐 <b>RR map · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
-    TELEGRAM_MSG_RULE,
-    `${signal.action} · ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`,
-    `🎯 <b>Entry line:</b> ${setup.entry.toLocaleString('en-IN')}`,
-    `🛑 <b>Pain line:</b> ${setup.stopLoss.toLocaleString('en-IN')} · <b>${setup.risk.toFixed(1)} pts</b> risk`,
+    formatScenarioBanner(actionScenario, `RR map · ${escapeHtml(label)} · ${params.tradingStyle}`),
+    scenarioRule(actionScenario),
+    tintLine(actionScenario, `${signal.action} · ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`),
+    tintLine('pick', `<b>Entry line:</b> ${setup.entry.toLocaleString('en-IN')}`),
+    tintLine('danger', `<b>Pain line:</b> ${setup.stopLoss.toLocaleString('en-IN')} · <b>${setup.risk.toFixed(1)} pts</b> risk`),
     '',
-    '<b>Profit checkpoints</b>',
-    ...tpLines,
+    formatSectionHeader('success', 'Profit checkpoints', '🏁'),
+    ...tpLines.map((line) => tintLine('success', line.replace(/^•\s*/, ''))),
   ];
 
   if (setup.stopAdjusted && setup.stopAdjustReason) {
@@ -165,10 +174,11 @@ export async function buildPositionSizingTelegramMessage(
   const sizingBlock = formatPositionSizingTelegramSection(sizing);
   const setup = priceData.tradeSetup;
 
+  const actionScenario = scenarioForAction(action);
   const lines = [
-    `🏦 <b>How many lots? · ${escapeHtml(label)} · ${escapeHtml(style)}</b>`,
-    TELEGRAM_MSG_RULE,
-    `${priceData.signal.action} · ${priceData.signal.confidence}% confidence`,
+    formatScenarioBanner(actionScenario, `How many lots? · ${escapeHtml(label)} · ${style}`),
+    scenarioRule(actionScenario),
+    tintLine(actionScenario, `${priceData.signal.action} · ${priceData.signal.confidence}% confidence`),
   ];
 
   if (setup && setup.risk > 0) {
