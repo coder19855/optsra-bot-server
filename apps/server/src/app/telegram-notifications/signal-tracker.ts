@@ -126,12 +126,18 @@ export function detectSignalChange(
   return { shouldNotify, kinds, previous, current };
 }
 
-export function isIndianMarketOpen(
+export interface IstSessionClock {
+  weekday: string;
+  hour: number;
+  minute: number;
+  mins: number;
+  sessionDate: string;
+}
+
+export function getIstSessionClock(
   now = Date.now(),
   timezone = 'Asia/Kolkata',
-  sessionOpen = { hour: 9, minute: 15 },
-  sessionClose = { hour: 15, minute: 30 },
-): boolean {
+): IstSessionClock {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: timezone,
     weekday: 'short',
@@ -141,13 +147,59 @@ export function isIndianMarketOpen(
   }).formatToParts(new Date(now));
 
   const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
-  if (weekday === 'Sat' || weekday === 'Sun') return false;
-
   const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
   const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
-  const mins = hour * 60 + minute;
+  const sessionDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(now));
+
+  return {
+    weekday,
+    hour,
+    minute,
+    mins: hour * 60 + minute,
+    sessionDate,
+  };
+}
+
+export function isIndianWeekday(
+  now = Date.now(),
+  timezone = 'Asia/Kolkata',
+): boolean {
+  const { weekday } = getIstSessionClock(now, timezone);
+  return weekday !== 'Sat' && weekday !== 'Sun';
+}
+
+export function isIndianMarketOpen(
+  now = Date.now(),
+  timezone = 'Asia/Kolkata',
+  sessionOpen = { hour: 9, minute: 15 },
+  sessionClose = { hour: 15, minute: 30 },
+): boolean {
+  const { weekday, mins } = getIstSessionClock(now, timezone);
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+
   const openMins = sessionOpen.hour * 60 + sessionOpen.minute;
   const closeMins = sessionClose.hour * 60 + sessionClose.minute;
 
   return mins >= openMins && mins <= closeMins;
+}
+
+/** After the official close, while the server can still send the daily coach once. */
+export function isWithinPostSessionCoachWindow(
+  now = Date.now(),
+  timezone = 'Asia/Kolkata',
+  sessionClose = { hour: 15, minute: 30 },
+  windowMinutes = 45,
+): boolean {
+  if (!isIndianWeekday(now, timezone)) return false;
+
+  const { mins } = getIstSessionClock(now, timezone);
+  const closeMins = sessionClose.hour * 60 + sessionClose.minute;
+  const windowEnd = closeMins + windowMinutes;
+
+  return mins > closeMins && mins <= windowEnd;
 }

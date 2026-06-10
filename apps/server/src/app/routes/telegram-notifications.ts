@@ -8,6 +8,10 @@ export default async function telegramNotificationsRoute(
     return reply.send(status);
   });
 
+  fastify.get('/api/notifications/fyers-usage', async (_request, reply) => {
+    return reply.send(fastify.fyersUsage.getStats());
+  });
+
   async function sendTestNotification(message?: string) {
     if (!fastify.telegramNotifications.isConfigured()) {
       return {
@@ -29,7 +33,7 @@ export default async function telegramNotificationsRoute(
         '🕘 Polls every 1 min during market hours',
       ].join('\n');
 
-    await fastify.telegramNotifications.sendMessage(text);
+    await fastify.telegramNotifications.sendMessage(text, { channel: 'test' });
     return {
       statusCode: 200 as const,
       body: { ok: true, sent: text },
@@ -57,10 +61,14 @@ export default async function telegramNotificationsRoute(
       });
     }
 
-    const { force } = (request.query as { force?: string }) || {};
+    const { force, coach } = (request.query as { force?: string; coach?: string }) || {};
     const forcePoll = force === 'true' || force === '1';
-    await fastify.telegramNotifications.pollNow(forcePoll);
+    const coachOnly = coach === 'true' || coach === '1';
+    await fastify.telegramNotifications.pollNow({
+      force: forcePoll || coachOnly,
+      coachOnly,
+    });
     const status = await fastify.telegramNotifications.getStatus();
-    return reply.send({ ok: true, forced: forcePoll, status });
+    return reply.send({ ok: true, forced: forcePoll, coachOnly, status });
   });
 }

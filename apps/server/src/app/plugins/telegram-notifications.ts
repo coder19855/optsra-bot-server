@@ -5,17 +5,34 @@ import {
   TELEGRAM_API_BASE,
   TELEGRAM_NOTIFICATION_DEFAULTS,
 } from '../constants/telegram-notifications';
+import {
+  buildAlertChannelStatus,
+  resolveSendParams,
+  TELEGRAM_SOUND_ROUTING_NOTE,
+} from '../telegram-notifications/alert-channels';
 import { formatTelegramAlertMessage } from '../telegram-notifications/message-formatter';
+import {
+  loadSessionCoachState,
+  saveSessionCoachState,
+  sendSessionCoachSummary,
+  SessionCoachState,
+} from '../telegram-notifications/session-coach';
 import {
   buildSignalSnapshot,
   detectSignalChange,
+  getIstSessionClock,
   isIndianMarketOpen,
+  isWithinPostSessionCoachWindow,
   snapshotKey,
 } from '../telegram-notifications/signal-tracker';
+import { evaluateOpenPositionTpAlerts } from '../telegram-notifications/position-monitor';
 import { fetchTradeDecisionAlert } from '../telegram-notifications/trade-decision-fetch';
+import { recordTradeEntryIntent } from '../telegram-notifications/trade-entry-intent';
 import {
   SignalSnapshot,
   TelegramNotificationStatus,
+  TelegramSendOptions,
+  TpMonitorSnapshot,
 } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
 
@@ -64,6 +81,15 @@ export default fp(
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let lastPollAt: Date | null = null;
     let lastPollError: string | null = null;
+    let sessionCoachState: SessionCoachState = {
+      lastSessionDate: null,
+      lastSentAt: null,
+      lastError: null,
+    };
+    const tpMemory = new Map<string, TpMonitorSnapshot>();
+    let lastTpAlertAt: Date | null = null;
+    let openPositionsMonitored = 0;
+    let openPositionsTracked = 0;
 
     const collectionName = TELEGRAM_NOTIFICATION_DEFAULTS.COLLECTION;
 
@@ -95,16 +121,21 @@ export default fp(
       );
     }
 
-    async function sendTelegramMessage(text: string): Promise<void> {
+    async function sendTelegramMessage(
+      text: string,
+      options?: TelegramSendOptions,
+    ): Promise<void> {
       if (!configured) {
         throw new Error('Telegram is not configured (missing bot token or chat id)');
       }
+      const send = resolveSendParams(chatId, options);
       const url = `${TELEGRAM_API_BASE}/bot${botToken}/sendMessage`;
       await axios.post(url, {
-        chat_id: chatId,
+        chat_id: send.chatId,
         text,
         parse_mode: 'HTML',
         disable_web_page_preview: true,
+        disable_notification: send.disableNotification,
       });
     }
 
@@ -137,44 +168,201 @@ export default fp(
           current: change.current,
           kinds: change.kinds.length ? change.kinds : ['ACTION'],
         });
-        await sendTelegramMessage(message);
+        await sendTelegramMessage(message, { channel: 'signal' });
         current.lastNotifiedAt = new Date();
         current.lastNotifiedFingerprint = current.fingerprint;
+
+        const entryDirection =
+          payload.action === 'CE-BUY' || payload.action === 'PE-BUY'
+            ? payload.action
+            : payload.priceAction.action === 'CE-BUY' ||
+                payload.priceAction.action === 'PE-BUY'
+              ? payload.priceAction.action
+              : null;
+        if (
+          entryDirection &&
+          payload.tradeGuidance.shouldConsiderTrade
+        ) {
+          try {
+            await recordTradeEntryIntent(fastify, {
+              indexSymbol: payload.symbol,
+              tradingStyle,
+              direction: entryDirection,
+            });
+          } catch (err) {
+            fastify.log.warn({ err }, 'Failed to record trade entry intent');
+          }
+        }
       }
 
       await saveSnapshot(current);
       return { notified: shouldSend, snapshot: current };
     }
 
-    async function pollAll(options?: { force?: boolean }): Promise<void> {
+    async function loadAllSnapshots(): Promise<SignalSnapshot[]> {
+      const snapshots: SignalSnapshot[] = [];
+      for (const symbol of watchedSymbols) {
+        for (const style of watchedStyles) {
+          const snap = await loadSnapshot(symbol, style);
+          if (snap) snapshots.push(snap);
+        }
+      }
+      return snapshots;
+    }
+
+    async function maybeSendSessionCoachSummary(options?: {
+      force?: boolean;
+      coachOnly?: boolean;
+    }): Promise<void> {
+      fastify.fyersUsage.beginScope('telegram-coach');
+      try {
+        const now = Date.now();
+        const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+        const inCoachWindow = isWithinPostSessionCoachWindow(
+          now,
+          timezone,
+          TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+          TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
+        );
+
+        const allowCoach = options?.force || options?.coachOnly;
+        if (!allowCoach && !inCoachWindow) return;
+
+        const { sessionDate } = getIstSessionClock(now, timezone);
+        sessionCoachState = await loadSessionCoachState(
+          fastify,
+          sessionCoachState,
+        );
+
+        if (!allowCoach && sessionCoachState.lastSessionDate === sessionDate) {
+          return;
+        }
+
+        const snapshots = await loadAllSnapshots();
+
+        try {
+          await sendSessionCoachSummary(fastify, {
+            sessionDate,
+            symbols: watchedSymbols,
+            styles: watchedStyles,
+            snapshots,
+          sendMessage: (text) =>
+            sendTelegramMessage(text, { channel: 'coach' }),
+        });
+        sessionCoachState = await saveSessionCoachState(
+            fastify,
+            sessionCoachState,
+            {
+              lastSessionDate: sessionDate,
+              lastSentAt: new Date(),
+              lastError: null,
+            },
+          );
+          fastify.log.info(
+            { sessionDate },
+            'Telegram end-of-session trading coach summary sent',
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          sessionCoachState = await saveSessionCoachState(
+            fastify,
+            sessionCoachState,
+            {
+              lastSessionDate: sessionDate,
+              lastSentAt: new Date(),
+              lastError: msg,
+            },
+          );
+          fastify.log.error(
+            { err, sessionDate },
+            'Telegram end-of-session trading coach summary failed',
+          );
+        }
+      } finally {
+        fastify.fyersUsage.endScope('telegram-coach');
+      }
+    }
+
+    async function pollAll(options?: {
+      force?: boolean;
+      coachOnly?: boolean;
+    }): Promise<void> {
+      fastify.fyersUsage.beginScope('telegram-poll');
+      try {
       lastPollError = null;
+      const now = Date.now();
+      const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
       const marketOpen = isIndianMarketOpen(
-        Date.now(),
-        TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE,
+        now,
+        timezone,
         TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_OPEN,
         TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
       );
+      const inCoachWindow = isWithinPostSessionCoachWindow(
+        now,
+        timezone,
+        TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+        TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
+      );
 
-      if (!options?.force && !marketOpen) {
-        fastify.log.debug('Telegram poll skipped — Indian market closed');
+      if (!options?.force && !marketOpen && !inCoachWindow) {
+        fastify.log.debug(
+          'Telegram poll skipped — outside market hours and coach window',
+        );
         return;
       }
 
-      for (const symbol of watchedSymbols) {
-        for (const style of watchedStyles) {
-          try {
-            await evaluateAndNotify(symbol, style, options);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            lastPollError = msg;
-            fastify.log.error(
-              { err, symbol, style },
-              'Telegram notification poll failed for watch item',
-            );
+      if (!options?.coachOnly && (marketOpen || options?.force)) {
+        for (const symbol of watchedSymbols) {
+          for (const style of watchedStyles) {
+            try {
+              await evaluateAndNotify(symbol, style, options);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              lastPollError = msg;
+              fastify.log.error(
+                { err, symbol, style },
+                'Telegram notification poll failed for watch item',
+              );
+            }
           }
         }
+
+        try {
+          const tpStyle = watchedStyles[0] ?? TradingStyle.Intraday;
+          const tpResult = await evaluateOpenPositionTpAlerts(fastify, {
+            watchedSymbols,
+            tradingStyle: tpStyle,
+            tpMemory,
+            sendMessage: (text) =>
+              sendTelegramMessage(text, { channel: 'tp' }),
+            force: options?.force,
+          });
+          openPositionsMonitored = tpResult.monitored;
+          openPositionsTracked = tpResult.tracked;
+          if (tpResult.notified > 0) {
+            lastTpAlertAt = new Date();
+          }
+        } catch (err) {
+          fastify.log.error({ err }, 'Telegram open-position TP monitor failed');
+        }
       }
+
+      if (inCoachWindow || options?.force || options?.coachOnly) {
+        try {
+          await maybeSendSessionCoachSummary(options);
+        } catch (err) {
+          fastify.log.error(
+            { err },
+            'Telegram session coach summary step failed',
+          );
+        }
+      }
+
       lastPollAt = new Date();
+      } finally {
+        fastify.fyersUsage.endScope('telegram-poll');
+      }
     }
 
     function startPolling(): void {
@@ -220,22 +408,54 @@ export default fp(
         }
       }
 
+      const now = Date.now();
+      const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+
       return {
         enabled: enabled && configured,
         configured,
+        alertChannels: buildAlertChannelStatus(chatId),
+        soundRoutingNote: TELEGRAM_SOUND_ROUTING_NOTE,
         polling: pollTimer != null,
         pollIntervalMs,
         marketOpen: isIndianMarketOpen(
-          Date.now(),
-          TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE,
+          now,
+          timezone,
           TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_OPEN,
           TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+        ),
+        postSessionCoachWindow: isWithinPostSessionCoachWindow(
+          now,
+          timezone,
+          TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+          TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
         ),
         watched: watchedSymbols.flatMap((symbol) =>
           watchedStyles.map((tradingStyle) => ({ symbol, tradingStyle })),
         ),
         lastPollAt: lastPollAt ? lastPollAt.toISOString() : null,
         lastPollError,
+        lastCoachSummarySessionDate: sessionCoachState.lastSessionDate,
+        lastCoachSummaryAt: sessionCoachState.lastSentAt
+          ? sessionCoachState.lastSentAt.toISOString()
+          : null,
+        lastCoachSummaryError: sessionCoachState.lastError,
+        openPositionsMonitored,
+        openPositionsTracked,
+        lastTpAlertAt: lastTpAlertAt ? lastTpAlertAt.toISOString() : null,
+        tpSnapshots: [...tpMemory.values()].map((snap) => ({
+          positionSymbol: snap.positionSymbol,
+          isTracked: snap.isTracked,
+          trackReason: snap.trackReason,
+          highestTpRr: snap.highestTpRr,
+          trackedAt: snap.trackedAt ? snap.trackedAt.toISOString() : null,
+          approachingTpRr: snap.approachingTpRr,
+          lastHoldAdvice: snap.lastHoldAdvice,
+          lastAlertKind: snap.lastAlertKind,
+          lastNotifiedAt: snap.lastNotifiedAt
+            ? snap.lastNotifiedAt.toISOString()
+            : null,
+        })),
         snapshots,
       };
     }
@@ -244,7 +464,12 @@ export default fp(
       isConfigured: () => configured,
       isEnabled: () => enabled && configured,
       sendMessage: sendTelegramMessage,
-      pollNow: (force = false) => pollAll({ force }),
+      pollNow: (options) => {
+        if (typeof options === 'boolean') {
+          return pollAll({ force: options });
+        }
+        return pollAll(options);
+      },
       getStatus,
       startPolling,
       stopPolling,
@@ -252,6 +477,10 @@ export default fp(
 
     if (enabled && configured) {
       fastify.addHook('onReady', async () => {
+        sessionCoachState = await loadSessionCoachState(
+          fastify,
+          sessionCoachState,
+        );
         startPolling();
         try {
           await pollAll();
@@ -269,5 +498,8 @@ export default fp(
       stopPolling();
     });
   },
-  { name: 'telegram-notifications' },
+  {
+    name: 'telegram-notifications',
+    dependencies: ['fyers-usage'],
+  },
 );

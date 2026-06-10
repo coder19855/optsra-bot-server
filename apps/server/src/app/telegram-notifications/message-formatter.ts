@@ -2,6 +2,7 @@ import {
   RecommendedStrategyAlert,
   SignalChangeKind,
   SignalSnapshot,
+  TelegramPositionSizing,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
@@ -140,6 +141,108 @@ function formatChangeLine(
   return parts.join('\n') || '🔄 Signal updated';
 }
 
+function formatInr(value: number, maximumFractionDigits = 0): string {
+  return value.toLocaleString('en-IN', { maximumFractionDigits });
+}
+
+function tierLabel(label: string): string {
+  if (label === 'conservative') return '🛡 Conservative';
+  if (label === 'aggressive') return '⚡ Aggressive';
+  return '📏 Standard';
+}
+
+function formatPositionSizingSection(
+  sizing: TelegramPositionSizing | undefined,
+): string | null {
+  if (!sizing) return null;
+
+  if (sizing.unavailableReason && sizing.availableBalance == null) {
+    return `🏦 <b>Account sizing</b>\n⚠️ ${escapeHtml(sizing.unavailableReason)}`;
+  }
+
+  const lines: string[] = ['🏦 <b>Account sizing (Fyers)</b>'];
+
+  if (sizing.availableBalance != null) {
+    lines.push(
+      `💳 <b>Available:</b> ₹${formatInr(sizing.availableBalance)}`,
+    );
+    if (sizing.totalBalance != null) {
+      lines.push(`📊 Total balance: ₹${formatInr(sizing.totalBalance)}`);
+    }
+  }
+
+  if (sizing.unavailableReason) {
+    lines.push(`⚠️ ${escapeHtml(sizing.unavailableReason)}`);
+    return lines.join('\n');
+  }
+
+  if (
+    sizing.recommendedLots == null ||
+    sizing.riskBudgetInr == null ||
+    sizing.riskPoints == null ||
+    sizing.riskPercent == null
+  ) {
+    return lines.join('\n');
+  }
+
+  const qtyPerLot = sizing.lotSize;
+  const recommendedQty = sizing.recommendedLots * qtyPerLot;
+  const lotLabel =
+    sizing.recommendedLots === 1
+      ? `1 lot (${qtyPerLot} qty)`
+      : `${sizing.recommendedLots} lots (${recommendedQty} qty)`;
+
+  lines.push(
+    `🎯 <b>Recommended:</b> ${lotLabel} · ${escapeHtml(sizing.indexLabel)}`,
+  );
+  lines.push(
+    `📉 Risk budget (${sizing.riskPercent}%): ₹${formatInr(sizing.riskBudgetInr)}`,
+  );
+  lines.push(
+    `🛑 Stop risk: ${sizing.riskPoints.toFixed(1)} index pts · ₹${formatInr(sizing.riskPerLotInr ?? 0)}/lot`,
+  );
+
+  if (sizing.capitalAtRiskInr != null) {
+    lines.push(`💸 Capital at risk: ₹${formatInr(sizing.capitalAtRiskInr)}`);
+  }
+
+  if (sizing.marginRequiredInr != null && sizing.marginRequiredInr > 0) {
+    const util =
+      sizing.utilizationPercent != null
+        ? ` (${sizing.utilizationPercent}% of available)`
+        : '';
+    lines.push(
+      `🏧 Est. margin: ₹${formatInr(sizing.marginRequiredInr)}${util}`,
+    );
+  }
+
+  if (
+    sizing.atmStrike != null &&
+    sizing.atmPremium != null &&
+    sizing.optionSide
+  ) {
+    lines.push(
+      `📌 ATM ${sizing.optionSide} @ ${formatInr(sizing.atmStrike)} · premium ₹${sizing.atmPremium.toFixed(1)}`,
+    );
+  }
+
+  if (sizing.tiers?.length) {
+    const tierLine = sizing.tiers
+      .map(
+        (tier) =>
+          `${tierLabel(tier.label)}: ${tier.lots} lot${tier.lots === 1 ? '' : 's'}`,
+      )
+      .join(' · ');
+    lines.push(tierLine);
+  }
+
+  if (sizing.recommendedLots < 1) {
+    lines.push('⛔ Risk budget too small for 1 lot at this stop — skip or add funds.');
+  }
+
+  return lines.join('\n');
+}
+
 function formatStrategies(strategies: RecommendedStrategyAlert[]): string {
   if (!strategies.length) {
     return '❓ No mapped strategies — review option flow manually.';
@@ -205,6 +308,8 @@ export function formatTelegramAlertMessage(params: {
     payload.tradeGuidance.sizeRecommendation
       ? `📏 ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}`
       : null,
+    '',
+    formatPositionSizingSection(payload.positionSizing),
     '',
     `🎲 <b>Top strategies</b>`,
     strategies,

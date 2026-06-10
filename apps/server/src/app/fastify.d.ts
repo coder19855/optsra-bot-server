@@ -26,7 +26,12 @@ import {
   TradeDecisionResult,
 } from './types';
 import { TradingStyle } from './types/trading-style';
-import { TelegramNotificationStatus } from './types/telegram-notifications';
+import { FyersTrackedMethod } from './constants/fyers-usage';
+import { FyersUsageResponse } from './types/fyers-usage';
+import {
+  TelegramNotificationStatus,
+  TelegramSendOptions,
+} from './types/telegram-notifications';
 
 export interface ScoreMetricsResponse {
   score: number;
@@ -57,6 +62,12 @@ export interface ScoreComponents {
 declare module 'fastify' {
   interface FastifyInstance {
     fyers: fyersModel;
+    fyersUsage: {
+      record: (method: FyersTrackedMethod) => void;
+      beginScope: (scope: string) => void;
+      endScope: (scope: string) => void;
+      getStats: () => FyersUsageResponse;
+    };
     mongo?: {
       client: MongoClient;
       ObjectId: typeof ObjectId;
@@ -363,8 +374,8 @@ declare module 'fastify' {
     telegramNotifications: {
       isConfigured: () => boolean;
       isEnabled: () => boolean;
-      sendMessage: (text: string) => Promise<void>;
-      pollNow: (force?: boolean) => Promise<void>;
+      sendMessage: (text: string, options?: TelegramSendOptions) => Promise<void>;
+      pollNow: (options?: boolean | { force?: boolean; coachOnly?: boolean }) => Promise<void>;
       getStatus: () => Promise<TelegramNotificationStatus>;
       startPolling: () => void;
       stopPolling: () => void;

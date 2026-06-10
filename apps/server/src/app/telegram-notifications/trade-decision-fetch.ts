@@ -1,7 +1,9 @@
 import { FastifyInstance } from 'fastify';
+import { PriceActionResponse } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
+import { resolveTelegramPositionSizing } from './position-sizing-context';
 
 function parseTradingStyle(value: string): TradingStyle {
   const upper = value.toUpperCase();
@@ -47,6 +49,31 @@ export async function fetchTradeDecisionAlert(
     }
   }
 
+  const debug = body._debug as { rawPrice?: PriceActionResponse } | undefined;
+  const rawPrice = debug?.rawPrice;
+  const tradeSetup = rawPrice?.tradeSetup ?? null;
+  const signalConfidence = Number(
+    rawPrice?.signal?.confidence ?? paConfidence,
+  );
+  const signalAction = String(rawPrice?.signal?.action ?? paAction);
+
+  let positionSizing: TradeDecisionAlertPayload['positionSizing'];
+  try {
+    positionSizing = await resolveTelegramPositionSizing(fastify, {
+      symbol: String(body.symbol || symbol),
+      tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
+      action,
+      signalConfidence,
+      signalAction,
+      tradeSetup,
+    });
+  } catch (err) {
+    fastify.log.warn(
+      { err, symbol, tradingStyle },
+      'Telegram position sizing lookup failed — alert will omit account sizing',
+    );
+  }
+
   return {
     symbol: String(body.symbol || symbol),
     tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
@@ -81,5 +108,6 @@ export async function fetchTradeDecisionAlert(
       reason: s.reason ? String(s.reason) : undefined,
       executionHint: s.executionHint ? String(s.executionHint) : undefined,
     })),
+    positionSizing,
   };
 }
