@@ -36,16 +36,16 @@ function isSignalFlip(
 }
 
 function actionBanner(action: DecisionAction, flipped: boolean): string {
-  if (flipped) return '🚨 <b>Signal flip</b>';
+  if (flipped) return '🚨 <b>Plot twist — direction flipped!</b>';
   switch (action) {
     case 'CE-BUY':
-      return '🟢📈 <b>CE-BUY setup</b>';
+      return '🟢📈 <b>Calls are cooking</b>';
     case 'PE-BUY':
-      return '🔴📉 <b>PE-BUY setup</b>';
+      return '🔴📉 <b>Puts have the mic</b>';
     case 'NEUTRAL':
-      return '🟡 <b>Neutral / range</b>';
+      return '🟡 <b>Chop zone — sit tight</b>';
     default:
-      return '⚪ <b>No trade</b>';
+      return '⚪ <b>Nothing to chase</b>';
   }
 }
 
@@ -113,10 +113,10 @@ function formatChangeLine(
   current: SignalSnapshot,
   kinds: SignalChangeKind[],
 ): string {
-  if (!previous) return '🚀 First actionable signal this session.';
+  if (!previous) return '🚀 First real setup of the session — eyes up.';
 
   if (isSignalFlip(previous, current)) {
-    return `🚨 ${previous.action} ➜ ${current.action} — direction reversed!`;
+    return `🚨 ${previous.action} ➜ ${current.action} — market changed its mind!`;
   }
 
   const parts: string[] = [];
@@ -136,7 +136,7 @@ function formatChangeLine(
     );
   }
   if (kinds.includes('TRADE_READY')) {
-    parts.push(`${changeKindEmoji('TRADE_READY')} Trade threshold crossed`);
+    parts.push(`${changeKindEmoji('TRADE_READY')} Conviction bar cleared — trade-ready`);
   }
   if (kinds.includes('STRATEGY')) {
     parts.push(
@@ -162,10 +162,10 @@ export function formatPositionSizingTelegramSection(
   if (!sizing) return null;
 
   if (sizing.unavailableReason && sizing.availableBalance == null) {
-    return `🏦 <b>Account sizing</b>\n⚠️ ${escapeHtml(sizing.unavailableReason)}`;
+    return `🏦 <b>Wallet check</b>\n⚠️ ${escapeHtml(sizing.unavailableReason)}`;
   }
 
-  const lines: string[] = ['🏦 <b>Account sizing (Fyers)</b>'];
+  const lines: string[] = ['🏦 <b>Wallet check (Fyers)</b>'];
 
   if (sizing.availableBalance != null) {
     lines.push(
@@ -242,7 +242,7 @@ export function formatPositionSizingTelegramSection(
   }
 
   if (sizing.recommendedLots < 1) {
-    lines.push('⛔ Risk budget too small for 1 lot at this stop — skip or add funds.');
+    lines.push('⛔ Not enough room for even 1 lot at this stop — pass or top up.');
   }
 
   return lines.join('\n');
@@ -265,11 +265,11 @@ function formatExactStrikeSection(
       : '';
 
   return [
-    '🎯 <b>Exact strike pick</b>',
+    '🎯 <b>Strike ticket</b>',
     `<code>${escapeHtml(strike.fyersSymbol)}</code>`,
     `${strike.moneyness} @ ${formatInr(strike.strike)} · prem ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
     `↳ ${escapeHtml(strike.rationale)}`,
-    '💬 Reply <code>/why</code> for full breakdown',
+    '💬 Curious? Hit <code>/why</code> for the full story',
   ].join('\n');
 }
 
@@ -281,16 +281,16 @@ function formatAdaptiveConvictionLine(
 
   const meets = conviction >= adaptive.recommendedEnterThreshold;
   const icon = meets ? '✅' : '⚠️';
-  return `${icon} <b>Adaptive bar:</b> ${adaptive.recommendedEnterThreshold}% enter\n↳ ${adaptive.overallWinRate}% win · ${adaptive.sampleSize} alerts`;
+  return `${icon} <b>Your enter bar:</b> ${adaptive.recommendedEnterThreshold}% (from your alert history)\n↳ ${adaptive.overallWinRate}% win rate · ${adaptive.sampleSize} past alerts`;
 }
 
-function formatGreeksStrikeSection(
+export function formatGreeksStrikeSection(
   insight: GreeksStrikeInsight | undefined,
 ): string | null {
   if (!insight?.profiles.length) return null;
 
   const lines: string[] = [
-    `📐 <b>Greeks · ${insight.optionSide}</b>`,
+    `📐 <b>Greeks cheat sheet · ${insight.optionSide}</b>`,
     TELEGRAM_MSG_RULE,
   ];
 
@@ -310,7 +310,7 @@ function formatGreeksStrikeSection(
     lines.push(`↳ ${escapeHtml(profile.consequence)}`);
   }
 
-  lines.push(`💡 <b>Best fit:</b> ${escapeHtml(insight.bestFit)}`);
+  lines.push(`💡 <b>Sweet spot for you:</b> ${escapeHtml(insight.bestFit)}`);
   if (insight.ivNote) {
     lines.push(`🌡 ${escapeHtml(insight.ivNote)}`);
   }
@@ -320,7 +320,7 @@ function formatGreeksStrikeSection(
 
 function formatStrategies(strategies: RecommendedStrategyAlert[]): string {
   if (!strategies.length) {
-    return '❓ No mapped strategies — review option flow manually.';
+    return '🤷 No playbook match — eyeball option flow yourself this time.';
   }
 
   return strategies
@@ -374,22 +374,22 @@ export function formatTelegramAlertMessage(params: {
   const biasIcon = biasEmoji(payload.bias);
 
   const tradeReady = payload.tradeGuidance.shouldConsiderTrade
-    ? '✅ Meets conviction threshold'
-    : '⏸ Below threshold — caution';
+    ? '✅ Green light — conviction clears your bar'
+    : '⏸ Yellow light — below bar, size down or wait';
 
   return [
     banner,
     `${emoji} <b>${escapeHtml(label)} · ${escapeHtml(payload.tradingStyle)} · ${payload.action}</b>`,
     TELEGRAM_MSG_RULE,
     `${meter} <b>Conviction:</b> ${payload.conviction}%`,
-    `${biasIcon} <b>Bias:</b> ${escapeHtml(payload.bias)}`,
-    `💰 <b>Price:</b> ${payload.lastPrice.toLocaleString('en-IN')}`,
-    `${paEmoji(pa.action)} <b>PA:</b> ${pa.action} (${pa.confidence}%)`,
-    ofBias ? `🌊 <b>Option flow:</b> ${escapeHtml(ofBias)}` : null,
-    iv ? `⚡ <b>IV regime:</b> ${escapeHtml(iv)}` : null,
+    `${biasIcon} <b>Vibe:</b> ${escapeHtml(payload.bias)}`,
+    `💰 <b>Spot:</b> ${payload.lastPrice.toLocaleString('en-IN')}`,
+    `${paEmoji(pa.action)} <b>Price action:</b> ${pa.action} (${pa.confidence}%)`,
+    ofBias ? `🌊 <b>Options desk:</b> ${escapeHtml(ofBias)}` : null,
+    iv ? `🌡 <b>IV mood:</b> ${escapeHtml(iv)}` : null,
     adaptiveLine,
     TELEGRAM_MSG_RULE,
-    `🧭 <b>Trade guidance</b>`,
+    `🧭 <b>Should you pull the trigger?</b>`,
     tradeReady,
     payload.tradeGuidance.sizeRecommendation
       ? `📏 ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}`
@@ -401,13 +401,13 @@ export function formatTelegramAlertMessage(params: {
     greeksStrike ? '' : null,
     exactStrike,
     exactStrike ? '' : null,
-    `🎲 <b>Top strategies</b>`,
+    `🎲 <b>Playbook picks</b>`,
     strategies,
     '',
-    `🧠 <b>Summary</b>`,
+    `🧠 <b>TL;DR</b>`,
     escapeHtml(payload.humanSummary),
     TELEGRAM_MSG_RULE,
-    `🔄 <b>What changed</b>`,
+    `🔄 <b>What just shifted</b>`,
     change,
   ]
     .filter((line) => line !== null)

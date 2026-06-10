@@ -194,6 +194,7 @@ export interface TelegramNotificationStatus {
   polling: boolean;
   pollIntervalMs: number;
   marketOpen: boolean;
+  preSessionLearningWindow: boolean;
   postSessionCoachWindow: boolean;
   watched: Array<{ symbol: string; tradingStyle: TradingStyle }>;
   lastPollAt: string | null;
@@ -201,6 +202,9 @@ export interface TelegramNotificationStatus {
   lastCoachSummarySessionDate: string | null;
   lastCoachSummaryAt: string | null;
   lastCoachSummaryError: string | null;
+  lastLearningBriefSessionDate: string | null;
+  lastLearningBriefAt: string | null;
+  lastLearningBriefError: string | null;
   openPositionsMonitored: number;
   openPositionsTracked: number;
   lastTpAlertAt: string | null;

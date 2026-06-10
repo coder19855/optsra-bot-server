@@ -197,10 +197,10 @@ export function formatSignalOutcomesSummary(
   records: SignalOutcomeRecord[],
 ): string {
   if (!records.length) {
-    return '📭 No paper-tracked signal outcomes yet — outcomes start after directional alerts with a strike pick.';
+    return '📭 No paper scores yet — they kick in after directional alerts with a strike pick.';
   }
 
-  const lines = ['📊 <b>Outcomes (paper)</b>', TELEGRAM_MSG_RULE];
+  const lines = ['📊 <b>Paper scoreboard</b>', TELEGRAM_MSG_RULE];
 
   for (const r of records.slice(0, 8)) {
     const icon =
@@ -221,7 +221,7 @@ export function formatSignalOutcomesSummary(
     const wins = closed.filter((r) => r.status === 'win').length;
     lines.push(
       '',
-      `Closed sample: ${wins}/${closed.length} wins (${Math.round((wins / closed.length) * 100)}%)`,
+      `🏆 Closed alerts: ${wins}/${closed.length} winners (${Math.round((wins / closed.length) * 100)}%)`,
     );
   }
 

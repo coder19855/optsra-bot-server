@@ -24,12 +24,12 @@ export function formatWhyAlertMessage(params: {
 
   const isAlert = why.wasNotified === true || why.source === 'alert';
   const title = isAlert
-    ? `Why alert · ${label} · ${why.tradingStyle}`
-    : `Signal read · ${label} · ${why.tradingStyle}`;
-  const timeLabel = isAlert ? 'Alerted' : 'As of';
+    ? `🔍 Why that alert fired · ${label} · ${why.tradingStyle}`
+    : `🔍 Live read · ${label} · ${why.tradingStyle}`;
+  const timeLabel = isAlert ? 'Pinged you at' : 'Snapshot at';
 
   const lines: string[] = [
-    `🔍 <b>${escapeHtml(title)}</b>`,
+    `<b>${escapeHtml(title)}</b>`,
     TELEGRAM_MSG_RULE,
     `${why.action} · ${why.conviction}% conviction · ${escapeHtml(why.bias)}`,
     `🕐 ${timeLabel}: ${new Date(why.alertedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}`,
@@ -37,19 +37,19 @@ export function formatWhyAlertMessage(params: {
 
   if (!isAlert) {
     lines.push(
-      'ℹ️ No Telegram alert was sent for this — showing latest engine state.',
+      'ℹ️ No alert went out for this — just showing what the engine sees right now.',
     );
   }
 
   if (why.action === 'NO-TRADE' || why.action === 'NEUTRAL') {
     lines.push(
-      '⏸ No directional recommendation — strike pick and paper tracking do not apply.',
+      '⏸ Sidelines mode — no strike pick or paper tracking for this read.',
     );
   }
 
-  lines.push('', '🧠 <b>Conviction breakdown</b>');
+  lines.push('', '🧠 <b>How conviction stacked up</b>');
   lines.push(...why.confluenceLines.map((line) => `• ${escapeHtml(line)}`));
-  lines.push('', '📊 <b>Price action</b>');
+  lines.push('', '📊 <b>What price action said</b>');
   if (why.priceActionLines.length) {
     lines.push(
       ...why.priceActionLines
@@ -57,39 +57,39 @@ export function formatWhyAlertMessage(params: {
         .map((line) => `• ${escapeHtml(line)}`),
     );
   } else {
-    lines.push('• No detailed PA breakdown stored.');
+    lines.push('• PA detail wasn’t stored for this one.');
   }
-  lines.push('', '🌊 <b>Option flow (weakest links)</b>');
+  lines.push('', '🌊 <b>Where option flow wobbled</b>');
   if (why.optionFlowLines.length) {
     lines.push(...why.optionFlowLines.map((line) => `• ${escapeHtml(line)}`));
   } else {
-    lines.push('• Option flow detail not stored for this read.');
+    lines.push('• Option flow didn’t leave breadcrumbs on this read.');
   }
 
   if (why.vetoOrCaution.length) {
-    lines.push('', '⚠️ <b>Caution</b>');
+    lines.push('', '⚠️ <b>Heads up</b>');
     lines.push(...why.vetoOrCaution.map((line) => `• ${escapeHtml(line)}`));
   }
 
   if (exactStrike) {
-    lines.push('', '🎯 <b>Exact strike pick</b>');
+    lines.push('', '🎯 <b>Strike ticket</b>');
     lines.push(`<code>${escapeHtml(exactStrike.fyersSymbol)}</code>`);
     lines.push(
       `${exactStrike.moneyness} @ ${exactStrike.strike.toLocaleString('en-IN')} · prem ₹${exactStrike.premium.toFixed(1)} · Δ ${exactStrike.delta?.toFixed(2) ?? '—'}`,
     );
     if (exactStrike.expectedPremiumMove50Pts != null) {
       lines.push(
-        `↳ ~₹${exactStrike.expectedPremiumMove50Pts.toFixed(1)} premium change per 50 pts spot (per unit)`,
+        `↳ ~₹${exactStrike.expectedPremiumMove50Pts.toFixed(1)} premium per 50 pts spot move (per unit)`,
       );
     }
     lines.push(`↳ ${escapeHtml(exactStrike.rationale)}`);
   }
 
   if (adaptive) {
-    lines.push('', '📈 <b>Adaptive conviction</b>', escapeHtml(adaptive.summary));
+    lines.push('', '📈 <b>Your personal enter bar</b>', escapeHtml(adaptive.summary));
     const bucketLines = adaptive.buckets
       .filter((b) => b.samples > 0)
-      .map((b) => `• ${b.rangeLabel}: ${b.winRate}% win (${b.samples} alerts)`);
+      .map((b) => `• ${b.rangeLabel}% bucket: ${b.winRate}% wins (${b.samples} alerts)`);
     if (bucketLines.length) {
       lines.push(...bucketLines);
     }
@@ -97,12 +97,12 @@ export function formatWhyAlertMessage(params: {
 
   lines.push(
     '',
-    '📝 <b>Summary</b>',
+    '📝 <b>Bottom line</b>',
     escapeHtml(why.humanSummary),
   );
 
   if (why.tradeGuidanceNotes) {
-    lines.push('', escapeHtml(why.tradeGuidanceNotes));
+    lines.push('', `💬 ${escapeHtml(why.tradeGuidanceNotes)}`);
   }
 
   return lines.filter((line) => line != null).join('\n');

@@ -47,9 +47,9 @@ export function formatRiskRewardTelegramMessage(params: {
 
   if (!setup || setup.risk <= 0 || !setup.takeProfits?.length) {
     return [
-      `📐 <b>Risk / reward · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
+      `📐 <b>RR map · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
       TELEGRAM_MSG_RULE,
-      `⚠️ No active CE/PE setup — RR needs a directional signal with entry and stop.`,
+      `😴 No live CE/PE setup — need a directional signal with entry + stop first.`,
       `${signal.action} · ${signal.confidence}% confidence`,
       signal.vetoReason ? `↳ ${escapeHtml(signal.vetoReason)}` : null,
     ]
@@ -64,13 +64,13 @@ export function formatRiskRewardTelegramMessage(params: {
   });
 
   const lines = [
-    `📐 <b>Risk / reward · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
+    `📐 <b>RR map · ${escapeHtml(label)} · ${escapeHtml(params.tradingStyle)}</b>`,
     TELEGRAM_MSG_RULE,
     `${signal.action} · ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`,
-    `🎯 <b>Entry:</b> ${setup.entry.toLocaleString('en-IN')}`,
-    `🛑 <b>Stop:</b> ${setup.stopLoss.toLocaleString('en-IN')} · <b>${setup.risk.toFixed(1)} pts</b> risk`,
+    `🎯 <b>Entry line:</b> ${setup.entry.toLocaleString('en-IN')}`,
+    `🛑 <b>Pain line:</b> ${setup.stopLoss.toLocaleString('en-IN')} · <b>${setup.risk.toFixed(1)} pts</b> risk`,
     '',
-    '<b>Take-profit targets</b>',
+    '<b>Profit checkpoints</b>',
     ...tpLines,
   ];
 
@@ -78,7 +78,7 @@ export function formatRiskRewardTelegramMessage(params: {
     lines.push('', `ℹ️ ${escapeHtml(setup.stopAdjustReason)}`);
   }
 
-  lines.push('', '💡 Index levels — map to option premium with your strike delta.');
+  lines.push('', '💡 These are index levels — translate to premium using your strike’s delta.');
   return lines.join('\n');
 }
 
@@ -100,7 +100,7 @@ export async function buildRiskRewardTelegramMessage(
     return {
       message: '',
       error:
-        'Fyers token missing or expired — login required for live index setup.',
+        'Fyers session’s asleep — log in for live index setup.',
     };
   }
 
@@ -139,7 +139,7 @@ export async function buildPositionSizingTelegramMessage(
     return {
       message: '',
       error:
-        'Fyers token missing or expired — login required to read account balance.',
+        'Fyers session’s asleep — log in to read your balance.',
     };
   }
 
@@ -166,7 +166,7 @@ export async function buildPositionSizingTelegramMessage(
   const setup = priceData.tradeSetup;
 
   const lines = [
-    `🏦 <b>Position sizing · ${escapeHtml(label)} · ${escapeHtml(style)}</b>`,
+    `🏦 <b>How many lots? · ${escapeHtml(label)} · ${escapeHtml(style)}</b>`,
     TELEGRAM_MSG_RULE,
     `${priceData.signal.action} · ${priceData.signal.confidence}% confidence`,
   ];
@@ -177,6 +177,6 @@ export async function buildPositionSizingTelegramMessage(
     );
   }
 
-  lines.push('', sizingBlock ?? '⚠️ Position sizing unavailable.');
+  lines.push('', sizingBlock ?? '⚠️ Sizing math unavailable right now.');
   return { message: lines.join('\n') };
 }

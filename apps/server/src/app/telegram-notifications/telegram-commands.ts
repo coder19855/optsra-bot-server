@@ -34,6 +34,8 @@ import {
   buildPositionSizingTelegramMessage,
   buildRiskRewardTelegramMessage,
 } from './account-commands';
+import { buildBestStrikeTelegramMessage } from './best-strike-command';
+import { buildLearningTelegramMessage } from './session-learning';
 import { parseClearCommandLimit } from './telegram-message-journal';
 
 interface TelegramUpdate {
@@ -157,6 +159,10 @@ export class TelegramCommandPoller {
         await this.handleWhy(text, replyChatId);
       } else if (command === '/coach') {
         await this.handleCoach(text, replyChatId);
+      } else if (command === '/learning') {
+        await this.handleLearning(text, replyChatId);
+      } else if (command === '/best-strike' || command === '/beststrike') {
+        await this.handleBestStrike(text, replyChatId);
       } else if (command === '/outcomes') {
         await this.handleOutcomes(replyChatId);
       } else if (command === '/conviction') {
@@ -177,7 +183,7 @@ export class TelegramCommandPoller {
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
       await this.deps.sendMessage(
-        '⚠️ Command failed — try again in a moment.',
+        '😅 That command glitched — give it another shot in a sec.',
         this.replyOptions(replyChatId),
       );
     }
@@ -190,7 +196,7 @@ export class TelegramCommandPoller {
   ): Promise<void> {
     if (replyChatId == null || !this.deps.clearBotMessages) {
       await this.deps.sendMessage(
-        '⚠️ Clear is not available in this chat.',
+        '🤷 Can’t clear messages in this chat.',
         this.replyOptions(replyChatId),
       );
       return;
@@ -198,7 +204,7 @@ export class TelegramCommandPoller {
 
     if (commandMessageId == null) {
       await this.deps.sendMessage(
-        '⚠️ Could not resolve this message — try /clear again.',
+        '🤷 Couldn’t find this message — try <code>/clear</code> again.',
         { ...this.replyOptions(replyChatId), skipMessageTracking: true },
       );
       return;
@@ -213,8 +219,8 @@ export class TelegramCommandPoller {
     if (result.deleted === 0) {
       await this.deps.sendMessage(
         [
-          '🧹 No bot messages found to clear above this point.',
-          'Your /clear command stays (bots cannot delete your messages).',
+          '🧹 Nothing to sweep — no bot messages above this point.',
+          '(Your /clear message stays — bots can’t delete yours.)',
         ].join('\n'),
         { ...this.replyOptions(replyChatId), skipMessageTracking: true },
       );
@@ -222,7 +228,7 @@ export class TelegramCommandPoller {
     }
 
     await this.deps.sendMessage(
-      `🧹 Cleared ${result.deleted} bot message(s).`,
+      `🧹 Done — swept ${result.deleted} bot message(s). Chat’s breathing again.`,
       { ...this.replyOptions(replyChatId), skipMessageTracking: true },
     );
   }
@@ -317,7 +323,7 @@ export class TelegramCommandPoller {
 
     if (!resolved.why) {
       await this.deps.sendMessage(
-        '📭 No signal context available. Try <code>/why live</code> during market hours (valid Fyers token required).',
+        '📭 Nothing to explain yet. Try <code>/why live</code> during market hours (Fyers logged in).',
         this.replyOptions(replyChatId),
       );
       return;
@@ -341,6 +347,53 @@ export class TelegramCommandPoller {
       adaptive,
     });
     await this.deps.sendMessage(message, this.replyOptions(replyChatId));
+  }
+
+  private async handleBestStrike(
+    text: string,
+    replyChatId?: number,
+  ): Promise<void> {
+    const defaultSymbol =
+      this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
+    const defaultStyle =
+      this.deps.watchedStyles[0] ?? TradingStyle.Intraday;
+
+    const result = await buildBestStrikeTelegramMessage(this.fastify, {
+      text,
+      defaultSymbol,
+      defaultStyle,
+    });
+
+    if (result.error) {
+      const opts = isFyersAuthError(result.error)
+        ? this.fyersAuthReplyOptions(replyChatId)
+        : this.replyOptions(replyChatId);
+      await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+      return;
+    }
+
+    await this.deps.sendMessage(result.message, this.replyOptions(replyChatId));
+  }
+
+  private async handleLearning(
+    text: string,
+    replyChatId?: number,
+  ): Promise<void> {
+    const result = await buildLearningTelegramMessage(this.fastify, {
+      text,
+      watchedSymbols: this.deps.watchedSymbols,
+      watchedStyles: this.deps.watchedStyles,
+    });
+
+    if (result.error) {
+      const opts = isFyersAuthError(result.error)
+        ? this.fyersAuthReplyOptions(replyChatId)
+        : this.replyOptions(replyChatId);
+      await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+      return;
+    }
+
+    await this.deps.sendMessage(result.message, this.replyOptions(replyChatId));
   }
 
   private async handleCoach(text: string, replyChatId?: number): Promise<void> {
@@ -419,15 +472,15 @@ export class TelegramCommandPoller {
 
     await this.deps.sendMessage(
       [
-        '📈 <b>Adaptive conviction</b>',
+        '📈 <b>Your enter bar (from past alerts)</b>',
         insight.summary,
         '',
-        `Default enter: ${insight.defaultEnterThreshold}%`,
-        `Recommended enter: <b>${insight.recommendedEnterThreshold}%</b>`,
+        `📏 Factory default: ${insight.defaultEnterThreshold}%`,
+        `🎯 <b>Your sweet spot:</b> ${insight.recommendedEnterThreshold}%`,
         insight.overallWinRate != null
-          ? `Overall win rate: ${insight.overallWinRate}% (${insight.sampleSize} closed alerts)`
-          : `Samples: ${insight.sampleSize}`,
-        bucketLines ? `\n${bucketLines}` : '',
+          ? `🏆 Win rate: ${insight.overallWinRate}% across ${insight.sampleSize} closed alerts`
+          : `📊 Samples so far: ${insight.sampleSize}`,
+        bucketLines ? `\n<b>By conviction bucket</b>\n${bucketLines}` : '',
       ]
         .filter(Boolean)
         .join('\n'),

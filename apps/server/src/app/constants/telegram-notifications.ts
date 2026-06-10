@@ -11,6 +11,11 @@ export const TELEGRAM_NOTIFICATION_DEFAULTS = {
   SESSION_CLOSE: TIMELINE_DEFAULTS.SESSION_CLOSE,
   /** Minutes after 15:30 IST to attempt the once-per-day coach summary. */
   POST_SESSION_COACH_WINDOW_MINUTES: 45,
+  /** Default lookback for /learning habit patterns (override via TELEGRAM_LEARNING_LOOKBACK_DAYS). */
+  LEARNING_LOOKBACK_DAYS: 10,
+  /** IST window for the once-per-day pre-session learning brief (before 09:15 open). */
+  PRE_SESSION_LEARNING_START: { hour: 9, minute: 0 },
+  PRE_SESSION_LEARNING_END: { hour: 9, minute: 20 },
   DEFAULT_SYMBOLS: [FYERS_OPTION_INDEX_SYMBOLS[0].symbol],
   DEFAULT_TRADING_STYLES: [TradingStyle.Intraday],
   /** Skip alerts when conviction is below this on first poll (avoids startup noise). */

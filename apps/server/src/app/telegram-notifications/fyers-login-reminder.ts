@@ -3,7 +3,7 @@ import { TelegramSendOptions } from '../types/telegram-notifications';
 export const FYERS_LOGIN_REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 export const FYERS_AUTH_ERROR_REPLY =
-  '⚠️ Fyers token missing or expired — tap <b>Login to Fyers</b> below.';
+  '🔐 Fyers session’s asleep — tap <b>Login to Fyers</b> below to wake it up.';
 
 /** Public base URL for links opened from Telegram (browser). */
 export function resolvePublicAppBaseUrl(): string | null {
@@ -47,17 +47,17 @@ export function getFyersLoginReminderContent(): {
 
   const text = loginUrl
     ? [
-        '🔐 <b>Fyers login required</b>',
+        '🔐 <b>Time to log into Fyers</b>',
         '',
-        'Session expired or missing (~24h tokens).',
-        'Alerts, /coach, and live reads need a fresh login.',
+        'Your ~24h token expired (or never landed).',
+        'Alerts, /coach, and live reads need a fresh session.',
         '',
-        'Tap the button below — it opens your <b>browser</b>, redirects to Fyers, then back here when done.',
+        'Hit the button — opens your <b>browser</b>, through Fyers, then back when you’re done.',
       ].join('\n')
     : [
-        '🔐 <b>Fyers login required</b>',
+        '🔐 <b>Time to log into Fyers</b>',
         '',
-        'Session expired or missing. Set <code>PUBLIC_APP_URL</code> (or <code>FYERS_REDIRECT_URL</code>) so Telegram can link to <code>/api/login</code>.',
+        'Session’s missing. Set <code>PUBLIC_APP_URL</code> (or <code>FYERS_REDIRECT_URL</code>) so Telegram can link to <code>/api/login</code>.',
         '',
         'Then open <code>/api/login?forceRedirect=true</code> in your browser.',
       ].join('\n');

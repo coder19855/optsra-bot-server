@@ -21,20 +21,20 @@ function adviceEmoji(advice: TpHoldAdvice): string {
 
 function kindBanner(kinds: TpAlertKind[]): string {
   if (kinds.includes('SIGNAL_CONFLICT')) {
-    return '⚠️ <b>Position vs signal</b>';
+    return '⚠️ <b>Your position vs the engine</b>';
   }
   if (kinds.includes('REACHED')) {
-    return '🎯 <b>TP reached</b>';
+    return '🎯 <b>Target hit — nice!</b>';
   }
   if (kinds.includes('APPROACHING')) {
-    return '🎯 <b>Approaching TP</b>';
+    return '🎯 <b>Target in sight</b>';
   }
-  return '🎯 <b>Hold review</b>';
+  return '🎯 <b>Hold check</b>';
 }
 
 function formatRrLine(evaluation: PositionTpEvaluation): string {
   const parts: string[] = [
-    `📈 <b>Current:</b> ${evaluation.currentR.toFixed(2)}R on index`,
+    `📈 <b>Riding:</b> ${evaluation.currentR.toFixed(2)}R on index`,
     `💰 <b>Spot:</b> ${evaluation.spot.toLocaleString('en-IN')}`,
     `🎯 <b>Entry:</b> ${evaluation.tradeSetup.entry.toLocaleString('en-IN')}`,
     `🛑 <b>Stop:</b> ${evaluation.tradeSetup.stopLoss.toLocaleString('en-IN')} (${evaluation.tradeSetup.risk.toFixed(1)} pts risk)`,
@@ -42,7 +42,7 @@ function formatRrLine(evaluation: PositionTpEvaluation): string {
 
   if (evaluation.highestHitTp) {
     parts.push(
-      `✅ <b>Hit:</b> ${evaluation.highestHitTp.rr} @ ${evaluation.highestHitTp.price.toLocaleString('en-IN')}`,
+      `✅ <b>Banked:</b> ${evaluation.highestHitTp.rr} @ ${evaluation.highestHitTp.price.toLocaleString('en-IN')}`,
     );
   }
 
@@ -56,7 +56,7 @@ function formatRrLine(evaluation: PositionTpEvaluation): string {
         ? ` (${evaluation.distanceToNextR.toFixed(2)}R away)`
         : '';
     parts.push(
-      `⏭ <b>Next:</b> ${evaluation.nextTp.rr} @ ${evaluation.nextTp.price.toLocaleString('en-IN')} · ${dist}${distR}`,
+      `⏭ <b>Next prize:</b> ${evaluation.nextTp.rr} @ ${evaluation.nextTp.price.toLocaleString('en-IN')} · ${dist}${distR}`,
     );
   }
 
@@ -82,16 +82,16 @@ export function formatTelegramTpAlertMessage(params: {
     banner,
     `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
     TELEGRAM_MSG_RULE,
-    `📦 <b>Qty:</b> ${position.netQty} · premium avg ₹${position.buyAvg.toFixed(1)}`,
-    `${pnlSign.startsWith('+') ? '🟢' : '🔴'} <b>Open PnL:</b> ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-    `🧭 <b>Engine:</b> ${evaluation.signalAction} · ${evaluation.conviction}% conviction · ${escapeHtml(evaluation.bias)}`,
+    `📦 <b>Size:</b> ${position.netQty} · avg prem ₹${position.buyAvg.toFixed(1)}`,
+    `${pnlSign.startsWith('+') ? '🟢' : '🔴'} <b>Open P&amp;L:</b> ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+    `🧭 <b>Engine says:</b> ${evaluation.signalAction} · ${evaluation.conviction}% conviction · ${escapeHtml(evaluation.bias)}`,
     TELEGRAM_MSG_RULE,
     formatRrLine(evaluation),
     TELEGRAM_MSG_RULE,
-    `${advice} <b>Coach:</b> ${escapeHtml(evaluation.holdHeadline)}`,
+    `${advice} <b>Coach says:</b> ${escapeHtml(evaluation.holdHeadline)}`,
     reasons ? `💡 <b>Why</b>\n${reasons}` : null,
     TELEGRAM_MSG_RULE,
-    '📌 TP levels from live engine — trail as spot moves.',
+    '📌 TP levels track live — trail as spot moves in your favour.',
   ]
     .filter((line) => line != null)
     .join('\n');

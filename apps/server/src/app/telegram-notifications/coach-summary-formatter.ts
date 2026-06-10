@@ -56,24 +56,24 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
   const pnl = trade.pnlInr;
   const sign = pnl >= 0 ? '+' : '';
   const time = trade.entryAtISO.slice(11, 16);
-  const coaching = analysis.coaching[0] ?? 'Review entry and exit against system rules.';
+  const coaching = analysis.coaching[0] ?? 'Worth a replay — did entry and exit match your rules?';
   const optionLabel = trade.optionSymbol.split(':').pop() ?? trade.optionSymbol;
 
   return [
     `${verdictEmoji(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${trade.direction} · ${time}`,
     `   ${pnlEmoji(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
-    analysis.systemApproved ? '   🎯 System-approved at entry' : '   ⚡ Discretionary entry',
+    analysis.systemApproved ? '   🎯 Engine gave the thumbs-up at entry' : '   🎲 You went off-script at entry',
     `   💡 ${escapeHtml(coaching)}`,
   ].join('\n');
 }
 
 function formatSignalRecap(snapshots: SignalSnapshot[]): string {
-  if (!snapshots.length) return '📡 No signal snapshots stored for today.';
+  if (!snapshots.length) return '📡 No signal snapshots saved today — quiet on the wire.';
 
   return snapshots
     .map((snap) => {
       const label = shortSymbol(snap.symbol);
-      const ready = snap.shouldConsiderTrade ? '✅ trade-ready' : '⏸ below threshold';
+      const ready = snap.shouldConsiderTrade ? '✅ green light' : '⏸ below bar';
       return `📊 <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${snap.action} · ${snap.conviction}% conviction · ${ready}`;
     })
     .join('\n\n');
@@ -90,15 +90,15 @@ function formatStyleSection(
   if (summary.totalRoundTrips === 0) {
     const emptyTradeHint =
       coach.rawFillCount > 0
-        ? `📭 ${coach.rawFillCount} fill(s) — no closed round trips.\nSquare off for coaching replay.`
+        ? `📭 ${coach.rawFillCount} fill(s) logged — nothing closed yet.\nSquare off and I’ll grade the round trip.`
         : coach.source === 'fyers_tradebook'
-          ? '📭 No fills in today’s tradebook yet.'
-          : '📭 No fills for this date.';
+          ? '📭 Tradebook’s empty so far — the market owes you nothing yet.'
+          : '📭 No fills on this date.';
     return [
       `🎯 <b>${escapeHtml(style)}</b>`,
       emptyTradeHint,
       '',
-      '<b>Final signals</b>',
+      '<b>How the day ended (signals)</b>',
       formatSignalRecap(styleSnapshots),
     ].join('\n');
   }
@@ -123,13 +123,13 @@ function formatStyleSection(
     `🏁 ${summary.winCount}W / ${summary.lossCount}L · ${summary.systemApprovedCount} approved`,
     `📋 ✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
     '',
-    '<b>Trade review</b>',
+    '<b>Trade-by-trade replay</b>',
     tradeLines + more,
     '',
-    '<b>Coach takeaway</b>',
+    '<b>Real talk — what to fix tomorrow</b>',
     escapeHtml(takeaway),
     '',
-    '<b>Final signals</b>',
+    '<b>End-of-day signal snapshot</b>',
     formatSignalRecap(styleSnapshots),
   ].join('\n');
 }
@@ -138,7 +138,7 @@ function buildSessionTakeaway(coach: TradingCoachResponse): string {
   const { summary, trades } = coach;
 
   if (summary.totalRoundTrips === 0) {
-    return 'No trades to review today. Use the final signal state to plan tomorrow’s watchlist.';
+    return 'Flat day — no trades to roast. Use the signal snapshot to plan tomorrow’s watchlist.';
   }
 
   const ugly = trades.filter((t) => t.analysis.verdict === 'ugly');
@@ -150,40 +150,40 @@ function buildSessionTakeaway(coach: TradingCoachResponse): string {
   const parts: string[] = [];
 
   if (summary.verdicts.good > 0 && summary.verdicts.ugly === 0) {
-    parts.push('Process held up — focus on repeating system-approved entries.');
+    parts.push('Clean sheet on discipline — rinse and repeat the approved-entry playbook.');
   } else if (summary.verdicts.ugly > 0) {
     parts.push(
-      `${summary.verdicts.ugly} ugly trade(s): fix discipline leaks before sizing up.`,
+      `${summary.verdicts.ugly} ugly trade(s) — plug the leaks before you size up.`,
     );
   }
 
   if (ugly.length) {
     parts.push(
-      'Worst leak: entries without system approval — skip these setups tomorrow.',
+      'Biggest leak: entries the engine didn’t bless — walk past those tomorrow.',
     );
   }
 
   if (discretionaryWins.length) {
     parts.push(
-      `${discretionaryWins.length} discretionary win(s) — do not loosen filters because of these.`,
+      `${discretionaryWins.length} lucky off-script win(s) — don’t let them fool you into loosening rules.`,
     );
   }
 
   if (earlyExits.length) {
     parts.push(
-      `${earlyExits.length} early exit(s) — spot kept moving in your favor after you left.`,
+      `${earlyExits.length} early bail(s) — spot kept paying after you left the party.`,
     );
   }
 
   if (summary.systemApprovedCount < summary.analyzed) {
     parts.push(
-      `${summary.analyzed - summary.systemApprovedCount} trade(s) were not system-approved at entry.`,
+      `${summary.analyzed - summary.systemApprovedCount} trade(s) started without engine approval.`,
     );
   }
 
   return parts.length
     ? parts.join(' ')
-    : 'Review each trade against entry conviction and exit timing before the next session.';
+    : 'Quick replay: did every entry earn its conviction and every exit earn its keep?';
 }
 
 export function formatTelegramCoachOnDemandMessage(params: {
@@ -207,22 +207,22 @@ export function formatTelegramCoachOnDemandMessage(params: {
           `${totalTrades} round trip(s)`,
         ].join('\n')
       : anyFills
-        ? '📭 Fills found — no closed round trips yet.\nSquare off for coaching replay.'
-        : '📭 No round trips this session.';
+        ? '📭 Fills on the book — nothing squared off yet.\nClose a round trip and I’ll grade it.'
+        : '📭 No closed trades today — sometimes the best trade is no trade.';
 
   const body = [
-    '📚 <b>Coach</b>',
-    `📅 ${dateLabel} · tradebook`,
+    '📚 <b>Coach mode</b>',
+    `📅 ${dateLabel} · straight from your tradebook`,
     TELEGRAM_MSG_RULE,
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
     TELEGRAM_MSG_RULE,
-    '🧠 Replay: index price only (no option flow).',
+    '🧠 Replay uses index price only — option flow wasn’t in the room.',
   ].join('\n\n');
 
   if (body.length <= 3900) return body;
-  return `${body.slice(0, 3850)}\n\n… message trimmed for Telegram length limit`;
+  return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
 }
 
 export function formatTelegramCoachSummaryMessage(params: {
@@ -244,21 +244,21 @@ export function formatTelegramCoachSummaryMessage(params: {
           `${pnlEmoji(totalPnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
           `${totalTrades} round trip(s)`,
         ].join('\n')
-      : '📭 No round trips across watched styles.';
+      : '📭 No closed trades across your watched styles.';
 
   const body = [
-    '🏁 <b>Session coach</b>',
-    `📅 ${dateLabel} · NSE close`,
+    '🏁 <b>Day’s wrap</b>',
+    `📅 ${dateLabel} · bell rang at NSE close`,
     TELEGRAM_MSG_RULE,
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
     TELEGRAM_MSG_RULE,
-    '🧠 Replay: index price only (no option flow).',
+    '🧠 Replay uses index price only — option flow wasn’t in the room.',
   ].join('\n\n');
 
   if (body.length <= 3900) return body;
-  return `${body.slice(0, 3850)}\n\n… message trimmed for Telegram length limit`;
+  return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
 }
 
 export { FYERS_AUTH_ERROR_REPLY } from './fyers-login-reminder';
@@ -281,10 +281,10 @@ export function formatTelegramCoachOnDemandErrorMessage(params: {
 }): string {
   const dateLabel = formatIstDateLabel(params.sessionDate);
   return [
-    '📚 <b>Coach</b>',
+    '📚 <b>Coach mode</b>',
     `📅 ${dateLabel}`,
     TELEGRAM_MSG_RULE,
-    `⚠️ Could not load tradebook: ${escapeHtml(params.error)}`,
+    `😬 Couldn’t pull your tradebook: ${escapeHtml(params.error)}`,
   ].join('\n');
 }
 
@@ -295,12 +295,12 @@ export function formatTelegramCoachErrorMessage(params: {
 }): string {
   const dateLabel = formatIstDateLabel(params.sessionDate);
   return [
-    '🏁 <b>Session coach</b>',
+    '🏁 <b>Day’s wrap</b>',
     `📅 ${dateLabel}`,
     TELEGRAM_MSG_RULE,
-    `⚠️ Could not analyze trades: ${escapeHtml(params.error)}`,
+    `😬 Trade review hit a wall: ${escapeHtml(params.error)}`,
     '',
-    '<b>Final signals</b>',
+    '<b>End-of-day signal snapshot</b>',
     formatSignalRecap(params.snapshots),
   ].join('\n');
 }

@@ -63,3 +63,30 @@ export function parseSymbolStyleCommandArgs(
 export function shortIndexLabel(symbol: string): string {
   return symbol.split(':')[1]?.replace('-INDEX', '') ?? symbol;
 }
+
+/** Parse `/beststrike`, `/beststrike CE`, `/beststrike NIFTY INTRADAY`, etc. */
+export function parseBestStrikeCommandArgs(
+  text: string,
+  defaults: { symbol: string; style: TradingStyle },
+): { symbol: string; style: TradingStyle; side?: 'CE' | 'PE' } {
+  const parts = text.split(/\s+/).filter(Boolean).slice(1);
+  let symbol = defaults.symbol;
+  let style = defaults.style;
+  let side: 'CE' | 'PE' | undefined;
+
+  for (const part of parts) {
+    const upper = part.toUpperCase();
+    if (upper === 'CE' || upper === 'PE') {
+      side = upper as 'CE' | 'PE';
+      continue;
+    }
+    const parsedStyle = parseTradingStyleArg(part);
+    if (parsedStyle) {
+      style = parsedStyle;
+      continue;
+    }
+    symbol = resolveIndexSymbol(part);
+  }
+
+  return { symbol, style, side };
+}

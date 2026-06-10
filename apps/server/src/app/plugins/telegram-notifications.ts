@@ -18,11 +18,19 @@ import {
   SessionCoachState,
 } from '../telegram-notifications/session-coach';
 import {
+  isPreSessionLearningEnabled,
+  loadSessionLearningState,
+  saveSessionLearningState,
+  sendPreSessionLearningBrief,
+  SessionLearningState,
+} from '../telegram-notifications/session-learning';
+import {
   buildSignalSnapshot,
   detectSignalChange,
   getIstSessionClock,
   isIndianMarketOpen,
   isWithinPostSessionCoachWindow,
+  isWithinPreSessionLearningWindow,
   snapshotKey,
 } from '../telegram-notifications/signal-tracker';
 import { saveAlertWhyContext } from '../telegram-notifications/alert-context-store';
@@ -99,6 +107,11 @@ export default fp(
     let lastPollAt: Date | null = null;
     let lastPollError: string | null = null;
     let sessionCoachState: SessionCoachState = {
+      lastSessionDate: null,
+      lastSentAt: null,
+      lastError: null,
+    };
+    let sessionLearningState: SessionLearningState = {
       lastSessionDate: null,
       lastSentAt: null,
       lastError: null,
@@ -323,6 +336,85 @@ export default fp(
       return snapshots;
     }
 
+    async function maybeSendPreSessionLearning(options?: {
+      force?: boolean;
+    }): Promise<void> {
+      if (!isPreSessionLearningEnabled()) return;
+
+      fastify.fyersUsage.beginScope('telegram-learning');
+      try {
+        const sessionReady = await fastify.ensureFyersSession({
+          verifyWithApi: true,
+        });
+        if (!sessionReady) {
+          fastify.log.debug(
+            'Pre-session learning skipped — Fyers token missing or API rejected',
+          );
+          return;
+        }
+
+        const now = Date.now();
+        const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+        const inWindow = isWithinPreSessionLearningWindow(
+          now,
+          timezone,
+          TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_START,
+          TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_END,
+        );
+
+        if (!options?.force && !inWindow) return;
+
+        const { sessionDate } = getIstSessionClock(now, timezone);
+        sessionLearningState = await loadSessionLearningState(
+          fastify,
+          sessionLearningState,
+        );
+
+        if (!options?.force && sessionLearningState.lastSessionDate === sessionDate) {
+          return;
+        }
+
+        try {
+          await sendPreSessionLearningBrief(fastify, {
+            watchedSymbols,
+            watchedStyles,
+            sendMessage: (text) =>
+              sendTelegramMessage(text, { channel: 'default' }),
+          });
+          sessionLearningState = await saveSessionLearningState(
+            fastify,
+            sessionLearningState,
+            {
+              lastSessionDate: sessionDate,
+              lastSentAt: new Date(),
+              lastError: null,
+            },
+          );
+          fastify.log.info(
+            { sessionDate },
+            'Telegram pre-session learning brief sent',
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          sessionLearningState = await saveSessionLearningState(
+            fastify,
+            sessionLearningState,
+            {
+              lastSessionDate: sessionDate,
+              lastSentAt: new Date(),
+              lastError: msg,
+            },
+          );
+          fastify.log.error(
+            { err, sessionDate },
+            'Telegram pre-session learning brief failed',
+          );
+        }
+      } finally {
+        fastify.fyersUsage.endScope('telegram-learning');
+      }
+    }
+
     async function maybeSendSessionCoachSummary(options?: {
       force?: boolean;
       coachOnly?: boolean;
@@ -427,10 +519,18 @@ export default fp(
         TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
         TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
       );
+      const inPreSessionWindow =
+        isPreSessionLearningEnabled() &&
+        isWithinPreSessionLearningWindow(
+          now,
+          timezone,
+          TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_START,
+          TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_END,
+        );
 
-      if (!options?.force && !marketOpen && !inCoachWindow) {
+      if (!options?.force && !marketOpen && !inCoachWindow && !inPreSessionWindow) {
         fastify.log.debug(
-          'Telegram poll skipped — outside market hours and coach window',
+          'Telegram poll skipped — outside market, coach, and pre-session windows',
         );
         return;
       }
@@ -450,6 +550,17 @@ export default fp(
       }
 
       lastFyersLoginReminderAt = null;
+
+      if (inPreSessionWindow || options?.force) {
+        try {
+          await maybeSendPreSessionLearning(options);
+        } catch (err) {
+          fastify.log.error(
+            { err },
+            'Telegram pre-session learning step failed',
+          );
+        }
+      }
 
       if (!options?.coachOnly && (marketOpen || options?.force)) {
         const spotBySymbol: Record<string, number> = {};
@@ -592,6 +703,14 @@ export default fp(
           TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_OPEN,
           TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
         ),
+        preSessionLearningWindow:
+          isPreSessionLearningEnabled() &&
+          isWithinPreSessionLearningWindow(
+            now,
+            timezone,
+            TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_START,
+            TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_END,
+          ),
         postSessionCoachWindow: isWithinPostSessionCoachWindow(
           now,
           timezone,
@@ -608,6 +727,11 @@ export default fp(
           ? sessionCoachState.lastSentAt.toISOString()
           : null,
         lastCoachSummaryError: sessionCoachState.lastError,
+        lastLearningBriefSessionDate: sessionLearningState.lastSessionDate,
+        lastLearningBriefAt: sessionLearningState.lastSentAt
+          ? sessionLearningState.lastSentAt.toISOString()
+          : null,
+        lastLearningBriefError: sessionLearningState.lastError,
         openPositionsMonitored,
         openPositionsTracked,
         lastTpAlertAt: lastTpAlertAt ? lastTpAlertAt.toISOString() : null,
@@ -648,6 +772,10 @@ export default fp(
         sessionCoachState = await loadSessionCoachState(
           fastify,
           sessionCoachState,
+        );
+        sessionLearningState = await loadSessionLearningState(
+          fastify,
+          sessionLearningState,
         );
         startPolling();
         if (allowedUserIds.size === 0) {

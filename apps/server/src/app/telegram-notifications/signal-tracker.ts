@@ -188,6 +188,22 @@ export function isIndianMarketOpen(
   return mins >= openMins && mins <= closeMins;
 }
 
+/** Before the official open — window for the once-per-day pre-session learning brief. */
+export function isWithinPreSessionLearningWindow(
+  now = Date.now(),
+  timezone = 'Asia/Kolkata',
+  windowStart = { hour: 9, minute: 0 },
+  windowEnd = { hour: 9, minute: 20 },
+): boolean {
+  if (!isIndianWeekday(now, timezone)) return false;
+
+  const { mins } = getIstSessionClock(now, timezone);
+  const startMins = windowStart.hour * 60 + windowStart.minute;
+  const endMins = windowEnd.hour * 60 + windowEnd.minute;
+
+  return mins >= startMins && mins <= endMins;
+}
+
 /** After the official close, while the server can still send the daily coach once. */
 export function isWithinPostSessionCoachWindow(
   now = Date.now(),
