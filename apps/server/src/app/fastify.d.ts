@@ -1,6 +1,6 @@
 import 'fastify';
 import { fyersModel, FyersAPI } from 'fyers-api-v3';
-import { FastifyMongoObject } from '@fastify/mongodb';
+import type { Db, MongoClient, ObjectId } from 'mongodb';
 import {
   DirectionBias,
   IndicatorImpact,
@@ -57,7 +57,11 @@ export interface ScoreComponents {
 declare module 'fastify' {
   interface FastifyInstance {
     fyers: fyersModel;
-    mongo: FastifyMongoObject;
+    mongo?: {
+      client: MongoClient;
+      ObjectId: typeof ObjectId;
+      db?: Db;
+    };
     utilsPlugin: {
       norm: (x: number, scale?: number) => number;
       interpretRange: (value: number) => string;

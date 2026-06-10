@@ -1,6 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
-import mongodb from '@fastify/mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
+
+function parseDatabaseName(url: string): string | undefined {
+  const match = url.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^?]+)/);
+  return match?.[1] || undefined;
+}
 
 export default fp(
   async (fastify: FastifyInstance) => {
@@ -19,17 +24,30 @@ export default fp(
       return;
     }
 
+    const client = new MongoClient(url, {
+      serverSelectionTimeoutMS: 8000,
+      connectTimeoutMS: 8000,
+    });
+
     try {
-      await fastify.register(mongodb, {
-        forceClose: true,
-        url,
-        serverSelectionTimeoutMS: 10000,
+      await client.connect();
+      const dbName = parseDatabaseName(url);
+      const db = dbName ? client.db(dbName) : client.db();
+      await db.command({ ping: 1 });
+
+      fastify.decorate('mongo', { client, ObjectId, db });
+      fastify.addHook('onClose', async () => {
+        await client.close(true);
       });
-      fastify.log.info('MongoDB connected');
+      fastify.log.info(
+        { database: db.databaseName },
+        'MongoDB connected',
+      );
     } catch (err) {
+      await client.close(true).catch(() => undefined);
       fastify.log.error(
         { err },
-        'MongoDB connection failed — server will start without persistence (fix MONGODB_URL / Atlas network access / use Node 20)',
+        'MongoDB unavailable — server starting without persistence. Fix Atlas Network Access (allow 0.0.0.0/0) and verify MONGODB_URL.',
       );
     }
   },
