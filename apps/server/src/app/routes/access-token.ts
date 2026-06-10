@@ -22,7 +22,7 @@ export default async function accessTokenRoutes(fastify: FastifyInstance) {
 
       if (authResponse.s === ResponseStatus.ok) {
         fastify.fyers.setAccessToken(authResponse.access_token);
-        fastify.mongo.db?.collection('access-tokens').insertOne({
+        await fastify.mongo?.db?.collection('access-tokens').insertOne({
           token: authResponse.access_token,
           timestamp: Date.now(),
         });

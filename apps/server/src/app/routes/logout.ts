@@ -17,7 +17,7 @@ export default async function logoutRoutes(fastify: FastifyInstance) {
 
       if (response.s === ResponseStatus.ok) {
         fastify.fyers.setAccessToken('');
-        fastify.mongo.db?.collection('access-tokens').deleteMany({});
+        await fastify.mongo?.db?.collection('access-tokens').deleteMany({});
 
         return reply
           .status(response.code)
