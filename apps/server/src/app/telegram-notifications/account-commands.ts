@@ -6,14 +6,10 @@ import {
   parseSymbolStyleCommandArgs,
   shortIndexLabel,
 } from './command-args';
-import { scenarioRule } from './message-layout';
 import { formatPositionSizingTelegramSection } from './message-formatter';
 import {
   formatScenarioBanner,
-  formatSectionHeader,
   scenarioForAction,
-  tintLine,
-  wrapScenarioCallout,
 } from './telegram-palette';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
 
@@ -56,38 +52,28 @@ export function formatRiskRewardTelegramMessage(params: {
 
   if (!setup || setup.risk <= 0 || !setup.takeProfits?.length) {
     return [
-      formatScenarioBanner(actionScenario, `RR map · ${escapeHtml(label)} · ${params.tradingStyle}`),
-      scenarioRule(actionScenario),
-      wrapScenarioCallout('muted', '<b>💤 No live setup</b>', [
-        'Need a directional signal with entry + stop first.',
-        tintLine(actionScenario, `${signal.action} · ${signal.confidence}% confidence`),
-        signal.vetoReason ? escapeHtml(signal.vetoReason) : null,
-      ].filter((line): line is string => line != null)),
+      formatScenarioBanner(actionScenario, `RR · ${escapeHtml(label)} · ${params.tradingStyle}`),
+      `${signal.action} ${signal.confidence}%${signal.vetoReason ? ` — ${escapeHtml(signal.vetoReason)}` : ''}`,
+      '💤 No entry/stop setup yet.',
     ].join('\n');
   }
 
   const tpLines = setup.takeProfits.map((tp) => {
     const dist = Math.abs(tp.price - setup.entry);
-    const dir = tp.price >= setup.entry ? '+' : '−';
-    return `• <b>${tp.rr}</b> @ ${tp.price.toLocaleString('en-IN')} (${dir}${dist.toFixed(1)} pts · ${tp.multiplier}R)`;
+    return `<b>${tp.rr}</b> @ ${tp.price.toLocaleString('en-IN')} (+${dist.toFixed(0)}pts)`;
   });
 
   const lines = [
-    formatScenarioBanner(actionScenario, `RR map · ${escapeHtml(label)} · ${params.tradingStyle}`),
-    scenarioRule(actionScenario),
-    tintLine(actionScenario, `${signal.action} · ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`),
-    tintLine('pick', `<b>Entry line:</b> ${setup.entry.toLocaleString('en-IN')}`),
-    tintLine('danger', `<b>Pain line:</b> ${setup.stopLoss.toLocaleString('en-IN')} · <b>${setup.risk.toFixed(1)} pts</b> risk`),
-    '',
-    formatSectionHeader('success', 'Profit checkpoints', '🏁'),
-    ...tpLines.map((line) => tintLine('success', line.replace(/^•\s*/, ''))),
+    formatScenarioBanner(actionScenario, `RR · ${escapeHtml(label)} · ${params.tradingStyle}`),
+    `${signal.action} ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`,
+    `🎯 Entry ${setup.entry.toLocaleString('en-IN')} · 🛑 SL ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`,
+    `🏁 ${tpLines.join(' · ')}`,
   ];
 
   if (setup.stopAdjusted && setup.stopAdjustReason) {
-    lines.push('', `ℹ️ ${escapeHtml(setup.stopAdjustReason)}`);
+    lines.push(`ℹ️ ${escapeHtml(setup.stopAdjustReason)}`);
   }
 
-  lines.push('', '💡 These are index levels — translate to premium using your strike’s delta.');
   return lines.join('\n');
 }
 
@@ -176,17 +162,16 @@ export async function buildPositionSizingTelegramMessage(
 
   const actionScenario = scenarioForAction(action);
   const lines = [
-    formatScenarioBanner(actionScenario, `How many lots? · ${escapeHtml(label)} · ${style}`),
-    scenarioRule(actionScenario),
-    tintLine(actionScenario, `${priceData.signal.action} · ${priceData.signal.confidence}% confidence`),
+    formatScenarioBanner(actionScenario, `Size · ${escapeHtml(label)} · ${style}`),
+    `${priceData.signal.action} ${priceData.signal.confidence}%`,
   ];
 
   if (setup && setup.risk > 0) {
     lines.push(
-      `🎯 Entry ${setup.entry.toLocaleString('en-IN')} · stop ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)} pts)`,
+      `🎯 ${setup.entry.toLocaleString('en-IN')} · 🛑 ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`,
     );
   }
 
-  lines.push('', sizingBlock ?? '⚠️ Sizing math unavailable right now.');
+  lines.push(sizingBlock ?? '⚠️ Sizing unavailable.');
   return { message: lines.join('\n') };
 }

@@ -5,8 +5,6 @@ import {
 } from '../types/greeks-strike-insight';
 import {
   formatSectionHeader,
-  iconLine,
-  tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
 
@@ -42,33 +40,15 @@ export function pickGammaBlastProfile(
 function nearMoneyNote(
   profile: GreeksStrikeProfile,
   spot: number,
-  optionSide: 'CE' | 'PE',
 ): string | null {
   const pts = Math.abs(spot - profile.strike);
   if (pts > 150) return null;
-
-  const zone =
-    profile.moneyness === 'ATM'
-      ? 'at-the-money'
-      : profile.moneyness === 'ITM'
-        ? '1-strike ITM'
-        : '1-strike OTM';
-
-  return iconLine(
-    '📍',
-    tintLine(
-      'info',
-      `Spot ${formatInr(spot)} · strike ${formatInr(profile.strike)} (${zone} ${optionSide}) — ` +
-        `only ${pts} pts away, gamma stays hot (≥85% of ATM Γ).`,
-    ),
-  );
+  return `📍 ${pts} pts from spot`;
 }
 
 function formatGammaValue(profile: GreeksStrikeProfile): string {
-  if (profile.gamma == null) {
-    return `Γ ${profile.gammaLevel}`;
-  }
-  return `Γ ${profile.gamma.toFixed(4)} · ${profile.gammaLevel}`;
+  if (profile.gamma == null) return profile.gammaLevel;
+  return `${profile.gamma.toFixed(4)} (${profile.gammaLevel})`;
 }
 
 export function formatGammaBlastCallout(params: {
@@ -84,22 +64,9 @@ export function formatGammaBlastCallout(params: {
   );
 
   const body = [
-    tintLine(
-      'gamma',
-      `<b>${top.moneyness}</b> ${formatInr(top.strike)} · ${formatGammaValue(top)}`,
-    ),
-    nearMoneyNote(top, params.spot, params.insight.optionSide),
-    tintLine(
-      'gamma',
-      '<i>Fastest premium mover</i> if spot breaks — not a direction forecast.',
-    ),
-    tintLine('gamma', escapeHtml(top.consequence)),
-    runner
-      ? tintLine(
-          'gamma',
-          `Also hot: <b>${runner.moneyness}</b> ${formatInr(runner.strike)}`,
-        )
-      : null,
+    `<b>${top.moneyness}</b> ${formatInr(top.strike)} · Γ ${formatGammaValue(top)}`,
+    nearMoneyNote(top, params.spot),
+    runner ? `Also hot: ${runner.moneyness} ${formatInr(runner.strike)}` : null,
   ].filter((line): line is string => line != null);
 
   return wrapScenarioCallout(
@@ -119,12 +86,8 @@ export function formatEnginePickCallout(
       : '';
 
   return wrapScenarioCallout('pick', title, [
-    tintLine('pick', `<code>${escapeHtml(strike.fyersSymbol)}</code>`),
-    tintLine(
-      'pick',
-      `<b>${strike.moneyness}</b> @ ${formatInr(strike.strike)} · prem ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
-    ),
-    tintLine('pick', escapeHtml(strike.rationale)),
+    `<code>${escapeHtml(strike.fyersSymbol)}</code>`,
+    `${strike.moneyness} @ ${formatInr(strike.strike)} · ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
   ]);
 }
 
@@ -140,5 +103,5 @@ export function gammaRowPrefix(profile: GreeksStrikeProfile): string {
 
 export function formatGreeksSectionHeader(optionSide: 'CE' | 'PE'): string {
   const scenario = optionSide === 'CE' ? 'bullish' : 'bearish';
-  return formatSectionHeader(scenario, `Greeks cheat sheet · ${optionSide}`, '📐');
+  return formatSectionHeader(scenario, `Greeks · ${optionSide}`, '📐');
 }

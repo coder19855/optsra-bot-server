@@ -53,6 +53,11 @@ import {
 } from '../telegram-notifications/telegram-message-journal';
 import { TelegramCommandPoller } from '../telegram-notifications/telegram-commands';
 import {
+  loadPollingPauseState,
+  PollingPauseState,
+  savePollingPauseState,
+} from '../telegram-notifications/polling-pause';
+import {
   SignalSnapshot,
   TelegramNotificationStatus,
   TelegramSendOptions,
@@ -115,6 +120,10 @@ export default fp(
       lastSessionDate: null,
       lastSentAt: null,
       lastError: null,
+    };
+    let pollingPauseState: PollingPauseState = {
+      alertsPaused: false,
+      pausedAt: null,
     };
     const tpMemory = new Map<string, TpMonitorSnapshot>();
     let lastTpAlertAt: Date | null = null;
@@ -551,7 +560,9 @@ export default fp(
 
       lastFyersLoginReminderAt = null;
 
-      if (inPreSessionWindow || options?.force) {
+      const alertsPaused = pollingPauseState.alertsPaused;
+
+      if ((inPreSessionWindow || options?.force) && !alertsPaused) {
         try {
           await maybeSendPreSessionLearning(options);
         } catch (err) {
@@ -563,31 +574,37 @@ export default fp(
       }
 
       if (!options?.coachOnly && (marketOpen || options?.force)) {
-        const spotBySymbol: Record<string, number> = {};
+        if (!alertsPaused) {
+          const spotBySymbol: Record<string, number> = {};
 
-        for (const symbol of watchedSymbols) {
-          for (const style of watchedStyles) {
-            try {
-              const result = await evaluateAndNotify(symbol, style, options);
-              spotBySymbol[symbol] = result.snapshot.lastPrice;
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              lastPollError = msg;
-              fastify.log.error(
-                { err, symbol, style },
-                'Telegram notification poll failed for watch item',
-              );
+          for (const symbol of watchedSymbols) {
+            for (const style of watchedStyles) {
+              try {
+                const result = await evaluateAndNotify(symbol, style, options);
+                spotBySymbol[symbol] = result.snapshot.lastPrice;
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                lastPollError = msg;
+                fastify.log.error(
+                  { err, symbol, style },
+                  'Telegram notification poll failed for watch item',
+                );
+              }
             }
           }
-        }
 
-        try {
-          await updateOpenSignalOutcomes(fastify, {
-            symbols: watchedSymbols,
-            spotBySymbol,
-          });
-        } catch (err) {
-          fastify.log.warn({ err }, 'Signal outcome tracker update failed');
+          try {
+            await updateOpenSignalOutcomes(fastify, {
+              symbols: watchedSymbols,
+              spotBySymbol,
+            });
+          } catch (err) {
+            fastify.log.warn({ err }, 'Signal outcome tracker update failed');
+          }
+        } else {
+          fastify.log.debug(
+            'Telegram signal poll skipped — alerts paused by user',
+          );
         }
 
         try {
@@ -696,6 +713,10 @@ export default fp(
         alertChannels: buildAlertChannelStatus(chatId),
         soundRoutingNote: TELEGRAM_SOUND_ROUTING_NOTE,
         polling: pollTimer != null,
+        alertsPaused: pollingPauseState.alertsPaused,
+        alertsPausedAt: pollingPauseState.pausedAt
+          ? pollingPauseState.pausedAt.toISOString()
+          : null,
         pollIntervalMs,
         marketOpen: isIndianMarketOpen(
           now,
@@ -752,6 +773,42 @@ export default fp(
       };
     }
 
+    async function setAlertsPaused(paused: boolean): Promise<void> {
+      pollingPauseState = await savePollingPauseState(
+        fastify,
+        pollingPauseState,
+        {
+          alertsPaused: paused,
+          pausedAt: paused ? new Date() : null,
+        },
+      );
+      fastify.log.info(
+        { alertsPaused: paused },
+        paused
+          ? 'Telegram signal alerts paused by user'
+          : 'Telegram signal alerts resumed',
+      );
+    }
+
+    async function resumeAlertsAfterLogin(): Promise<boolean> {
+      const wasPaused = pollingPauseState.alertsPaused;
+      if (!wasPaused) return false;
+
+      await setAlertsPaused(false);
+      try {
+        await sendTelegramMessage(
+          [
+            '✅ <b>Fyers connected</b>',
+            '▶️ Signal alerts resumed — you’re back on the watch.',
+          ].join('\n'),
+          { channel: 'default' },
+        );
+      } catch (err) {
+        fastify.log.warn({ err }, 'Failed to send login resume Telegram notice');
+      }
+      return true;
+    }
+
     fastify.decorate('telegramNotifications', {
       isConfigured: () => configured,
       isEnabled: () => enabled && configured,
@@ -763,6 +820,9 @@ export default fp(
         return pollAll(options);
       },
       getStatus,
+      isAlertsPaused: () => pollingPauseState.alertsPaused,
+      setAlertsPaused,
+      resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
     });
@@ -777,6 +837,16 @@ export default fp(
           fastify,
           sessionLearningState,
         );
+        pollingPauseState = await loadPollingPauseState(
+          fastify,
+          pollingPauseState,
+        );
+        if (pollingPauseState.alertsPaused) {
+          fastify.log.info(
+            { pausedAt: pollingPauseState.pausedAt },
+            'Telegram signal alerts loaded in paused state',
+          );
+        }
         startPolling();
         if (allowedUserIds.size === 0) {
           fastify.log.warn(

@@ -81,8 +81,7 @@ function formatNeutralStrikeOverview(params: {
   spot: number;
 }): string[] {
   const sections: string[] = [
-    '🤷 No clear CE/PE lean — scouting both sides below.',
-    'Zoom in with <code>/beststrike CE</code> or <code>/beststrike PE</code>.',
+    '🤷 No lean — try <code>/beststrike CE</code> or <code>PE</code>',
   ];
 
   for (const side of ['CE', 'PE'] as const) {
@@ -94,14 +93,12 @@ function formatNeutralStrikeOverview(params: {
     const pick = params.exactStrikes[side]
       ? formatEnginePickCallout(
           params.exactStrikes[side],
-          `🎯 <b>ENGINE PICK · if ${side} rips</b>`,
+          `<b>ENGINE PICK · ${side}</b>`,
         )
       : null;
-    const greeks = formatGreeksStrikeSection(insight ?? undefined);
 
     if (blast) sections.push('', blast);
     if (pick) sections.push('', pick);
-    if (greeks) sections.push('', greeks);
   }
 
   return sections;
@@ -193,10 +190,6 @@ export async function buildBestStrikeTelegramMessage(
         spot: payload.lastPrice,
       }),
     );
-    lines.push(
-      '',
-      `🤯 <b>GAMMA BLAST</b> = fastest premium mover. 🎯 <b>ENGINE PICK</b> = what we’d actually trade.`,
-    );
     return { message: lines.join('\n') };
   }
 
@@ -211,23 +204,17 @@ export async function buildBestStrikeTelegramMessage(
   const enginePick = exactStrikes[activeSide]
     ? formatEnginePickCallout(exactStrikes[activeSide])
     : null;
-  const greeks = formatGreeksStrikeSection(insight ?? undefined);
+  const greeks =
+    blast || enginePick
+      ? null
+      : formatGreeksStrikeSection(insight ?? undefined);
 
   if (blast) lines.push('', blast);
   if (enginePick) lines.push('', enginePick);
   if (greeks) lines.push('', greeks);
 
   if (!blast && !enginePick && !greeks) {
-    lines.push(
-      '',
-      '⚠️ Chain or Greeks ghosted us — retry in market hours with Fyers logged in.',
-    );
-  } else {
-    lines.push(
-      '',
-      `🎯 <b>ENGINE PICK</b> → style + conviction + IV (what to trade).`,
-      `🤯 <b>GAMMA BLAST</b> → highest Γ near spot (fastest premium if spot runs).`,
-    );
+    lines.push('', '⚠️ No chain data — retry in market hours.');
   }
 
   return { message: lines.join('\n') };

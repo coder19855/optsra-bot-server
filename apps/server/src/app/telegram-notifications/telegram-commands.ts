@@ -38,6 +38,7 @@ import { buildBestStrikeTelegramMessage } from './best-strike-command';
 import { buildLearningTelegramMessage } from './session-learning';
 import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { parseClearCommandLimit } from './telegram-message-journal';
+import { formatTelegramStatusMessage } from './status-formatter';
 
 interface TelegramUpdate {
   update_id: number;
@@ -185,7 +186,11 @@ export class TelegramCommandPoller {
       } else if (command === '/help' || command === '/commands') {
         await this.handleHelp(text, replyChatId);
       } else if (command === '/start') {
-        await this.handleHelp('/help', replyChatId);
+        await this.handleStart(replyChatId);
+      } else if (command === '/stop') {
+        await this.handleStop(replyChatId);
+      } else if (command === '/status') {
+        await this.handleStatus(replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -303,6 +308,73 @@ export class TelegramCommandPoller {
   private async handleHelp(_text: string, replyChatId?: number): Promise<void> {
     await this.deps.sendMessage(
       this.helpText(),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleStop(replyChatId?: number): Promise<void> {
+    if (this.fastify.telegramNotifications.isAlertsPaused()) {
+      await this.deps.sendMessage(
+        [
+          '⏸ Already paused — no signal or pre-session pings.',
+          'TP/hold nudges and commands still work.',
+          'Resume with <code>/start</code> or <code>/login</code>.',
+        ].join('\n'),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.fastify.telegramNotifications.setAlertsPaused(true);
+    await this.deps.sendMessage(
+      [
+        '⏸ <b>Signal alerts paused</b>',
+        'No signal flips or pre-session briefs until you resume.',
+        'TP/hold nudges and commands still work.',
+        '',
+        'Resume: <code>/start</code> or <code>/login</code>',
+      ].join('\n'),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleStart(replyChatId?: number): Promise<void> {
+    if (!this.fastify.telegramNotifications.isAlertsPaused()) {
+      await this.deps.sendMessage(
+        '▶️ Alerts already active — nothing to resume. Cheat sheet: <code>/help</code>',
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    const sessionReady = await this.fastify.ensureFyersSession({
+      verifyWithApi: true,
+    });
+    if (!sessionReady) {
+      await this.deps.sendMessage(
+        [
+          '⚠️ Can’t resume yet — Fyers session isn’t live.',
+          'Log in first, then alerts turn back on automatically.',
+        ].join('\n'),
+        this.fyersAuthReplyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.fastify.telegramNotifications.setAlertsPaused(false);
+    await this.deps.sendMessage(
+      [
+        '▶️ <b>Signal alerts resumed</b>',
+        'You’re back on the watch for flips and pre-session briefs.',
+      ].join('\n'),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleStatus(replyChatId?: number): Promise<void> {
+    const status = await this.fastify.telegramNotifications.getStatus();
+    await this.deps.sendMessage(
+      formatTelegramStatusMessage(status),
       this.replyOptions(replyChatId),
     );
   }

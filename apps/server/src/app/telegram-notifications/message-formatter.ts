@@ -10,7 +10,6 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
-import { scenarioRule } from './message-layout';
 import {
   formatEnginePickCallout,
   formatGreeksSectionHeader,
@@ -23,7 +22,6 @@ import {
   scenarioForAction,
   scenarioForSignalFlip,
   scenarioForTradeReady,
-  tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
 
@@ -94,83 +92,44 @@ function paEmoji(action: string): string {
   return '➖';
 }
 
-function riskEmoji(risk?: string): string {
-  const r = (risk || '').toLowerCase();
-  if (r.includes('low')) return '✅';
-  if (r.includes('high')) return '🚨';
-  if (r.includes('medium') || r.includes('med')) return '⚠️';
-  return '💤';
-}
-
 function strategyRankEmoji(index: number): string {
   return ['🥇', '🥈', '🥉'][index] ?? '▫️';
-}
-
-function changeKindEmoji(kind: SignalChangeKind): string {
-  switch (kind) {
-    case 'ACTION':
-      return '🔀';
-    case 'PA_SIGNAL':
-      return '📊';
-    case 'BIAS':
-      return '🧭';
-    case 'TRADE_READY':
-      return '✅';
-    case 'STRATEGY':
-      return '🎯';
-    case 'INITIAL':
-      return '🚀';
-    default:
-      return '🔄';
-  }
 }
 
 function formatChangeLine(
   previous: SignalSnapshot | null,
   current: SignalSnapshot,
   kinds: SignalChangeKind[],
-): string {
-  if (!previous) return '🚀 First real setup of the session — eyes up.';
+): string | null {
+  if (!previous) return null;
 
   if (isSignalFlip(previous, current)) {
-    return `🚨 ${previous.action} ➜ ${current.action} — market changed its mind!`;
+    return `🚨 ${previous.action} ➜ ${current.action}`;
   }
 
   const parts: string[] = [];
   if (kinds.includes('ACTION') || kinds.includes('INITIAL')) {
-    parts.push(
-      `${changeKindEmoji('ACTION')} ${previous.action} ➜ ${current.action}`,
-    );
+    parts.push(`${previous.action} ➜ ${current.action}`);
   }
   if (kinds.includes('PA_SIGNAL')) {
-    parts.push(
-      `${changeKindEmoji('PA_SIGNAL')} PA ${previous.paAction} ➜ ${current.paAction}`,
-    );
+    parts.push(`PA ${previous.paAction} ➜ ${current.paAction}`);
   }
-  if (kinds.includes('BIAS')) {
-    parts.push(
-      `${changeKindEmoji('BIAS')} ${previous.bias} ➜ ${current.bias}`,
-    );
+  if (kinds.includes('BIAS') && previous.bias !== current.bias) {
+    parts.push(`${previous.bias} ➜ ${current.bias}`);
   }
   if (kinds.includes('TRADE_READY')) {
-    parts.push(`${changeKindEmoji('TRADE_READY')} Conviction bar cleared — trade-ready`);
+    parts.push('Trade-ready');
   }
   if (kinds.includes('STRATEGY')) {
     parts.push(
-      `${changeKindEmoji('STRATEGY')} ${previous.topStrategy || '—'} ➜ ${current.topStrategy || '—'}`,
+      `${previous.topStrategy || '—'} ➜ ${current.topStrategy || '—'}`,
     );
   }
-  return parts.join('\n') || '🔄 Signal updated';
+  return parts.length ? `🔄 ${parts.join(' · ')}` : null;
 }
 
 function formatInr(value: number, maximumFractionDigits = 0): string {
   return value.toLocaleString('en-IN', { maximumFractionDigits });
-}
-
-function tierLabel(label: string): string {
-  if (label === 'conservative') return '🛡 Conservative';
-  if (label === 'aggressive') return '⚡ Aggressive';
-  return '📏 Standard';
 }
 
 export function formatPositionSizingTelegramSection(
@@ -179,25 +138,20 @@ export function formatPositionSizingTelegramSection(
   if (!sizing) return null;
 
   if (sizing.unavailableReason && sizing.availableBalance == null) {
-    return wrapScenarioCallout('warning', '<b>🏦 Wallet check</b>', [
-      `⚠️ ${escapeHtml(sizing.unavailableReason)}`,
+    return wrapScenarioCallout('warning', '<b>🏦 Wallet</b>', [
+      escapeHtml(sizing.unavailableReason),
     ]);
   }
 
   const lines: string[] = [];
 
   if (sizing.availableBalance != null) {
-    lines.push(
-      `💳 <b>Available:</b> ₹${formatInr(sizing.availableBalance)}`,
-    );
-    if (sizing.totalBalance != null) {
-      lines.push(`📊 Total balance: ₹${formatInr(sizing.totalBalance)}`);
-    }
+    lines.push(`💳 ₹${formatInr(sizing.availableBalance)} available`);
   }
 
   if (sizing.unavailableReason) {
-    lines.push(tintLine('warning', escapeHtml(sizing.unavailableReason)));
-    return wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines);
+    lines.push(escapeHtml(sizing.unavailableReason));
+    return wrapScenarioCallout('info', '<b>🏦 Wallet</b>', lines);
   }
 
   if (
@@ -207,68 +161,27 @@ export function formatPositionSizingTelegramSection(
     sizing.riskPercent == null
   ) {
     return lines.length
-      ? wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines)
+      ? wrapScenarioCallout('info', '<b>🏦 Wallet</b>', lines)
       : null;
   }
 
-  const qtyPerLot = sizing.lotSize;
-  const recommendedQty = sizing.recommendedLots * qtyPerLot;
   const lotLabel =
     sizing.recommendedLots === 1
-      ? `1 lot (${qtyPerLot} qty)`
-      : `${sizing.recommendedLots} lots (${recommendedQty} qty)`;
+      ? `1 lot (${sizing.lotSize} qty)`
+      : `${sizing.recommendedLots} lots`;
 
   lines.push(
-    `🎯 <b>Recommended:</b> ${lotLabel} · ${escapeHtml(sizing.indexLabel)}`,
+    `🎯 ${lotLabel} · ${escapeHtml(sizing.indexLabel)}`,
   );
   lines.push(
-    `📉 Risk budget (${sizing.riskPercent}%): ₹${formatInr(sizing.riskBudgetInr)}`,
+    `🛑 ${sizing.riskPoints.toFixed(1)} pts · ${sizing.riskPercent}% risk · ₹${formatInr(sizing.riskBudgetInr)} budget`,
   );
-  lines.push(
-    `🛑 Stop risk: ${sizing.riskPoints.toFixed(1)} index pts · ₹${formatInr(sizing.riskPerLotInr ?? 0)}/lot`,
-  );
-
-  if (sizing.capitalAtRiskInr != null) {
-    lines.push(`💸 Capital at risk: ₹${formatInr(sizing.capitalAtRiskInr)}`);
-  }
-
-  if (sizing.marginRequiredInr != null && sizing.marginRequiredInr > 0) {
-    const util =
-      sizing.utilizationPercent != null
-        ? ` (${sizing.utilizationPercent}% of available)`
-        : '';
-    lines.push(
-      `🏧 Est. margin: ₹${formatInr(sizing.marginRequiredInr)}${util}`,
-    );
-  }
-
-  if (
-    sizing.atmStrike != null &&
-    sizing.atmPremium != null &&
-    sizing.optionSide
-  ) {
-    lines.push(
-      `📌 ATM ${sizing.optionSide} @ ${formatInr(sizing.atmStrike)} · premium ₹${sizing.atmPremium.toFixed(1)}`,
-    );
-  }
-
-  if (sizing.tiers?.length) {
-    const tierLine = sizing.tiers
-      .map(
-        (tier) =>
-          `${tierLabel(tier.label)}: ${tier.lots} lot${tier.lots === 1 ? '' : 's'}`,
-      )
-      .join(' · ');
-    lines.push(tierLine);
-  }
 
   if (sizing.recommendedLots < 1) {
-    lines.push(
-      tintLine('danger', 'Not enough room for even 1 lot at this stop — pass or top up.'),
-    );
+    lines.push('Not enough margin for 1 lot at this stop.');
   }
 
-  return wrapScenarioCallout('info', '<b>🏦 Wallet check (Fyers)</b>', lines);
+  return wrapScenarioCallout('info', '<b>🏦 Wallet</b>', lines);
 }
 
 function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
@@ -281,11 +194,7 @@ function formatExactStrikeSection(
   strike: TradeDecisionAlertPayload['exactStrikeRecommendation'],
 ): string | null {
   if (!strike) return null;
-
-  return [
-    formatEnginePickCallout(strike, '<b>🎯 STRIKE TICKET</b>'),
-    '💬 Curious? Hit <code>/why</code> for the full story',
-  ].join('\n');
+  return formatEnginePickCallout(strike, '<b>🎯 STRIKE</b>');
 }
 
 function formatAdaptiveConvictionLine(
@@ -295,74 +204,55 @@ function formatAdaptiveConvictionLine(
   if (!adaptive || adaptive.dataSource === 'defaults') return null;
 
   const meets = conviction >= adaptive.recommendedEnterThreshold;
-  const scenario = meets ? 'success' : 'warning';
-  return wrapScenarioCallout(scenario, '<b>📈 Your enter bar</b>', [
-    tintLine(scenario, `${adaptive.recommendedEnterThreshold}% from your alert history`),
-    tintLine(
-      scenario,
-      `🏆 ${adaptive.overallWinRate}% win rate · ${adaptive.sampleSize} past alerts`,
-    ),
-  ]);
+  const icon = meets ? '✅' : '⚠️';
+  return `${icon} Enter bar ${adaptive.recommendedEnterThreshold}% · ${adaptive.overallWinRate}% wins (${adaptive.sampleSize} alerts)`;
 }
 
 export function formatGreeksStrikeSection(
   insight: GreeksStrikeInsight | undefined,
+  options?: { includeBestFit?: boolean },
 ): string | null {
   if (!insight?.profiles.length) return null;
 
-  const lines: string[] = [
-    formatGreeksSectionHeader(insight.optionSide),
-    scenarioRule(insight.optionSide === 'CE' ? 'bullish' : 'bearish'),
-  ];
+  const lines: string[] = [formatGreeksSectionHeader(insight.optionSide)];
 
   for (const profile of insight.profiles) {
     const delta =
-      profile.delta != null ? `Δ ${profile.delta.toFixed(2)}` : 'Δ —';
-    const gamma = `${gammaEmoji(profile.gammaLevel)} Γ ${profile.gammaLevel}`;
-    const theta = profile.thetaLabel ? `Θ ${profile.thetaLabel}` : 'Θ —';
+      profile.delta != null ? `Δ${profile.delta.toFixed(2)}` : 'Δ—';
+    const gamma = `${gammaEmoji(profile.gammaLevel)}Γ ${profile.gammaLevel}`;
+    const theta = profile.thetaLabel ? `Θ${profile.thetaLabel}` : '';
     const premium =
-      profile.premium != null
-        ? ` · prem ₹${profile.premium.toFixed(1)}`
-        : '';
+      profile.premium != null ? ` · ₹${profile.premium.toFixed(0)}` : '';
 
     lines.push(
-      `${gammaRowPrefix(profile)}<b>${profile.moneyness}</b> ${formatInr(profile.strike)} · ${delta} · ${gamma} · ${theta}${premium}`,
+      `${gammaRowPrefix(profile)}<b>${profile.moneyness}</b> ${formatInr(profile.strike)} · ${delta} · ${gamma}${theta ? ` · ${theta}` : ''}${premium}`,
     );
-    lines.push(`↳ ${escapeHtml(profile.consequence)}`);
   }
 
-  lines.push(`💡 <b>Sweet spot for you:</b> ${escapeHtml(insight.bestFit)}`);
-  if (insight.ivNote) {
-    lines.push(`🌡 ${escapeHtml(insight.ivNote)}`);
+  if (options?.includeBestFit !== false) {
+    lines.push(`💡 ${escapeHtml(insight.bestFit)}`);
   }
 
   return lines.join('\n');
 }
 
-function formatStrategies(strategies: RecommendedStrategyAlert[]): string {
-  if (!strategies.length) {
-    return '🤷 No playbook match — eyeball option flow yourself this time.';
-  }
+function formatStrategies(strategies: RecommendedStrategyAlert[]): string | null {
+  if (!strategies.length) return null;
 
   return strategies
-    .slice(0, 3)
+    .slice(0, 2)
     .map((s, i) => {
       const rank = strategyRankEmoji(i);
-      const risk = riskEmoji(s.risk);
-      const lines = [
-        `${rank} <b>${escapeHtml(s.strategy)}</b>`,
-        s.confidenceScore != null
-          ? `   🎯 Confidence: ${s.confidenceScore}%`
-          : null,
-        s.risk ? `   ${risk} Risk: ${escapeHtml(s.risk)}` : null,
-        s.executionHint
-          ? `   ⚡ Execution: ${escapeHtml(s.executionHint)}`
-          : null,
-        s.reason ? `   💡 ${escapeHtml(s.reason)}` : null,
-      ].filter(Boolean);
-      return lines.join('\n');
+      const conf =
+        s.confidenceScore != null ? ` · ${s.confidenceScore}%` : '';
+      const hint = s.executionHint
+        ? ` — ${escapeHtml(s.executionHint)}`
+        : s.reason
+          ? ` — ${escapeHtml(s.reason)}`
+          : '';
+      return `${rank} <b>${escapeHtml(s.strategy)}</b>${conf}${hint}`;
     })
-    .join('\n\n');
+    .join('\n');
 }
 
 export function formatTelegramAlertMessage(params: {
@@ -381,9 +271,6 @@ export function formatTelegramAlertMessage(params: {
   const ofBias = payload.optionFlow?.bias;
   const change = formatChangeLine(previous, current, kinds);
   const strategies = formatStrategies(payload.recommendedStrategies);
-  const greeksStrike = formatGreeksStrikeSection(
-    payload.optionFlow?.greeksStrikeInsight,
-  );
   const exactStrike = formatExactStrikeSection(
     payload.exactStrikeRecommendation,
   );
@@ -393,51 +280,42 @@ export function formatTelegramAlertMessage(params: {
   );
   const meter = convictionMeter(payload.conviction);
   const biasIcon = biasEmoji(payload.bias);
-
   const readyScenario = scenarioForTradeReady(
     payload.tradeGuidance.shouldConsiderTrade,
   );
-  const tradeReady = tintLine(
-    readyScenario,
-    readyScenario === 'success'
-      ? 'Green light — conviction clears your bar'
-      : 'Yellow light — below bar, size down or wait',
-  );
-  const actionScenario = scenarioForAction(payload.action);
+  const readyIcon = readyScenario === 'success' ? '✅' : '⚠️';
+  const readyText =
+    readyScenario === 'success' ? 'Trade-ready' : 'Below bar — wait/size down';
+  const flowBits = [
+    `${paEmoji(pa.action)} PA ${pa.action} ${pa.confidence}%`,
+    ofBias ? `🌊 ${escapeHtml(ofBias)}` : null,
+    iv ? `🌡 ${escapeHtml(iv)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  const showGreeks = !exactStrike;
+  const compactGreeks = showGreeks
+    ? formatGreeksStrikeSection(payload.optionFlow?.greeksStrikeInsight, {
+        includeBestFit: false,
+      })
+    : null;
 
   return [
     banner,
-    `${emoji} <b>${escapeHtml(label)} · ${escapeHtml(payload.tradingStyle)} · ${payload.action}</b>`,
-    scenarioRule(actionScenario),
-    `${meter} <b>Conviction:</b> ${payload.conviction}%`,
-    `${biasIcon} <b>Vibe:</b> ${escapeHtml(payload.bias)}`,
-    `💰 <b>Spot:</b> ${payload.lastPrice.toLocaleString('en-IN')}`,
-    `${paEmoji(pa.action)} <b>Price action:</b> ${pa.action} (${pa.confidence}%)`,
-    ofBias ? `🌊 <b>Options desk:</b> ${escapeHtml(ofBias)}` : null,
-    iv ? `🌡 <b>IV mood:</b> ${escapeHtml(iv)}` : null,
+    `${emoji} <b>${escapeHtml(label)} · ${payload.tradingStyle} · ${payload.action}</b> · ${meter} ${payload.conviction}%`,
+    `💰 ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)}`,
+    flowBits || null,
     adaptiveLine,
-    scenarioRule(readyScenario),
-    formatSectionHeader(readyScenario, 'Should you pull the trigger?', '🧭'),
-    tradeReady,
-    payload.tradeGuidance.sizeRecommendation
-      ? `📏 ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}`
-      : null,
-    '',
+    `${readyIcon} ${readyText}${payload.tradeGuidance.sizeRecommendation ? ` · ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}` : ''}`,
     formatPositionSizingTelegramSection(payload.positionSizing),
-    '',
-    greeksStrike,
-    greeksStrike ? '' : null,
     exactStrike,
-    exactStrike ? '' : null,
-    formatSectionHeader('info', 'Playbook picks', '🎲'),
+    compactGreeks,
+    strategies ? formatSectionHeader('info', 'Playbook', '🎲') : null,
     strategies,
-    '',
-    formatSectionHeader(actionScenario, 'TL;DR', '🧠'),
-    escapeHtml(payload.humanSummary),
-    scenarioRule('info'),
-    formatSectionHeader('info', 'What just shifted', '🔄'),
+    `🧠 ${escapeHtml(payload.humanSummary)}`,
     change,
   ]
-    .filter((line) => line !== null)
+    .filter((line) => line !== null && line !== '')
     .join('\n');
 }

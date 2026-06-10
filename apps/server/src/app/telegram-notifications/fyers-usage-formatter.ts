@@ -4,12 +4,10 @@ import {
   FyersUsageHealth,
   FyersUsageResponse,
 } from '../types/fyers-usage';
-import { scenarioRule } from './message-layout';
 import {
   formatScenarioBanner,
   formatSectionHeader,
   scenarioForFyersHealth,
-  tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
 
@@ -130,32 +128,6 @@ function formatMethodTable(
   return `${formatSectionHeader('api', title)}\n<pre>${escapePre(table)}</pre>`;
 }
 
-function formatPollTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-}
-
-function formatRecentPollsTable(polls: FyersPollUsageSnapshot[]): string | null {
-  if (!polls.length) return null;
-
-  const rows = [
-    ['Time', 'Scope', 'Calls', 'ms'],
-    ...polls.slice(0, 6).map((poll) => [
-      formatPollTime(poll.at),
-      poll.scope.replace('telegram-', 'tg-'),
-      String(poll.total),
-      poll.durationMs != null ? String(poll.durationMs) : '—',
-    ]),
-  ];
-
-  return `${formatSectionHeader('api', 'Recent poll bursts', '📡')}\n<pre>${escapePre(buildTable(rows))}</pre>`;
-}
-
 function formatLastPollDetail(poll: FyersPollUsageSnapshot | null): string | null {
   if (!poll || poll.total === 0) return null;
 
@@ -171,9 +143,9 @@ function formatLastPollDetail(poll: FyersPollUsageSnapshot | null): string | nul
 
   const duration =
     poll.durationMs != null ? `${poll.durationMs}ms` : '—';
-  return wrapScenarioCallout('api', '<b>⚡ Last poll burst</b>', [
-    tintLine('api', `${poll.total} calls in ${duration}`),
-    topMethods ? tintLine('api', topMethods) : null,
+  return wrapScenarioCallout('api', '<b>⚡ Last poll</b>', [
+    `${poll.total} calls · ${duration}`,
+    topMethods ?? null,
   ].filter((line): line is string => line != null));
 }
 
@@ -181,49 +153,22 @@ export function formatFyersUsageTelegramMessage(
   stats: FyersUsageResponse,
 ): string {
   const sections = [
-    formatScenarioBanner('api', 'Fyers API meter'),
-    tintLine('info', `📅 IST session ${stats.istSessionDate}`),
-    scenarioRule('api'),
+    formatScenarioBanner('api', 'API meter'),
+    `📅 ${stats.istSessionDate}`,
     healthCallout(stats.health),
-    '',
-    formatSectionHeader('api', 'Limits vs usage', '📊'),
+    formatSectionHeader('api', 'Limits', '📊'),
     `<pre>${escapePre(formatLimitsTable(stats))}</pre>`,
   ];
 
   const sessionMethods = formatMethodTable(
     stats.totals.byMethodSession,
-    '📋 Today by endpoint',
+    'Today',
+    6,
   );
   if (sessionMethods) sections.push('', sessionMethods);
 
-  const last60Methods = formatMethodTable(
-    stats.rolling.last60SecondsByMethod,
-    '⏱ Last 60s by endpoint',
-    8,
-  );
-  if (last60Methods) sections.push('', last60Methods);
-
   const lastPoll = formatLastPollDetail(stats.lastTelegramPoll);
   if (lastPoll) sections.push('', lastPoll);
-
-  if (stats.rolling.estimatedPerMinuteFromLastPoll != null) {
-    sections.push(
-      tintLine(
-        'warning',
-        `If every poll matched the last one: ~${stats.rolling.estimatedPerMinuteFromLastPoll} calls/min`,
-      ),
-    );
-  }
-
-  const recentPolls = formatRecentPollsTable(stats.recentTelegramPolls);
-  if (recentPolls) sections.push('', recentPolls);
-
-  sections.push(
-    '',
-    scenarioRule('muted'),
-    tintLine('muted', 'REST calls only — local token checks don’t count.'),
-    tintLine('info', 'Full JSON: /api/notifications/fyers-usage'),
-  );
 
   const body = sections.join('\n');
   if (body.length <= 3900) return body;

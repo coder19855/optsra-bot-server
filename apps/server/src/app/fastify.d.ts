@@ -381,6 +381,9 @@ declare module 'fastify' {
       sendMessage: (text: string, options?: TelegramSendOptions) => Promise<void>;
       pollNow: (options?: boolean | { force?: boolean; coachOnly?: boolean }) => Promise<void>;
       getStatus: () => Promise<TelegramNotificationStatus>;
+      isAlertsPaused: () => boolean;
+      setAlertsPaused: (paused: boolean) => Promise<void>;
+      resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;
     };

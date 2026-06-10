@@ -51,20 +51,15 @@ export function paletteToken(scenario: TelegramScenario): PaletteToken {
   return TELEGRAM_PALETTE[scenario];
 }
 
-/** Full-width callout card for high-signal blocks. */
+/** Compact callout — title + body, no heavy borders. */
 export function wrapScenarioCallout(
   scenario: TelegramScenario,
   titleHtml: string,
   bodyLines: string[],
 ): string {
-  const { edge, accent } = TELEGRAM_PALETTE[scenario];
+  const { accent } = TELEGRAM_PALETTE[scenario];
   const body = bodyLines.filter(Boolean);
-  return [
-    edge,
-    `${accent} ${titleHtml}`,
-    ...body,
-    edge,
-  ].join('\n');
+  return [`${accent} ${titleHtml}`, ...body].join('\n');
 }
 
 /** Section header with scenario icon. */
@@ -87,8 +82,12 @@ export function formatScenarioBanner(
   return `${accent} <b>${headlineHtml}</b>`;
 }
 
-/** Prefix a line with a scenario icon — keeps body emojis intact. */
+const LEADING_EMOJI = /^[\p{Extended_Pictographic}\u{FE0F}\u{200D}#*0-9]/u;
+
+/** Prefix only when the line has no leading emoji (avoids ℹ️ 💰 …). */
 export function tintLine(scenario: TelegramScenario, line: string): string {
+  const trimmed = line.trimStart();
+  if (LEADING_EMOJI.test(trimmed)) return line;
   const { accent } = TELEGRAM_PALETTE[scenario];
   return `${accent} ${line}`;
 }

@@ -5,7 +5,7 @@ import {
 } from '../types/trading-coach';
 import { SignalSnapshot } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
-import { TELEGRAM_MSG_RULE, scenarioRule } from './message-layout';
+import { TELEGRAM_MSG_RULE } from './message-layout';
 import {
   formatScenarioBanner,
   formatSectionHeader,
@@ -13,9 +13,6 @@ import {
   scenarioForAction,
   scenarioForCoachVerdict,
   scenarioForPnl,
-  scenarioForTradeReady,
-  tintLine,
-  wrapScenarioCallout,
 } from './telegram-palette';
 
 function escapeHtml(text: string): string {
@@ -63,31 +60,28 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
   const pnl = trade.pnlInr;
   const sign = pnl >= 0 ? '+' : '';
   const time = trade.entryAtISO.slice(11, 16);
-  const coaching = analysis.coaching[0] ?? 'Worth a replay — did entry and exit match your rules?';
+  const coaching = analysis.coaching[0] ?? '';
   const optionLabel = trade.optionSymbol.split(':').pop() ?? trade.optionSymbol;
+  const approved = analysis.systemApproved ? '✅' : '⚠️ off-script';
 
   return [
-    `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${trade.direction} · ${time}`,
-    `   ${pnlIcon(pnl)} PnL: ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${analysis.entryQuality} entry · ${analysis.exitQuality} exit`,
-    analysis.systemApproved
-      ? tintLine('pick', 'Engine gave the thumbs-up at entry')
-      : tintLine('warning', 'You went off-script at entry'),
-    `   💡 ${escapeHtml(coaching)}`,
-  ].join('\n');
+    `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${time} · ${pnlIcon(pnl)} ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${approved}`,
+    coaching ? `   💡 ${escapeHtml(coaching)}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function formatSignalRecap(snapshots: SignalSnapshot[]): string {
-  if (!snapshots.length) return '📡 No signal snapshots saved today — quiet on the wire.';
+  if (!snapshots.length) return '📡 No signals logged today.';
 
   return snapshots
     .map((snap) => {
       const label = shortSymbol(snap.symbol);
-      const readyScenario = scenarioForTradeReady(snap.shouldConsiderTrade);
-      const ready =
-        readyScenario === 'success' ? 'green light' : 'below bar';
-      return `📡 <b>${escapeHtml(label)} · ${escapeHtml(snap.tradingStyle)}</b>\n   ${paletteToken(scenarioForAction(snap.action)).accent} ${snap.action} · ${snap.conviction}% · ${paletteToken(readyScenario).accent} ${ready}`;
+      const ready = snap.shouldConsiderTrade ? '✅' : '⚠️';
+      return `${paletteToken(scenarioForAction(snap.action)).accent} ${escapeHtml(label)} ${snap.action} ${snap.conviction}% ${ready}`;
     })
-    .join('\n\n');
+    .join('\n');
 }
 
 function formatStyleSection(
@@ -101,15 +95,12 @@ function formatStyleSection(
   if (summary.totalRoundTrips === 0) {
     const emptyTradeHint =
       coach.rawFillCount > 0
-        ? `📭 ${coach.rawFillCount} fill(s) logged — nothing closed yet.\nSquare off and I’ll grade the round trip.`
-        : coach.source === 'fyers_tradebook'
-          ? '📭 Tradebook’s empty so far — the market owes you nothing yet.'
-          : '📭 No fills on this date.';
+        ? `📭 ${coach.rawFillCount} fill(s) — nothing closed yet`
+        : '📭 No fills today';
     return [
       formatSectionHeader('coach', String(style), '📊'),
-      tintLine('muted', emptyTradeHint),
-      '',
-      formatSectionHeader('info', 'How the day ended (signals)', '📡'),
+      emptyTradeHint,
+      formatSectionHeader('info', 'Signals', '📡'),
       formatSignalRecap(styleSnapshots),
     ].join('\n');
   }
@@ -128,27 +119,15 @@ function formatStyleSection(
 
   const takeaway = buildSessionTakeaway(coach);
 
-  const pnlScenario = scenarioForPnl(pnl);
   return [
     formatSectionHeader('coach', String(style), '📊'),
-    tintLine(
-      pnlScenario,
-      `💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-    ),
-    tintLine(
-      'info',
-      `🏁 ${summary.winCount}W / ${summary.lossCount}L · ✅ ${summary.systemApprovedCount} approved`,
-    ),
-    `✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
+    `💰 ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`,
     '',
-    formatSectionHeader('coach', 'Trade-by-trade replay', '🎬'),
+    formatSectionHeader('coach', 'Trades', '🎬'),
     tradeLines + more,
+    `💬 ${escapeHtml(takeaway)}`,
     '',
-    wrapScenarioCallout('warning', '<b>💬 Real talk — what to fix tomorrow</b>', [
-      escapeHtml(takeaway),
-    ]),
-    '',
-    formatSectionHeader('info', 'End-of-day signal snapshot', '📡'),
+    formatSectionHeader('info', 'Signals', '📡'),
     formatSignalRecap(styleSnapshots),
   ].join('\n');
 }
@@ -226,18 +205,15 @@ export function formatTelegramCoachOnDemandMessage(params: {
           `🏁 ${totalTrades} round trip(s)`,
         ].join('\n')
       : anyFills
-        ? '📭 Fills on the book — nothing squared off yet.\nClose a round trip and I’ll grade it.'
-        : '📭 No closed trades today — sometimes the best trade is no trade.';
+        ? '📭 Fills logged — nothing closed yet'
+        : '📭 No closed trades today';
 
   const body = [
-    formatScenarioBanner('coach', 'Coach mode'),
-    tintLine('info', `📅 ${dateLabel} · straight from your tradebook`),
-    scenarioRule('coach'),
+    formatScenarioBanner('coach', 'Coach'),
+    `📅 ${dateLabel}`,
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
-    TELEGRAM_MSG_RULE,
-    '🧠 Replay uses index price only — option flow wasn’t in the room.',
   ].join('\n\n');
 
   if (body.length <= 3900) return body;
@@ -266,14 +242,11 @@ export function formatTelegramCoachSummaryMessage(params: {
       : '📭 No closed trades across your watched styles.';
 
   const body = [
-    formatScenarioBanner('coach', 'Day’s wrap'),
-    tintLine('info', `📅 ${dateLabel} · bell rang at NSE close`),
-    scenarioRule('coach'),
+    formatScenarioBanner('coach', 'Day wrap'),
+    `📅 ${dateLabel}`,
     headerPnl,
     TELEGRAM_MSG_RULE,
     ...sections,
-    TELEGRAM_MSG_RULE,
-    '🧠 Replay uses index price only — option flow wasn’t in the room.',
   ].join('\n\n');
 
   if (body.length <= 3900) return body;

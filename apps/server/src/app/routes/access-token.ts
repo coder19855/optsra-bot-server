@@ -38,6 +38,14 @@ export default async function accessTokenRoutes(fastify: FastifyInstance) {
           timestamp: Date.now(),
         });
 
+        if (fastify.telegramNotifications?.isConfigured()) {
+          try {
+            await fastify.telegramNotifications.resumeAlertsAfterLogin();
+          } catch (err) {
+            fastify.log.warn({ err }, 'Failed to resume Telegram alerts after login');
+          }
+        }
+
         const accept = request.headers.accept || '';
         if (accept.includes('text/html')) {
           return reply.type('text/html').send(`

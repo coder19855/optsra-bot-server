@@ -2,13 +2,11 @@ import {
   PositionTpEvaluation,
   TpAlertKind,
 } from '../types/telegram-notifications';
-import { scenarioRule } from './message-layout';
 import {
   formatScenarioBanner,
   scenarioForHoldAdvice,
   scenarioForPnl,
   scenarioForTpKinds,
-  tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
 
@@ -20,56 +18,33 @@ function escapeHtml(text: string): string {
 }
 
 function kindHeadline(kinds: TpAlertKind[]): string {
-  if (kinds.includes('SIGNAL_CONFLICT')) {
-    return '⚔️ Your position vs the engine';
-  }
-  if (kinds.includes('REACHED')) {
-    return '🎉 Target hit — nice!';
-  }
-  if (kinds.includes('APPROACHING')) {
-    return '👀 Target in sight';
-  }
+  if (kinds.includes('SIGNAL_CONFLICT')) return '⚔️ Position vs engine';
+  if (kinds.includes('REACHED')) return '🎉 Target hit';
+  if (kinds.includes('APPROACHING')) return '👀 Target near';
   return '🧭 Hold check';
 }
 
-function formatRrLine(evaluation: PositionTpEvaluation): string {
-  const parts: string[] = [
-    tintLine('info', `<b>Riding:</b> ${evaluation.currentR.toFixed(2)}R on index`),
-    tintLine('info', `<b>Spot:</b> ${evaluation.spot.toLocaleString('en-IN')}`),
-    tintLine('info', `<b>Entry:</b> ${evaluation.tradeSetup.entry.toLocaleString('en-IN')}`),
-    tintLine(
-      'info',
-      `<b>Stop:</b> ${evaluation.tradeSetup.stopLoss.toLocaleString('en-IN')} (${evaluation.tradeSetup.risk.toFixed(1)} pts risk)`,
-    ),
+function formatRrSummary(evaluation: PositionTpEvaluation): string {
+  const parts = [
+    `${evaluation.currentR.toFixed(2)}R`,
+    `spot ${evaluation.spot.toLocaleString('en-IN')}`,
+    `entry ${evaluation.tradeSetup.entry.toLocaleString('en-IN')}`,
+    `SL ${evaluation.tradeSetup.stopLoss.toLocaleString('en-IN')}`,
   ];
 
   if (evaluation.highestHitTp) {
-    parts.push(
-      tintLine(
-        'success',
-        `<b>Banked:</b> ${evaluation.highestHitTp.rr} @ ${evaluation.highestHitTp.price.toLocaleString('en-IN')}`,
-      ),
-    );
+    parts.push(`banked ${evaluation.highestHitTp.rr}`);
   }
 
   if (evaluation.nextTp) {
     const dist =
       evaluation.distanceToNextPoints != null
-        ? `${evaluation.distanceToNextPoints.toFixed(1)} pts`
-        : '—';
-    const distR =
-      evaluation.distanceToNextR != null
-        ? ` (${evaluation.distanceToNextR.toFixed(2)}R away)`
+        ? `${evaluation.distanceToNextPoints.toFixed(0)}pts`
         : '';
-    parts.push(
-      tintLine(
-        'pick',
-        `<b>Next prize:</b> ${evaluation.nextTp.rr} @ ${evaluation.nextTp.price.toLocaleString('en-IN')} · ${dist}${distR}`,
-      ),
-    );
+    parts.push(`next ${evaluation.nextTp.rr} ${dist}`.trim());
   }
 
-  return parts.join('\n');
+  return parts.join(' · ');
 }
 
 export function formatTelegramTpAlertMessage(params: {
@@ -84,35 +59,20 @@ export function formatTelegramTpAlertMessage(params: {
   const pnlScenario = scenarioForPnl(position.unrealizedPnl);
 
   const reasons = evaluation.holdReasons
-    .slice(0, 4)
-    .map((line) => tintLine(holdScenario, escapeHtml(line)))
+    .slice(0, 2)
+    .map((line) => escapeHtml(line))
     .join('\n');
 
   return [
     formatScenarioBanner(tpScenario, kindHeadline(kinds)),
-    tintLine(
-      'info',
-      `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
-    ),
-    scenarioRule(tpScenario),
-    tintLine('info', `<b>Size:</b> ${position.netQty} · avg prem ₹${position.buyAvg.toFixed(1)}`),
-    tintLine(
-      pnlScenario,
-      `<b>Open P&amp;L:</b> ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-    ),
-    tintLine(
-      'info',
-      `<b>Engine says:</b> ${evaluation.signalAction} · ${evaluation.conviction}% · ${escapeHtml(evaluation.bias)}`,
-    ),
-    scenarioRule('info'),
-    formatRrLine(evaluation),
-    scenarioRule(holdScenario),
-    wrapScenarioCallout(holdScenario, '<b>🧭 Coach says</b>', [
+    `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
+    `${pnlScenario === 'success' ? '✅' : pnlScenario === 'danger' ? '🚨' : '⚠️'} P&L ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${position.netQty} qty @ ₹${position.buyAvg.toFixed(1)}`,
+    `Engine: ${evaluation.signalAction} ${evaluation.conviction}% · ${escapeHtml(evaluation.bias)}`,
+    formatRrSummary(evaluation),
+    wrapScenarioCallout(holdScenario, '<b>🧭 Coach</b>', [
       escapeHtml(evaluation.holdHeadline),
       reasons || null,
     ].filter((line): line is string => line != null)),
-    '',
-    tintLine('muted', 'TP levels track live — trail as spot moves in your favour.'),
   ]
     .filter((line) => line != null)
     .join('\n');

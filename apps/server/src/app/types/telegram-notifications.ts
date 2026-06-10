@@ -192,6 +192,9 @@ export interface TelegramNotificationStatus {
   alertChannels: TelegramAlertChannelConfig[];
   soundRoutingNote: string;
   polling: boolean;
+  /** User paused signal + pre-session alerts via /stop (TP/commands still run). */
+  alertsPaused: boolean;
+  alertsPausedAt: string | null;
   pollIntervalMs: number;
   marketOpen: boolean;
   preSessionLearningWindow: boolean;

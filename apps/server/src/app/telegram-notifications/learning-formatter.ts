@@ -1,10 +1,8 @@
 import { MarketNewsHeadline } from './market-news';
 import { LearningInsightProfile } from './learning-insights';
-import { scenarioRule } from './message-layout';
 import {
   formatScenarioBanner,
   paletteToken,
-  tintLine,
   wrapScenarioCallout,
 } from './telegram-palette';
 
@@ -30,28 +28,24 @@ function formatPatterns(
   emptyLabel: string,
   scenario: 'warning' | 'success',
 ): string {
-  if (!items.length) return tintLine(scenario, emptyLabel.replace(/^•\s*/, ''));
+  if (!items.length) return emptyLabel;
   return items
     .map(
       (item) =>
-        `${paletteToken(scenario).accent} <b>${escapeHtml(item.label)}</b> ×${item.count}\n   ↳ ${escapeHtml(item.reminder)}`,
+        `${paletteToken(scenario).accent} <b>${escapeHtml(item.label)}</b> ×${item.count} — ${escapeHtml(item.reminder)}`,
     )
     .join('\n');
 }
 
 export function formatMarketNewsSection(headlines: MarketNewsHeadline[]): string | null {
-  if (!headlines.length) {
-    return wrapScenarioCallout('info', '<b>📰 Market mood</b>', [
-      '📭 Headlines MIA — peek at NSE / economic calendar before you size up.',
-    ]);
-  }
+  if (!headlines.length) return null;
 
-  const lines = headlines.slice(0, 5).map((item) => {
-    const source = item.source ? ` · ${escapeHtml(item.source)}` : '';
-    return tintLine('info', `${escapeHtml(item.title)}${source}`);
+  const lines = headlines.slice(0, 3).map((item) => {
+    const source = item.source ? ` (${escapeHtml(item.source)})` : '';
+    return `• ${escapeHtml(item.title)}${source}`;
   });
 
-  return wrapScenarioCallout('info', '<b>📰 What the tape is whispering</b>', lines);
+  return wrapScenarioCallout('info', '<b>📰 Headlines</b>', lines);
 }
 
 export function formatLearningTelegramMessage(params: {
@@ -66,34 +60,32 @@ export function formatLearningTelegramMessage(params: {
 
   const tradeSummary =
     profile.totalTrades > 0
-      ? `Last ${profile.lookbackDays} days · ${profile.totalTrades} coached trades · ✅ ${profile.verdicts.good} · ⚠️ ${profile.verdicts.bad} · 🚨 ${profile.verdicts.ugly}`
-      : `Last ${profile.lookbackDays} days · no closed trades yet — fresh slate today.`;
+      ? `${profile.lookbackDays}d · ${profile.totalTrades} trades · ✅${profile.verdicts.good} ⚠️${profile.verdicts.bad} 🚨${profile.verdicts.ugly}`
+      : `${profile.lookbackDays}d · no closed trades yet`;
 
   const sections = [
     preamble
-      ? formatScenarioBanner('learning', '🌅 Before the bell — your homework')
-      : formatScenarioBanner('learning', 'Lessons from your own trades'),
-    tintLine('info', `📅 ${dateLabel}`),
-    scenarioRule('learning'),
-    tradeSummary,
+      ? formatScenarioBanner('learning', '🌅 Pre-session brief')
+      : formatScenarioBanner('learning', 'Your trade lessons'),
+    `📅 ${dateLabel} · ${tradeSummary}`,
     '',
-    wrapScenarioCallout('warning', '<b>🕳️ Leaks that keep biting you</b>', [
+    wrapScenarioCallout('warning', '<b>🕳️ Leaks</b>', [
       formatPatterns(
         profile.leaks,
-        'No repeat offenders tagged — stay sharp anyway; one bad hour can cluster.',
+        'No repeat leaks tagged.',
         'warning',
       ),
     ]),
     '',
-    wrapScenarioCallout('success', '<b>💪 Habits worth keeping</b>', [
+    wrapScenarioCallout('success', '<b>💪 Strengths</b>', [
       formatPatterns(
         profile.strengths,
-        'Not enough green patterns yet — stick to engine-approved entries only.',
+        'Keep taking engine-approved entries.',
         'success',
       ),
     ]),
     '',
-    wrapScenarioCallout('pick', '<b>🎯 One intention for today</b>', [
+    wrapScenarioCallout('pick', '<b>🎯 Today</b>', [
       escapeHtml(profile.intention),
     ]),
   ];
@@ -101,34 +93,24 @@ export function formatLearningTelegramMessage(params: {
   if (profile.recentMistakeNotes.length) {
     sections.push(
       '',
-      wrapScenarioCallout('danger', '<b>📝 Fresh reminders from ugly trades</b>', [
+      wrapScenarioCallout('danger', '<b>📝 Reminders</b>', [
         ...profile.recentMistakeNotes
-          .slice(0, 3)
-          .map((note) => tintLine('danger', escapeHtml(note))),
+          .slice(0, 2)
+          .map((note) => escapeHtml(note)),
       ]),
     );
   }
 
   if (params.includeNews) {
     const newsBlock = formatMarketNewsSection(params.newsHeadlines ?? []);
-    if (newsBlock) {
-      sections.push('', newsBlock);
-    }
+    if (newsBlock) sections.push('', newsBlock);
   }
 
   if (preamble) {
-    sections.push('', tintLine('info', 'Want the full breakdown? <code>/learning</code>'));
-  } else {
-    sections.push(
-      '',
-      tintLine(
-        'muted',
-        'Pulled from your Fyers book + engine replay — not random guru quotes.',
-      ),
-    );
+    sections.push('', 'Full detail: <code>/learning</code>');
   }
 
   const body = sections.join('\n');
   if (body.length <= 3900) return body;
-  return `${body.slice(0, 3850)}\n\n… trimmed for Telegram`;
+  return `${body.slice(0, 3850)}\n\n… trimmed`;
 }

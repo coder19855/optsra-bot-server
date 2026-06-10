@@ -60,8 +60,13 @@ export function formatCommandsReferenceMessage(
     '<code>/beststrike</code> — 🤯 gamma blast + 🎯 engine pick &amp; Greeks',
     `<i>Try:</i> <code>/beststrike ${sym} ${style}</code> · <code>/beststrike CE</code>`,
     '',
+    '⏯ <b>Alert cool-off</b>',
+    '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
+    '<code>/start</code> — resume alerts (needs live Fyers session)',
+    '<code>/status</code> — paused vs active, market, TP watch',
+    '',
     '🔐 <b>Fyers session</b>',
-    '<code>/login</code> — login link (opens browser)',
+    '<code>/login</code> — login link (opens browser; auto-resumes alerts)',
     '',
     '🌡 <b>API budget</b>',
     '<code>/apiusage</code> — Fyers rate limits &amp; what we’ve consumed',
@@ -89,6 +94,9 @@ export function formatCommandsReferenceMessage(
 }
 
 export const TELEGRAM_BOT_COMMANDS = [
+  { command: 'start', description: 'Resume signal alerts' },
+  { command: 'stop', description: 'Pause signal alerts' },
+  { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },
   { command: 'learning', description: 'Habits from your trades' },
