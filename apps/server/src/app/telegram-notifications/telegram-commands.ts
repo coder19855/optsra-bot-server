@@ -36,6 +36,7 @@ import {
 } from './account-commands';
 import { buildBestStrikeTelegramMessage } from './best-strike-command';
 import { buildLearningTelegramMessage } from './session-learning';
+import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { parseClearCommandLimit } from './telegram-message-journal';
 
 interface TelegramUpdate {
@@ -163,6 +164,12 @@ export class TelegramCommandPoller {
         await this.handleLearning(text, replyChatId);
       } else if (command === '/best-strike' || command === '/beststrike') {
         await this.handleBestStrike(text, replyChatId);
+      } else if (
+        command === '/apiusage' ||
+        command === '/fyers-usage' ||
+        command === '/fyersusage'
+      ) {
+        await this.handleFyersUsage(replyChatId);
       } else if (command === '/outcomes') {
         await this.handleOutcomes(replyChatId);
       } else if (command === '/conviction') {
@@ -347,6 +354,14 @@ export class TelegramCommandPoller {
       adaptive,
     });
     await this.deps.sendMessage(message, this.replyOptions(replyChatId));
+  }
+
+  private async handleFyersUsage(replyChatId?: number): Promise<void> {
+    const stats = this.fastify.fyersUsage.getStats();
+    await this.deps.sendMessage(
+      formatFyersUsageTelegramMessage(stats),
+      this.replyOptions(replyChatId),
+    );
   }
 
   private async handleBestStrike(
