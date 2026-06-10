@@ -8,3 +8,7 @@ export * from './fyers-symbols';
 export * from './trading-coach';
 export * from './telegram-notifications';
 export * from './fyers-usage';
+export * from './greeks-strike-insight';
+export * from './exact-strike-recommendation';
+export * from './adaptive-conviction';
+export * from './alert-intelligence';

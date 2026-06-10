@@ -25,3 +25,5 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
+      - key: TELEGRAM_ALLOWED_USER_IDS
+        sync: false

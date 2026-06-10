@@ -1,5 +1,6 @@
 import { HttpStatusCode } from 'axios';
 import { FastifyInstance } from 'fastify';
+import { buildGreeksStrikeInsightPair } from '../option-flow/greeks-moneyness-insight';
 import { ResponseStatus } from '../types';
 import type { ScoreComponents } from '../fastify';
 import { TradingStyle } from '../trading-style';
@@ -118,6 +119,13 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
           components.skew || 0,
         );
 
+        const greeksStrikeInsights = buildGreeksStrikeInsightPair(
+          filteredChain,
+          spotLtp || 0,
+          activeStyle,
+          ivRegime,
+        );
+
         reply.send({
           spotSymbol,
           spotLtp,
@@ -143,6 +151,8 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
             vix: components.vix,
             trend: components.trend,
           },
+          greeksStrikeInsights,
+          optionChainNearby: filteredChain,
         });
       } else {
         reply.code(response.code).send({ error: response.message });

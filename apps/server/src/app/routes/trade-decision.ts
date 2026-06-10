@@ -2,6 +2,9 @@ import { HttpStatusCode } from 'axios';
 import { FastifyInstance } from 'fastify';
 import { STYLE_TF_DISPLAY_WEIGHTS } from '../constants/technical-analysis';
 import { getStyleScoringConfig, TradingStyle } from '../trading-style';
+import { buildExactStrikeRecommendation } from '../option-flow/exact-strike-recommender';
+import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
+import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { OptionMetricsResponse, PriceActionResponse } from '../types';
 
 export default async function tradeDecisionRoute(fastify: FastifyInstance) {
@@ -360,6 +363,44 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         priceData,
       );
 
+      const greeksInsights = optionData.greeksStrikeInsights;
+      let greeksStrikeInsight: GreeksStrikeInsight | null = null;
+      if (coreDecision.action === 'CE-BUY') {
+        greeksStrikeInsight = greeksInsights?.CE ?? null;
+      } else if (coreDecision.action === 'PE-BUY') {
+        greeksStrikeInsight = greeksInsights?.PE ?? null;
+      }
+
+      if (
+        greeksStrikeInsight &&
+        coreDecision.conviction < scoringConfig.convictionThreshold.enter
+      ) {
+        greeksStrikeInsight = {
+          ...greeksStrikeInsight,
+          bestFit:
+            'Conviction is below style threshold — prefer ITM or skip OTM; size down regardless of strike.',
+        };
+      }
+
+      let exactStrikeRecommendation: ExactStrikeRecommendation | null = null;
+      const nearbyChain = optionData.optionChainNearby ?? [];
+      const indexSymbol = optionData.spotSymbol || priceData.symbol;
+      if (
+        (coreDecision.action === 'CE-BUY' || coreDecision.action === 'PE-BUY') &&
+        nearbyChain.length > 0
+      ) {
+        exactStrikeRecommendation = buildExactStrikeRecommendation(
+          nearbyChain,
+          indexSymbol,
+          coreDecision.action === 'CE-BUY' ? 'CE' : 'PE',
+          activeStyle,
+          coreDecision.conviction,
+          greeksStrikeInsight,
+          optionData.ivRegime,
+          coreDecision.conviction < scoringConfig.convictionThreshold.enter,
+        );
+      }
+
       reply.send({
         symbol: optionData.spotSymbol || priceData.symbol,
         lastPrice: priceData.lastPrice,
@@ -407,6 +448,8 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
           bias: optionData.bias,
           ivRegime: optionData.ivRegime,
           components: optionFlowComponents,
+          greeksStrikeInsight,
+          exactStrikeRecommendation,
         },
 
         // 4. Final Strategies with confidence

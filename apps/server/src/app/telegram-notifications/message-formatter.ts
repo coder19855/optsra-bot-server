@@ -1,4 +1,8 @@
 import {
+  GreeksStrikeInsight,
+  GreeksStrikeProfile,
+} from '../types/greeks-strike-insight';
+import {
   RecommendedStrategyAlert,
   SignalChangeKind,
   SignalSnapshot,
@@ -6,6 +10,7 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
+import { TELEGRAM_MSG_RULE } from './message-layout';
 
 function escapeHtml(text: string): string {
   return text
@@ -31,16 +36,16 @@ function isSignalFlip(
 }
 
 function actionBanner(action: DecisionAction, flipped: boolean): string {
-  if (flipped) return '🚨🔁 SIGNAL FLIP 🔁🚨';
+  if (flipped) return '🚨 <b>Signal flip</b>';
   switch (action) {
     case 'CE-BUY':
-      return '🟢📈 BULLISH CALL SETUP 📈🟢';
+      return '🟢📈 <b>CE-BUY setup</b>';
     case 'PE-BUY':
-      return '🔴📉 BEARISH PUT SETUP 📉🔴';
+      return '🔴📉 <b>PE-BUY setup</b>';
     case 'NEUTRAL':
-      return '🟡⚖️ NEUTRAL / RANGE PLAY ⚖️🟡';
+      return '🟡 <b>Neutral / range</b>';
     default:
-      return '⚪🛑 NO TRADE — STAY FLAT 🛑⚪';
+      return '⚪ <b>No trade</b>';
   }
 }
 
@@ -151,7 +156,7 @@ function tierLabel(label: string): string {
   return '📏 Standard';
 }
 
-function formatPositionSizingSection(
+export function formatPositionSizingTelegramSection(
   sizing: TelegramPositionSizing | undefined,
 ): string | null {
   if (!sizing) return null;
@@ -243,6 +248,76 @@ function formatPositionSizingSection(
   return lines.join('\n');
 }
 
+function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
+  if (level === 'high') return '⚡';
+  if (level === 'moderate') return '〰️';
+  return '💤';
+}
+
+function formatExactStrikeSection(
+  strike: TradeDecisionAlertPayload['exactStrikeRecommendation'],
+): string | null {
+  if (!strike) return null;
+
+  const move =
+    strike.expectedPremiumMove50Pts != null
+      ? ` · ~₹${strike.expectedPremiumMove50Pts.toFixed(1)}/50pts`
+      : '';
+
+  return [
+    '🎯 <b>Exact strike pick</b>',
+    `<code>${escapeHtml(strike.fyersSymbol)}</code>`,
+    `${strike.moneyness} @ ${formatInr(strike.strike)} · prem ₹${strike.premium.toFixed(1)} · Δ ${strike.delta?.toFixed(2) ?? '—'}${move}`,
+    `↳ ${escapeHtml(strike.rationale)}`,
+    '💬 Reply <code>/why</code> for full breakdown',
+  ].join('\n');
+}
+
+function formatAdaptiveConvictionLine(
+  adaptive: TradeDecisionAlertPayload['adaptiveConviction'],
+  conviction: number,
+): string | null {
+  if (!adaptive || adaptive.dataSource === 'defaults') return null;
+
+  const meets = conviction >= adaptive.recommendedEnterThreshold;
+  const icon = meets ? '✅' : '⚠️';
+  return `${icon} <b>Adaptive bar:</b> ${adaptive.recommendedEnterThreshold}% enter\n↳ ${adaptive.overallWinRate}% win · ${adaptive.sampleSize} alerts`;
+}
+
+function formatGreeksStrikeSection(
+  insight: GreeksStrikeInsight | undefined,
+): string | null {
+  if (!insight?.profiles.length) return null;
+
+  const lines: string[] = [
+    `📐 <b>Greeks · ${insight.optionSide}</b>`,
+    TELEGRAM_MSG_RULE,
+  ];
+
+  for (const profile of insight.profiles) {
+    const delta =
+      profile.delta != null ? `Δ ${profile.delta.toFixed(2)}` : 'Δ —';
+    const gamma = `${gammaEmoji(profile.gammaLevel)} Γ ${profile.gammaLevel}`;
+    const theta = profile.thetaLabel ? `Θ ${profile.thetaLabel}` : 'Θ —';
+    const premium =
+      profile.premium != null
+        ? ` · prem ₹${profile.premium.toFixed(1)}`
+        : '';
+
+    lines.push(
+      `<b>${profile.moneyness}</b> ${formatInr(profile.strike)} · ${delta} · ${gamma} · ${theta}${premium}`,
+    );
+    lines.push(`↳ ${escapeHtml(profile.consequence)}`);
+  }
+
+  lines.push(`💡 <b>Best fit:</b> ${escapeHtml(insight.bestFit)}`);
+  if (insight.ivNote) {
+    lines.push(`🌡 ${escapeHtml(insight.ivNote)}`);
+  }
+
+  return lines.join('\n');
+}
+
 function formatStrategies(strategies: RecommendedStrategyAlert[]): string {
   if (!strategies.length) {
     return '❓ No mapped strategies — review option flow manually.';
@@ -285,38 +360,53 @@ export function formatTelegramAlertMessage(params: {
   const ofBias = payload.optionFlow?.bias;
   const change = formatChangeLine(previous, current, kinds);
   const strategies = formatStrategies(payload.recommendedStrategies);
+  const greeksStrike = formatGreeksStrikeSection(
+    payload.optionFlow?.greeksStrikeInsight,
+  );
+  const exactStrike = formatExactStrikeSection(
+    payload.exactStrikeRecommendation,
+  );
+  const adaptiveLine = formatAdaptiveConvictionLine(
+    payload.adaptiveConviction,
+    payload.conviction,
+  );
   const meter = convictionMeter(payload.conviction);
   const biasIcon = biasEmoji(payload.bias);
 
   const tradeReady = payload.tradeGuidance.shouldConsiderTrade
-    ? '✅🟢 Meets style conviction threshold'
-    : '⏸🟡 Below style threshold — caution';
+    ? '✅ Meets conviction threshold'
+    : '⏸ Below threshold — caution';
 
   return [
     banner,
     `${emoji} <b>${escapeHtml(label)} · ${escapeHtml(payload.tradingStyle)} · ${payload.action}</b>`,
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     `${meter} <b>Conviction:</b> ${payload.conviction}%`,
     `${biasIcon} <b>Bias:</b> ${escapeHtml(payload.bias)}`,
     `💰 <b>Price:</b> ${payload.lastPrice.toLocaleString('en-IN')}`,
     `${paEmoji(pa.action)} <b>PA:</b> ${pa.action} (${pa.confidence}%)`,
     ofBias ? `🌊 <b>Option flow:</b> ${escapeHtml(ofBias)}` : null,
     iv ? `⚡ <b>IV regime:</b> ${escapeHtml(iv)}` : null,
-    '━━━━━━━━━━━━━━━━━━━━',
+    adaptiveLine,
+    TELEGRAM_MSG_RULE,
     `🧭 <b>Trade guidance</b>`,
     tradeReady,
     payload.tradeGuidance.sizeRecommendation
       ? `📏 ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}`
       : null,
     '',
-    formatPositionSizingSection(payload.positionSizing),
+    formatPositionSizingTelegramSection(payload.positionSizing),
     '',
+    greeksStrike,
+    greeksStrike ? '' : null,
+    exactStrike,
+    exactStrike ? '' : null,
     `🎲 <b>Top strategies</b>`,
     strategies,
     '',
     `🧠 <b>Summary</b>`,
     escapeHtml(payload.humanSummary),
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     `🔄 <b>What changed</b>`,
     change,
   ]

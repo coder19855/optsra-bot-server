@@ -5,6 +5,7 @@ import {
   CoachPnlSummary,
   CoachSymbolPnl,
   FyersTradeFill,
+  RoundTripTrade,
 } from '../types/trading-coach';
 import { parseFyersIstDateTime, resolveOptionMeta } from './symbol-utils';
 
@@ -39,6 +40,8 @@ export function resolveCoachDateRange(query: {
 
   if (query.date) {
     if (!isIsoDate(query.date)) return null;
+    // Same-day fills live in the tradebook; trade history is often empty until EOD.
+    if (query.date === today) return null;
     return {
       fromDate: query.date,
       toDate: query.date,
@@ -172,6 +175,36 @@ export async function fetchCoachTradeFills(
     fills,
     rawFillCount: historyRes.data?.length ?? 0,
   };
+}
+
+export function sumRoundTripPnlInr(roundTrips: RoundTripTrade[]): number {
+  return +roundTrips.reduce((sum, trade) => sum + trade.pnlInr, 0).toFixed(2);
+}
+
+/**
+ * Fyers realised-profit API often returns gross_pnl=0 intraday while the tradebook FIFO is correct.
+ * Prefer FIFO session PnL unless Fyers reconciles with it.
+ */
+export function resolveCoachDisplayPnlInr(params: {
+  fifoSessionPnlInr: number;
+  pnlSummary: CoachPnlSummary | null;
+  symbolPnl: CoachSymbolPnl[];
+  indexFilter: string | null;
+}): number {
+  const fifo = +params.fifoSessionPnlInr.toFixed(2);
+  if (!params.pnlSummary) return fifo;
+
+  let fyersGross = params.pnlSummary.grossPnlInr;
+  if (params.indexFilter && params.symbolPnl.length > 0) {
+    fyersGross = +params.symbolPnl
+      .reduce((sum, row) => sum + row.realizedPnlInr, 0)
+      .toFixed(2);
+  }
+
+  if (fifo !== 0 && fyersGross === 0) return fifo;
+  if (params.pnlSummary.reconciled) return fyersGross;
+  if (Math.abs(fyersGross - fifo) < 1) return fyersGross;
+  return fifo;
 }
 
 export async function fetchRealisedProfitSummary(

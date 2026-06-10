@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { TELEGRAM_MSG_RULE } from '../telegram-notifications/message-layout';
 
 export default async function telegramNotificationsRoute(
   fastify: FastifyInstance,
@@ -26,8 +27,8 @@ export default async function telegramNotificationsRoute(
     const text =
       message?.trim() ||
       [
-        '🟢📈 Opstra alerts are LIVE 📈🟢',
-        '━━━━━━━━━━━━━━━━━━━━',
+        '🟢 <b>Opstra alerts live</b>',
+        TELEGRAM_MSG_RULE,
         '✅ Telegram connected',
         '🔔 Signal-flip alerts enabled',
         '🕘 Polls every 1 min during market hours',

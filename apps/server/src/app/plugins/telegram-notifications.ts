@@ -25,9 +25,25 @@ import {
   isWithinPostSessionCoachWindow,
   snapshotKey,
 } from '../telegram-notifications/signal-tracker';
+import { saveAlertWhyContext } from '../telegram-notifications/alert-context-store';
 import { evaluateOpenPositionTpAlerts } from '../telegram-notifications/position-monitor';
+import {
+  closeSessionSignalOutcomes,
+  recordSignalOutcome,
+  updateOpenSignalOutcomes,
+} from '../telegram-notifications/signal-outcome-tracker';
 import { fetchTradeDecisionAlert } from '../telegram-notifications/trade-decision-fetch';
 import { recordTradeEntryIntent } from '../telegram-notifications/trade-entry-intent';
+import {
+  getFyersLoginReminderContent,
+  shouldSendFyersLoginReminder,
+} from '../telegram-notifications/fyers-login-reminder';
+import { resolveAllowedTelegramUserIds } from '../telegram-notifications/telegram-access';
+import {
+  TelegramMessageJournal,
+  clearBotMessagesByScan,
+} from '../telegram-notifications/telegram-message-journal';
+import { TelegramCommandPoller } from '../telegram-notifications/telegram-commands';
 import {
   SignalSnapshot,
   TelegramNotificationStatus,
@@ -61,6 +77,7 @@ export default fp(
       (process.env.TELEGRAM_NOTIFICATIONS_ENABLED ?? 'true').toLowerCase() !==
       'false';
     const configured = Boolean(botToken && chatId);
+    const allowedUserIds = resolveAllowedTelegramUserIds(chatId);
     const pollIntervalMs = Number(
       process.env.TELEGRAM_POLL_INTERVAL_MS ||
         TELEGRAM_NOTIFICATION_DEFAULTS.POLL_INTERVAL_MS,
@@ -90,6 +107,12 @@ export default fp(
     let lastTpAlertAt: Date | null = null;
     let openPositionsMonitored = 0;
     let openPositionsTracked = 0;
+    let commandPoller: TelegramCommandPoller | null = null;
+    let lastFyersLoginReminderAt: Date | null = null;
+    const messageJournal = new TelegramMessageJournal();
+    const lastExactStrikeByKey = new Map<string, NonNullable<
+      Awaited<ReturnType<typeof fetchTradeDecisionAlert>>
+    >['exactStrikeRecommendation']>();
 
     const collectionName = TELEGRAM_NOTIFICATION_DEFAULTS.COLLECTION;
 
@@ -130,13 +153,55 @@ export default fp(
       }
       const send = resolveSendParams(chatId, options);
       const url = `${TELEGRAM_API_BASE}/bot${botToken}/sendMessage`;
-      await axios.post(url, {
+      const payload: Record<string, unknown> = {
         chat_id: send.chatId,
         text,
         parse_mode: 'HTML',
         disable_web_page_preview: true,
         disable_notification: send.disableNotification,
+      };
+      if (options?.inlineKeyboard?.length) {
+        payload.reply_markup = { inline_keyboard: options.inlineKeyboard };
+      }
+      const res = await axios.post(url, payload);
+      const messageId = res.data?.result?.message_id as number | undefined;
+      if (
+        messageId != null &&
+        !options?.skipMessageTracking
+      ) {
+        messageJournal.record(send.chatId, messageId);
+      }
+    }
+
+    async function clearBotMessagesInChat(
+      targetChatId: number,
+      options?: { limit?: number; anchorMessageId: number },
+    ): Promise<{ deleted: number; failed: number }> {
+      const result = await clearBotMessagesByScan({
+        botToken,
+        journal: messageJournal,
+        chatId: targetChatId,
+        anchorMessageId: options?.anchorMessageId ?? 0,
+        limit: options?.limit,
       });
+      return {
+        deleted: result.deleted,
+        failed: Math.max(0, result.scanned - result.deleted),
+      };
+    }
+
+    async function maybeSendFyersLoginReminder(
+      sendOptions?: TelegramSendOptions,
+    ): Promise<void> {
+      if (!shouldSendFyersLoginReminder(lastFyersLoginReminderAt)) return;
+
+      const { text, options } = getFyersLoginReminderContent();
+      await sendTelegramMessage(text, {
+        channel: 'default',
+        ...options,
+        ...sendOptions,
+      });
+      lastFyersLoginReminderAt = new Date();
     }
 
     async function evaluateAndNotify(
@@ -160,8 +225,30 @@ export default fp(
           TELEGRAM_NOTIFICATION_DEFAULTS.MIN_CONVICTION_FOR_INITIAL_ALERT,
       });
 
+      const polledAt = new Date();
+      if (payload.whyContext) {
+        try {
+          await saveAlertWhyContext(fastify, {
+            ...payload.whyContext,
+            alertedAt: polledAt.toISOString(),
+            source: 'poll',
+            wasNotified: false,
+          });
+        } catch (err) {
+          fastify.log.warn({ err }, 'Failed to save poll why-context');
+        }
+      }
+
+      if (payload.exactStrikeRecommendation) {
+        lastExactStrikeByKey.set(
+          snapshotKey(symbol, tradingStyle),
+          payload.exactStrikeRecommendation,
+        );
+      }
+
       const shouldSend = options?.force || change.shouldNotify;
       if (shouldSend) {
+        const notifiedAt = new Date();
         const message = formatTelegramAlertMessage({
           payload,
           previous: change.previous,
@@ -169,8 +256,34 @@ export default fp(
           kinds: change.kinds.length ? change.kinds : ['ACTION'],
         });
         await sendTelegramMessage(message, { channel: 'signal' });
-        current.lastNotifiedAt = new Date();
+        current.lastNotifiedAt = notifiedAt;
         current.lastNotifiedFingerprint = current.fingerprint;
+
+        if (payload.whyContext) {
+          try {
+            await saveAlertWhyContext(fastify, {
+              ...payload.whyContext,
+              alertedAt: notifiedAt.toISOString(),
+              source: 'alert',
+              wasNotified: true,
+            });
+          } catch (err) {
+            fastify.log.warn({ err }, 'Failed to save alert why-context');
+          }
+        }
+
+        if (payload.exactStrikeRecommendation) {
+          try {
+            await recordSignalOutcome(
+              fastify,
+              payload,
+              payload.exactStrikeRecommendation,
+              notifiedAt,
+            );
+          } catch (err) {
+            fastify.log.warn({ err }, 'Failed to record signal outcome');
+          }
+        }
 
         const entryDirection =
           payload.action === 'CE-BUY' || payload.action === 'PE-BUY'
@@ -216,6 +329,16 @@ export default fp(
     }): Promise<void> {
       fastify.fyersUsage.beginScope('telegram-coach');
       try {
+        const sessionReady = await fastify.ensureFyersSession({
+          verifyWithApi: true,
+        });
+        if (!sessionReady) {
+          fastify.log.debug(
+            'Session coach skipped — Fyers token missing or API rejected',
+          );
+          return;
+        }
+
         const now = Date.now();
         const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
         const inCoachWindow = isWithinPostSessionCoachWindow(
@@ -312,11 +435,30 @@ export default fp(
         return;
       }
 
+      const tokenValid = await fastify.ensureFyersSession();
+      if (!tokenValid) {
+        lastPollError =
+          'Fyers access token invalid or expired — skipped token-dependent poll steps';
+        lastPollAt = new Date();
+        fastify.log.debug(lastPollError);
+        try {
+          await maybeSendFyersLoginReminder();
+        } catch (err) {
+          fastify.log.warn({ err }, 'Failed to send Fyers login reminder');
+        }
+        return;
+      }
+
+      lastFyersLoginReminderAt = null;
+
       if (!options?.coachOnly && (marketOpen || options?.force)) {
+        const spotBySymbol: Record<string, number> = {};
+
         for (const symbol of watchedSymbols) {
           for (const style of watchedStyles) {
             try {
-              await evaluateAndNotify(symbol, style, options);
+              const result = await evaluateAndNotify(symbol, style, options);
+              spotBySymbol[symbol] = result.snapshot.lastPrice;
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               lastPollError = msg;
@@ -326,6 +468,15 @@ export default fp(
               );
             }
           }
+        }
+
+        try {
+          await updateOpenSignalOutcomes(fastify, {
+            symbols: watchedSymbols,
+            spotBySymbol,
+          });
+        } catch (err) {
+          fastify.log.warn({ err }, 'Signal outcome tracker update failed');
         }
 
         try {
@@ -349,6 +500,19 @@ export default fp(
       }
 
       if (inCoachWindow || options?.force || options?.coachOnly) {
+        const { sessionDate } = getIstSessionClock(now, timezone);
+        try {
+          const closed = await closeSessionSignalOutcomes(fastify, sessionDate);
+          if (closed.length > 0) {
+            fastify.log.info(
+              { count: closed.length, sessionDate },
+              'Paper signal outcomes closed for session',
+            );
+          }
+        } catch (err) {
+          fastify.log.warn({ err }, 'Failed to close session signal outcomes');
+        }
+
         try {
           await maybeSendSessionCoachSummary(options);
         } catch (err) {
@@ -410,10 +574,14 @@ export default fp(
 
       const now = Date.now();
       const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+      const isTokenValid = await fastify.ensureFyersSession();
 
       return {
         enabled: enabled && configured,
         configured,
+        commandAccessRestricted: allowedUserIds.size > 0,
+        allowedCommandUsers: allowedUserIds.size,
+        isTokenValid,
         alertChannels: buildAlertChannelStatus(chatId),
         soundRoutingNote: TELEGRAM_SOUND_ROUTING_NOTE,
         polling: pollTimer != null,
@@ -482,6 +650,33 @@ export default fp(
           sessionCoachState,
         );
         startPolling();
+        if (allowedUserIds.size === 0) {
+          fastify.log.warn(
+            'Telegram commands disabled for all users — set TELEGRAM_ALLOWED_USER_IDS or TELEGRAM_CHAT_ID (private chat user id)',
+          );
+        } else {
+          fastify.log.info(
+            { allowedUsers: allowedUserIds.size },
+            'Telegram command access restricted to allowlisted user IDs',
+          );
+        }
+
+        commandPoller = new TelegramCommandPoller(fastify, {
+          botToken,
+          defaultChatId: chatId,
+          allowedUserIds,
+          watchedSymbols,
+          watchedStyles,
+          sendMessage: sendTelegramMessage,
+          clearBotMessages: clearBotMessagesInChat,
+          getExactStrikeForKey: (symbol, style) =>
+            lastExactStrikeByKey.get(snapshotKey(symbol, style)),
+          loadSnapshots: loadAllSnapshots,
+        });
+        await commandPoller.setup();
+        commandPoller.start(
+          TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS,
+        );
         try {
           await pollAll();
         } catch (err) {
@@ -496,10 +691,11 @@ export default fp(
 
     fastify.addHook('onClose', async () => {
       stopPolling();
+      commandPoller?.stop();
     });
   },
   {
     name: 'telegram-notifications',
-    dependencies: ['fyers-usage'],
+    dependencies: ['fyers', 'fyers-usage'],
   },
 );

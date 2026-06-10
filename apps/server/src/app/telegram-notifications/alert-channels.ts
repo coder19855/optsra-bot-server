@@ -53,7 +53,10 @@ export function resolveSendParams(
   options?: TelegramSendOptions,
 ): { chatId: string; disableNotification: boolean; channel: TelegramAlertChannel } {
   const channel = options?.channel ?? 'default';
-  const chatId = resolveTelegramChatId(channel, fallbackChatId);
+  const chatId =
+    options?.chatId != null
+      ? String(options.chatId)
+      : resolveTelegramChatId(channel, fallbackChatId);
   const disableNotification =
     options?.disableNotification ?? isSilentChannel(channel);
   return { chatId, disableNotification, channel };

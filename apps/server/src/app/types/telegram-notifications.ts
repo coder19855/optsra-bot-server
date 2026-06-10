@@ -1,3 +1,7 @@
+import { AdaptiveConvictionInsight } from './adaptive-conviction';
+import { AlertWhyContext } from './alert-intelligence';
+import { ExactStrikeRecommendation } from './exact-strike-recommendation';
+import { GreeksStrikeInsight } from './greeks-strike-insight';
 import { RrLabel, TradeSetup } from './technical-analysis';
 import { DecisionAction, TradeBias } from './trade-decision';
 import { TradingStyle } from './trading-style';
@@ -7,10 +11,21 @@ export type PriceActionSignal = 'CE-BUY' | 'PE-BUY' | 'NO-TRADE';
 /** Route alerts to different chats — assign per-chat sounds in the Telegram app. */
 export type TelegramAlertChannel = 'signal' | 'tp' | 'coach' | 'test' | 'default';
 
+export interface TelegramInlineButton {
+  text: string;
+  url: string;
+}
+
 export interface TelegramSendOptions {
   channel?: TelegramAlertChannel;
+  /** Reply in the chat where the user sent a command (overrides channel routing). */
+  chatId?: string | number;
   /** Override env silent flag for this message. */
   disableNotification?: boolean;
+  /** URL buttons open in the device browser when tapped. */
+  inlineKeyboard?: TelegramInlineButton[][];
+  /** Skip journal tracking (e.g. ephemeral clear confirmation). */
+  skipMessageTracking?: boolean;
 }
 
 export interface TelegramAlertChannelConfig {
@@ -98,9 +113,13 @@ export interface TradeDecisionAlertPayload {
   optionFlow?: {
     bias?: string;
     ivRegime?: string;
+    greeksStrikeInsight?: GreeksStrikeInsight;
   };
   recommendedStrategies: RecommendedStrategyAlert[];
   positionSizing?: TelegramPositionSizing;
+  exactStrikeRecommendation?: ExactStrikeRecommendation;
+  whyContext?: AlertWhyContext;
+  adaptiveConviction?: AdaptiveConvictionInsight;
 }
 
 export type TpAlertKind =
@@ -166,6 +185,10 @@ export interface PositionTpEvaluation {
 export interface TelegramNotificationStatus {
   enabled: boolean;
   configured: boolean;
+  /** Inbound /commands restricted to TELEGRAM_ALLOWED_USER_IDS (or TELEGRAM_CHAT_ID). */
+  commandAccessRestricted: boolean;
+  allowedCommandUsers: number;
+  isTokenValid: boolean;
   alertChannels: TelegramAlertChannelConfig[];
   soundRoutingNote: string;
   polling: boolean;

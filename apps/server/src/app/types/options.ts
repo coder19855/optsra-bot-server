@@ -109,6 +109,9 @@ export interface RiskManagement {
   exitStrategy: string;
 }
 
+import type { FyersAPI } from 'fyers-api-v3';
+import type { GreeksStrikeInsightPair } from './greeks-strike-insight';
+
 export interface OptionMetricsResponse {
   spotSymbol: string;
   spotLtp: number;
@@ -126,6 +129,8 @@ export interface OptionMetricsResponse {
     riskManagement?: unknown;
     indicatorImpact?: unknown;
   }>;
+  greeksStrikeInsights?: GreeksStrikeInsightPair;
+  optionChainNearby?: FyersAPI.OptionChainData[];
   explanations?: Record<
     string,
     {

@@ -62,6 +62,10 @@ export interface ScoreComponents {
 declare module 'fastify' {
   interface FastifyInstance {
     fyers: fyersModel;
+    /** Initializes the Fyers client from Mongo and returns whether the session is usable. */
+    ensureFyersSession: (options?: {
+      verifyWithApi?: boolean;
+    }) => Promise<boolean>;
     fyersUsage: {
       record: (method: FyersTrackedMethod) => void;
       beginScope: (scope: string) => void;

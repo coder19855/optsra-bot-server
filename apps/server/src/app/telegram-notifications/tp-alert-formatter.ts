@@ -3,6 +3,7 @@ import {
   TpAlertKind,
   TpHoldAdvice,
 } from '../types/telegram-notifications';
+import { TELEGRAM_MSG_RULE } from './message-layout';
 
 function escapeHtml(text: string): string {
   return text
@@ -20,15 +21,15 @@ function adviceEmoji(advice: TpHoldAdvice): string {
 
 function kindBanner(kinds: TpAlertKind[]): string {
   if (kinds.includes('SIGNAL_CONFLICT')) {
-    return '⚠️🔄 POSITION vs SIGNAL CONFLICT 🔄⚠️';
+    return '⚠️ <b>Position vs signal</b>';
   }
   if (kinds.includes('REACHED')) {
-    return '🎯✅ TAKE PROFIT LEVEL REACHED ✅🎯';
+    return '🎯 <b>TP reached</b>';
   }
   if (kinds.includes('APPROACHING')) {
-    return '🎯📍 APPROACHING TAKE PROFIT 📍🎯';
+    return '🎯 <b>Approaching TP</b>';
   }
-  return '🎯📊 POSITION HOLD REVIEW 📊🎯';
+  return '🎯 <b>Hold review</b>';
 }
 
 function formatRrLine(evaluation: PositionTpEvaluation): string {
@@ -80,17 +81,17 @@ export function formatTelegramTpAlertMessage(params: {
   return [
     banner,
     `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     `📦 <b>Qty:</b> ${position.netQty} · premium avg ₹${position.buyAvg.toFixed(1)}`,
     `${pnlSign.startsWith('+') ? '🟢' : '🔴'} <b>Open PnL:</b> ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
     `🧭 <b>Engine:</b> ${evaluation.signalAction} · ${evaluation.conviction}% conviction · ${escapeHtml(evaluation.bias)}`,
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     formatRrLine(evaluation),
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     `${advice} <b>Coach:</b> ${escapeHtml(evaluation.holdHeadline)}`,
     reasons ? `💡 <b>Why</b>\n${reasons}` : null,
-    '━━━━━━━━━━━━━━━━━━━━',
-    '📌 Index TP levels come from the live engine setup — trail stops as spot moves.',
+    TELEGRAM_MSG_RULE,
+    '📌 TP levels from live engine — trail as spot moves.',
   ]
     .filter((line) => line != null)
     .join('\n');

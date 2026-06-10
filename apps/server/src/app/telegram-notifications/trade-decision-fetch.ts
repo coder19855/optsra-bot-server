@@ -1,4 +1,10 @@
 import { FastifyInstance } from 'fastify';
+import { computeAdaptiveConviction } from './adaptive-conviction';
+import { buildAlertWhyContext } from './why-context-builder';
+import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
+import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
+import { AdaptiveConvictionInsight } from '../types/adaptive-conviction';
+import { AlertWhyContext } from '../types/alert-intelligence';
 import { PriceActionResponse } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
@@ -74,6 +80,24 @@ export async function fetchTradeDecisionAlert(
     );
   }
 
+  const whyContext: AlertWhyContext = buildAlertWhyContext(body);
+  const exactStrikeRecommendation =
+    (optionFlow?.exactStrikeRecommendation as ExactStrikeRecommendation | null) ??
+    undefined;
+
+  let adaptiveConviction: AdaptiveConvictionInsight | undefined;
+  if (action === 'CE-BUY' || action === 'PE-BUY') {
+    try {
+      adaptiveConviction = await computeAdaptiveConviction(fastify, {
+        symbol: String(body.symbol || symbol),
+        tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
+        action,
+      });
+    } catch (err) {
+      fastify.log.warn({ err }, 'Adaptive conviction lookup failed');
+    }
+  }
+
   return {
     symbol: String(body.symbol || symbol),
     tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
@@ -98,8 +122,14 @@ export async function fetchTradeDecisionAlert(
       ? {
           bias: optionFlow.bias ? String(optionFlow.bias) : undefined,
           ivRegime: optionFlow.ivRegime ? String(optionFlow.ivRegime) : undefined,
+          greeksStrikeInsight:
+            (optionFlow.greeksStrikeInsight as GreeksStrikeInsight | null) ??
+            undefined,
         }
       : undefined,
+    exactStrikeRecommendation,
+    whyContext,
+    adaptiveConviction,
     recommendedStrategies: strategies.map((s) => ({
       strategy: String(s.strategy ?? ''),
       risk: s.risk ? String(s.risk) : undefined,

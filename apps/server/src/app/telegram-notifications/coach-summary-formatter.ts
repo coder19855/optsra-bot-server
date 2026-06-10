@@ -5,6 +5,7 @@ import {
 } from '../types/trading-coach';
 import { SignalSnapshot } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
+import { TELEGRAM_MSG_RULE } from './message-layout';
 
 function escapeHtml(text: string): string {
   return text
@@ -87,9 +88,15 @@ function formatStyleSection(
   const styleSnapshots = snapshots.filter((s) => s.tradingStyle === style);
 
   if (summary.totalRoundTrips === 0) {
+    const emptyTradeHint =
+      coach.rawFillCount > 0
+        ? `📭 ${coach.rawFillCount} fill(s) — no closed round trips.\nSquare off for coaching replay.`
+        : coach.source === 'fyers_tradebook'
+          ? '📭 No fills in today’s tradebook yet.'
+          : '📭 No fills for this date.';
     return [
       `🎯 <b>${escapeHtml(style)}</b>`,
-      '📭 No completed round trips in tradebook.',
+      emptyTradeHint,
       '',
       '<b>Final signals</b>',
       formatSignalRecap(styleSnapshots),
@@ -112,9 +119,9 @@ function formatStyleSection(
 
   return [
     `🎯 <b>${escapeHtml(style)}</b>`,
-    `${pnlEmoji(pnl)} <b>Session PnL:</b> ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
-    `🏁 ${summary.winCount}W / ${summary.lossCount}L · ${summary.systemApprovedCount} system-approved`,
-    `📋 Verdicts: ✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
+    `${pnlEmoji(pnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+    `🏁 ${summary.winCount}W / ${summary.lossCount}L · ${summary.systemApprovedCount} approved`,
+    `📋 ✅ ${summary.verdicts.good} · ⚠️ ${summary.verdicts.bad} · 🚨 ${summary.verdicts.ugly}`,
     '',
     '<b>Trade review</b>',
     tradeLines + more,
@@ -179,6 +186,45 @@ function buildSessionTakeaway(coach: TradingCoachResponse): string {
     : 'Review each trade against entry conviction and exit timing before the next session.';
 }
 
+export function formatTelegramCoachOnDemandMessage(params: {
+  sessionDate: string;
+  coaches: TradingCoachResponse[];
+  snapshots: SignalSnapshot[];
+}): string {
+  const { sessionDate, coaches, snapshots } = params;
+  const dateLabel = formatIstDateLabel(sessionDate);
+
+  const sections = coaches.map((coach) => formatStyleSection(coach, snapshots));
+
+  const totalPnl = coaches.reduce((sum, c) => sum + c.summary.totalPnlInr, 0);
+  const totalTrades = coaches.reduce((sum, c) => sum + c.summary.totalRoundTrips, 0);
+  const pnlSign = totalPnl >= 0 ? '+' : '';
+  const anyFills = coaches.some((c) => c.rawFillCount > 0);
+  const headerPnl =
+    totalTrades > 0
+      ? [
+          `${pnlEmoji(totalPnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `${totalTrades} round trip(s)`,
+        ].join('\n')
+      : anyFills
+        ? '📭 Fills found — no closed round trips yet.\nSquare off for coaching replay.'
+        : '📭 No round trips this session.';
+
+  const body = [
+    '📚 <b>Coach</b>',
+    `📅 ${dateLabel} · tradebook`,
+    TELEGRAM_MSG_RULE,
+    headerPnl,
+    TELEGRAM_MSG_RULE,
+    ...sections,
+    TELEGRAM_MSG_RULE,
+    '🧠 Replay: index price only (no option flow).',
+  ].join('\n\n');
+
+  if (body.length <= 3900) return body;
+  return `${body.slice(0, 3850)}\n\n… message trimmed for Telegram length limit`;
+}
+
 export function formatTelegramCoachSummaryMessage(params: {
   sessionDate: string;
   coaches: TradingCoachResponse[];
@@ -194,22 +240,52 @@ export function formatTelegramCoachSummaryMessage(params: {
   const pnlSign = totalPnl >= 0 ? '+' : '';
   const headerPnl =
     totalTrades > 0
-      ? `${pnlEmoji(totalPnl)} <b>Combined PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${totalTrades} round trip(s)`
-      : '📭 No round trips detected across watched styles.';
+      ? [
+          `${pnlEmoji(totalPnl)} <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`,
+          `${totalTrades} round trip(s)`,
+        ].join('\n')
+      : '📭 No round trips across watched styles.';
 
   const body = [
-    '🏁📚 <b>SESSION END — TRADING COACH</b> 📚🏁',
+    '🏁 <b>Session coach</b>',
     `📅 ${dateLabel} · NSE close`,
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     headerPnl,
-    '━━━━━━━━━━━━━━━━━━━━',
+    TELEGRAM_MSG_RULE,
     ...sections,
-    '━━━━━━━━━━━━━━━━━━━━',
-    '🧠 Replay uses index price action only (no historical option flow).',
+    TELEGRAM_MSG_RULE,
+    '🧠 Replay: index price only (no option flow).',
   ].join('\n\n');
 
   if (body.length <= 3900) return body;
   return `${body.slice(0, 3850)}\n\n… message trimmed for Telegram length limit`;
+}
+
+export { FYERS_AUTH_ERROR_REPLY } from './fyers-login-reminder';
+
+export function isFyersAuthError(error: string): boolean {
+  const lower = error.toLowerCase();
+  return (
+    lower.includes('token') &&
+    (lower.includes('missing') ||
+      lower.includes('expired') ||
+      lower.includes('invalid') ||
+      lower.includes('login') ||
+      lower.includes('authenticate'))
+  );
+}
+
+export function formatTelegramCoachOnDemandErrorMessage(params: {
+  sessionDate: string;
+  error: string;
+}): string {
+  const dateLabel = formatIstDateLabel(params.sessionDate);
+  return [
+    '📚 <b>Coach</b>',
+    `📅 ${dateLabel}`,
+    TELEGRAM_MSG_RULE,
+    `⚠️ Could not load tradebook: ${escapeHtml(params.error)}`,
+  ].join('\n');
 }
 
 export function formatTelegramCoachErrorMessage(params: {
@@ -219,10 +295,10 @@ export function formatTelegramCoachErrorMessage(params: {
 }): string {
   const dateLabel = formatIstDateLabel(params.sessionDate);
   return [
-    '🏁📚 <b>SESSION END — TRADING COACH</b> 📚🏁',
+    '🏁 <b>Session coach</b>',
     `📅 ${dateLabel}`,
-    '━━━━━━━━━━━━━━━━━━━━',
-    `⚠️ Could not analyze today’s trades: ${escapeHtml(params.error)}`,
+    TELEGRAM_MSG_RULE,
+    `⚠️ Could not analyze trades: ${escapeHtml(params.error)}`,
     '',
     '<b>Final signals</b>',
     formatSignalRecap(params.snapshots),

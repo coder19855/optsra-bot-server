@@ -19,6 +19,10 @@ export const TELEGRAM_NOTIFICATION_DEFAULTS = {
   TP_SNAPSHOT_COLLECTION: 'position-tp-snapshots',
   /** Recent system entry alerts used to qualify an open Fyers leg for TP coaching. */
   ENTRY_INTENT_COLLECTION: 'trade-entry-intents',
+  ALERT_WHY_CONTEXT_COLLECTION: 'alert-why-context',
+  SIGNAL_OUTCOMES_COLLECTION: 'signal-outcomes',
+  /** Poll Telegram getUpdates for /why, /outcomes, etc. */
+  COMMAND_POLL_INTERVAL_MS: 5 * 1000,
   /** How long after a CE/PE entry alert we still treat a new open leg as intentional. */
   ENTRY_INTENT_WINDOW_MS: 3 * 60 * 60 * 1000,
   /**

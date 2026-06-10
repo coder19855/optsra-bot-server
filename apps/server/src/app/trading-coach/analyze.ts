@@ -13,6 +13,8 @@ import {
   CoachDateRange,
   fetchCoachTradeFills,
   fetchRealisedProfitSummary,
+  resolveCoachDisplayPnlInr,
+  sumRoundTripPnlInr,
 } from './fyers-trades';
 import { fetchIndexCandles, replayRoundTripTrade } from './replay';
 import { countInternalCarryFills, pairRoundTripTrades } from './trade-pairing';
@@ -39,6 +41,13 @@ export async function runTradingCoachAnalysis(
     postMinutes = COACH_DEFAULT_POST_MINUTES,
     tradeId,
   } = options;
+
+  const sessionReady = await fastify.ensureFyersSession();
+  if (!sessionReady) {
+    throw new Error(
+      'Fyers access token is missing or expired — complete login via /api/login',
+    );
+  }
 
   const tradePayload = await fetchCoachTradeFills(fastify.fyers, dateRange);
 
@@ -111,43 +120,40 @@ export async function runTradingCoachAnalysis(
     ugly: 0,
   };
 
-  let computedRoundTripPnlInr = 0;
+  const fifoSessionPnlInr = sumRoundTripPnlInr(roundTrips);
   let systemApprovedCount = 0;
   let winCount = 0;
   let lossCount = 0;
   const roundTripSymbols = new Set<string>();
 
+  for (const trade of roundTrips) {
+    roundTripSymbols.add(trade.optionSymbol);
+    if (trade.pnlInr > 0) winCount += 1;
+    else if (trade.pnlInr < 0) lossCount += 1;
+  }
+
   for (const report of reports) {
     verdicts[report.analysis.verdict] += 1;
-    computedRoundTripPnlInr += report.trade.pnlInr;
-    roundTripSymbols.add(report.trade.optionSymbol);
     if (report.analysis.systemApproved) systemApprovedCount += 1;
-    if (report.trade.pnlInr > 0) winCount += 1;
-    if (report.trade.pnlInr < 0) lossCount += 1;
   }
 
   let { pnlSummary, symbolPnl } = await fetchRealisedProfitSummary(
     fastify.fyers,
     dateRange,
     roundTripSymbols,
-    computedRoundTripPnlInr,
+    fifoSessionPnlInr,
   );
 
   if (indexFilter && symbolPnl.length > 0) {
     symbolPnl = symbolPnl.filter((row) => row.indexSymbol === indexFilter);
-    if (pnlSummary) {
-      const filteredGross = +symbolPnl
-        .reduce((sum, row) => sum + row.realizedPnlInr, 0)
-        .toFixed(2);
-      pnlSummary = {
-        ...pnlSummary,
-        grossPnlInr: filteredGross,
-        reconciled: Math.abs(filteredGross - pnlSummary.computedRoundTripPnlInr) < 1,
-      };
-    }
   }
 
-  const totalPnlInr = pnlSummary?.grossPnlInr ?? +computedRoundTripPnlInr.toFixed(2);
+  const totalPnlInr = resolveCoachDisplayPnlInr({
+    fifoSessionPnlInr,
+    pnlSummary,
+    symbolPnl,
+    indexFilter: indexFilter ?? null,
+  });
 
   const disclaimer =
     tradePayload.source === 'fyers_trade_history'
@@ -173,7 +179,7 @@ export async function runTradingCoachAnalysis(
       internalCarryFillsExcluded,
       verdicts,
       totalPnlInr: +totalPnlInr.toFixed(2),
-      computedRoundTripPnlInr: +computedRoundTripPnlInr.toFixed(2),
+      computedRoundTripPnlInr: fifoSessionPnlInr,
       systemApprovedCount,
       winCount,
       lossCount,

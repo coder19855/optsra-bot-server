@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { fyersModel } from 'fyers-api-v3';
+import { ResponseStatus } from '../types/common';
 
 export default fp(
   async (fastify: FastifyInstance) => {
@@ -51,14 +52,35 @@ export default fp(
       }
     };
 
-    // Add a hook to run initialization for all /api routes automatically
+    /** Load app id + access token from Mongo onto the Fyers client (required before REST calls). */
+    async function ensureFyersSession(options?: {
+      verifyWithApi?: boolean;
+    }): Promise<boolean> {
+      await fyers.initialize();
+      if (!(await fyers.isTokenValid())) return false;
+
+      if (options?.verifyWithApi) {
+        try {
+          const response = await fyers.get_profile();
+          return response.s === ResponseStatus.ok;
+        } catch (error) {
+          console.error('Fyers API session verification failed:', error);
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    // HTTP /api routes auto-initialize; Telegram commands and background jobs must call ensureFyersSession().
     fastify.addHook('onRequest', async (request) => {
       if (request.url.startsWith('/api')) {
-        await fyers.initialize();
+        await ensureFyersSession();
       }
     });
 
     fastify.decorate('fyers', fyers);
+    fastify.decorate('ensureFyersSession', ensureFyersSession);
   },
   { name: 'fyers' },
 );
