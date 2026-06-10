@@ -7,6 +7,9 @@
     "start": "node apps/server/dist/main.js"
   },
   "private": true,
+  "engines": {
+    "node": ">=20 <21"
+  },
   "dependencies": {
     "@fastify/autoload": "~6.0.3",
     "@fastify/mongodb": "^10.0.0",
