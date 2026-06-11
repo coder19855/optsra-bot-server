@@ -396,6 +396,10 @@ declare module 'fastify' {
         vetoMode: import('./types/veto-mode').VetoMode,
       ) => Promise<import('./types/veto-mode').VetoMode>;
       setVetoOff: (vetoOff: boolean) => Promise<boolean>;
+      getTradingStyle: () => import('./types/trading-style').TradingStyle;
+      setTradingStyle: (
+        tradingStyle: import('./types/trading-style').TradingStyle,
+      ) => Promise<import('./types/trading-style').TradingStyle>;
       resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;

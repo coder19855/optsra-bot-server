@@ -49,6 +49,11 @@ import {
 } from './voice-command';
 import { voiceDisplayName } from './voice-copy';
 import {
+  formatStyleStatusMessage,
+  parseStyleCommandArgs,
+  tradingStyleLabel,
+} from './style-command';
+import {
   formatVetoStatusMessage,
   parseVetoCommandArgs,
 } from './veto-command';
@@ -231,6 +236,8 @@ export class TelegramCommandPoller {
         await this.handleVoice(text, replyChatId);
       } else if (command === '/veto') {
         await this.handleVeto(text, replyChatId);
+      } else if (command === '/style' || command === '/tradingstyle') {
+        await this.handleStyle(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -680,6 +687,33 @@ export class TelegramCommandPoller {
         bucketLines
           ? joinTelegramLines('📊 <b>By conviction bucket</b>', bucketLines)
           : null,
+      ),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleStyle(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseStyleCommandArgs(text);
+
+    if (parsed.action !== 'status') {
+      const style = await this.fastify.telegramNotifications.setTradingStyle(
+        parsed.action,
+      );
+      const label = tradingStyleLabel(style);
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>Trading style → ${label}</b>`,
+          '<i>Alerts, /now, deck, and coach now use this style.</i>',
+          '<i>Use <code>/style status</code> for details.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatStyleStatusMessage(
+        this.fastify.telegramNotifications.getTradingStyle(),
       ),
       this.replyOptions(replyChatId),
     );

@@ -72,6 +72,11 @@ import {
   VoicePreferenceState,
 } from '../telegram-notifications/voice-preference';
 import {
+  loadStylePreference,
+  saveStylePreference,
+  StylePreferenceState,
+} from '../telegram-notifications/style-preference';
+import {
   loadVetoPreference,
   saveVetoPreference,
   VetoPreferenceState,
@@ -121,12 +126,16 @@ export default fp(
       process.env.TELEGRAM_NOTIFY_SYMBOLS,
       [...TELEGRAM_NOTIFICATION_DEFAULTS.DEFAULT_SYMBOLS],
     );
-    const watchedStyles = parseTradingStyles(
+    const defaultStylesFromEnv = parseTradingStyles(
       parseCsvEnv(
         process.env.TELEGRAM_NOTIFY_STYLES,
         TELEGRAM_NOTIFICATION_DEFAULTS.DEFAULT_TRADING_STYLES.map(String),
       ),
     );
+    const initialTradingStyle =
+      defaultStylesFromEnv[0] ?? TradingStyle.Intraday;
+    /** Mutable — /style updates this in place for polls and command defaults. */
+    const activeWatchedStyles: TradingStyle[] = [initialTradingStyle];
 
     const memorySnapshots = new Map<string, SignalSnapshot>();
     let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -152,6 +161,14 @@ export default fp(
     let vetoPreferenceState: VetoPreferenceState = {
       vetoMode: 'strict',
     };
+    let stylePreferenceState: StylePreferenceState = {
+      tradingStyle: initialTradingStyle,
+    };
+
+    function syncActiveWatchedStyles(tradingStyle: TradingStyle): void {
+      activeWatchedStyles.length = 0;
+      activeWatchedStyles.push(tradingStyle);
+    }
     const tpMemory = new Map<string, TpMonitorSnapshot>();
     let lastTpAlertAt: Date | null = null;
     let openPositionsMonitored = 0;
@@ -449,7 +466,7 @@ export default fp(
     async function loadAllSnapshots(): Promise<SignalSnapshot[]> {
       const snapshots: SignalSnapshot[] = [];
       for (const symbol of watchedSymbols) {
-        for (const style of watchedStyles) {
+        for (const style of activeWatchedStyles) {
           const snap = await loadSnapshot(symbol, style);
           if (snap) snapshots.push(snap);
         }
@@ -498,7 +515,7 @@ export default fp(
         try {
           await sendPreSessionLearningBrief(fastify, {
             watchedSymbols,
-            watchedStyles,
+            watchedStyles: activeWatchedStyles,
             voice: voicePreferenceState.voice,
             sendMessage: (text) =>
               sendTelegramMessage(text, { channel: 'default' }),
@@ -588,7 +605,7 @@ export default fp(
           await sendSessionCoachSummary(fastify, {
             sessionDate,
             symbols: watchedSymbols,
-            styles: watchedStyles,
+            styles: activeWatchedStyles,
             snapshots,
             voice: voicePreferenceState.voice,
             sendMessage: (text) =>
@@ -597,7 +614,7 @@ export default fp(
                 mergeDeckKeyboard({ channel: 'coach' }, {
                   symbol: watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX',
                   tradingStyle: String(
-                    watchedStyles[0] ?? TradingStyle.Intraday,
+                    activeWatchedStyles[0] ?? TradingStyle.Intraday,
                   ),
                   sessionDate,
                   includeReplay: true,
@@ -709,7 +726,7 @@ export default fp(
           const spotBySymbol: Record<string, number> = {};
 
           for (const symbol of watchedSymbols) {
-            for (const style of watchedStyles) {
+            for (const style of activeWatchedStyles) {
               try {
                 const result = await evaluateAndNotify(symbol, style, options);
                 spotBySymbol[symbol] = result.snapshot.lastPrice;
@@ -739,7 +756,7 @@ export default fp(
         }
 
         try {
-          const tpStyle = watchedStyles[0] ?? TradingStyle.Intraday;
+          const tpStyle = activeWatchedStyles[0] ?? TradingStyle.Intraday;
           const tpResult = await evaluateOpenPositionTpAlerts(fastify, {
             watchedSymbols,
             tradingStyle: tpStyle,
@@ -798,7 +815,7 @@ export default fp(
         {
           pollIntervalMs,
           symbols: watchedSymbols,
-          styles: watchedStyles,
+          styles: activeWatchedStyles,
         },
         'Telegram signal notifications polling started',
       );
@@ -814,7 +831,7 @@ export default fp(
     async function getStatus(): Promise<TelegramNotificationStatus> {
       const snapshots: TelegramNotificationStatus['snapshots'] = [];
       for (const symbol of watchedSymbols) {
-        for (const style of watchedStyles) {
+        for (const style of activeWatchedStyles) {
           const snap = await loadSnapshot(symbol, style);
           if (!snap) continue;
           snapshots.push({
@@ -871,7 +888,7 @@ export default fp(
           TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
         ),
         watched: watchedSymbols.flatMap((symbol) =>
-          watchedStyles.map((tradingStyle) => ({ symbol, tradingStyle })),
+          activeWatchedStyles.map((tradingStyle) => ({ symbol, tradingStyle })),
         ),
         lastPollAt: lastPollAt ? lastPollAt.toISOString() : null,
         lastPollError,
@@ -935,6 +952,26 @@ export default fp(
     async function setVetoOff(vetoOff: boolean): Promise<boolean> {
       await setVetoMode(vetoOff ? 'off' : 'strict');
       return isVetoOff();
+    }
+
+    function getTradingStyle(): TradingStyle {
+      return stylePreferenceState.tradingStyle;
+    }
+
+    async function setTradingStyle(
+      tradingStyle: TradingStyle,
+    ): Promise<TradingStyle> {
+      stylePreferenceState = await saveStylePreference(
+        fastify,
+        stylePreferenceState,
+        tradingStyle,
+      );
+      syncActiveWatchedStyles(stylePreferenceState.tradingStyle);
+      fastify.log.info(
+        { tradingStyle: stylePreferenceState.tradingStyle },
+        'Telegram active trading style updated',
+      );
+      return stylePreferenceState.tradingStyle;
     }
 
     async function setVoice(voice: TelegramVoice): Promise<TelegramVoice> {
@@ -1002,6 +1039,8 @@ export default fp(
       isVetoOff,
       setVetoMode,
       setVetoOff,
+      getTradingStyle,
+      setTradingStyle,
       resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
@@ -1029,6 +1068,11 @@ export default fp(
           fastify,
           vetoPreferenceState,
         );
+        stylePreferenceState = await loadStylePreference(
+          fastify,
+          stylePreferenceState,
+        );
+        syncActiveWatchedStyles(stylePreferenceState.tradingStyle);
         if (pollingPauseState.alertsPaused) {
           fastify.log.info(
             { pausedAt: pollingPauseState.pausedAt },
@@ -1053,7 +1097,7 @@ export default fp(
           defaultChatId: chatId,
           allowedUserIds,
           watchedSymbols,
-          watchedStyles,
+          watchedStyles: activeWatchedStyles,
           sendMessage: sendTelegramMessage,
           clearBotMessages: clearBotMessagesInChat,
           getExactStrikeForKey: (symbol, style) =>
