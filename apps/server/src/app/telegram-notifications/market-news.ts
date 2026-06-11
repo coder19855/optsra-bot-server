@@ -1,4 +1,9 @@
 import axios from 'axios';
+import {
+  MARKET_NEWS_DEFAULTS,
+  MARKET_NEWS_FEEDS,
+} from '../constants/market-news';
+import { MarketNewsFeedId } from '../types/market-news-feed';
 
 export interface MarketNewsHeadline {
   title: string;
@@ -6,9 +11,6 @@ export interface MarketNewsHeadline {
   publishedAt: string | null;
   url: string | null;
 }
-
-const DEFAULT_NEWS_RSS =
-  'https://news.google.com/rss/search?q=India+stock+market+NIFTY+OR+RBI+OR+inflation+OR+crude&hl=en-IN&gl=IN&ceid=IN:en';
 
 function decodeXml(text: string): string {
   return text
@@ -23,7 +25,10 @@ function decodeXml(text: string): string {
 }
 
 function extractTag(block: string, tag: string): string | null {
-  const match = block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i'));
+  const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = block.match(
+    new RegExp(`<${escapedTag}[^>]*>([\\s\\S]*?)</${escapedTag}>`, 'i'),
+  );
   return match ? decodeXml(match[1]) : null;
 }
 
@@ -36,16 +41,48 @@ function parseSourceFromTitle(title: string): { title: string; source: string | 
   };
 }
 
+export function isCnbctv18FeedUrl(url: string): boolean {
+  return url.toLowerCase().includes('cnbctv18.com');
+}
+
+export function resolveMarketNewsRssUrl(
+  feedId: MarketNewsFeedId = MARKET_NEWS_DEFAULTS.DEFAULT_FEED_ID,
+): string {
+  const envOverride = process.env.TELEGRAM_MARKET_NEWS_RSS_URL?.trim();
+  if (envOverride) return envOverride;
+  return MARKET_NEWS_FEEDS[feedId].url;
+}
+
 export function isMarketNewsEnabled(): boolean {
   return (
     (process.env.TELEGRAM_MARKET_NEWS_ENABLED ?? 'true').toLowerCase() !== 'false'
   );
 }
 
+export function resolveHeadlineSource(
+  item: string,
+  rawTitle: string,
+  feedUrl: string,
+): { title: string; source: string | null } {
+  const { title, source: titleSource } = parseSourceFromTitle(rawTitle);
+
+  if (isCnbctv18FeedUrl(feedUrl)) {
+    const byline = extractTag(item, 'dc:creator');
+    const label = MARKET_NEWS_DEFAULTS.SOURCE_LABEL;
+    return {
+      title,
+      source: byline ? `${label} · ${byline}` : label,
+    };
+  }
+
+  return { title, source: titleSource };
+}
+
 export async function fetchMarketNewsHeadlines(
   limit = 5,
+  feedId: MarketNewsFeedId = MARKET_NEWS_DEFAULTS.DEFAULT_FEED_ID,
 ): Promise<MarketNewsHeadline[]> {
-  const rssUrl = process.env.TELEGRAM_MARKET_NEWS_RSS_URL?.trim() || DEFAULT_NEWS_RSS;
+  const rssUrl = resolveMarketNewsRssUrl(feedId);
 
   try {
     const res = await axios.get<string>(rssUrl, {
@@ -62,7 +99,7 @@ export async function fetchMarketNewsHeadlines(
       const rawTitle = extractTag(item, 'title');
       if (!rawTitle) continue;
 
-      const { title, source } = parseSourceFromTitle(rawTitle);
+      const { title, source } = resolveHeadlineSource(item, rawTitle, rssUrl);
       headlines.push({
         title,
         source,

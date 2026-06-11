@@ -109,7 +109,8 @@ export async function buildLearningTelegramMessage(
 
   let newsHeadlines;
   if (includeNews && isMarketNewsEnabled()) {
-    newsHeadlines = await fetchMarketNewsHeadlines(5);
+    const feedId = fastify.telegramNotifications?.getNewsFeed?.() ?? 'google';
+    newsHeadlines = await fetchMarketNewsHeadlines(5, feedId);
   }
 
   return {

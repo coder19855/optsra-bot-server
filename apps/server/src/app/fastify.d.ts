@@ -400,6 +400,10 @@ declare module 'fastify' {
       setTradingStyle: (
         tradingStyle: import('./types/trading-style').TradingStyle,
       ) => Promise<import('./types/trading-style').TradingStyle>;
+      getNewsFeed: () => import('./types/market-news-feed').MarketNewsFeedId;
+      setNewsFeed: (
+        feedId: import('./types/market-news-feed').MarketNewsFeedId,
+      ) => Promise<import('./types/market-news-feed').MarketNewsFeedId>;
       resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;

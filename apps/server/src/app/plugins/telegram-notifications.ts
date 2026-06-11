@@ -72,6 +72,11 @@ import {
   VoicePreferenceState,
 } from '../telegram-notifications/voice-preference';
 import {
+  loadNewsFeedPreference,
+  saveNewsFeedPreference,
+  NewsFeedPreferenceState,
+} from '../telegram-notifications/news-feed-preference';
+import {
   loadStylePreference,
   saveStylePreference,
   StylePreferenceState,
@@ -163,6 +168,9 @@ export default fp(
     };
     let stylePreferenceState: StylePreferenceState = {
       tradingStyle: initialTradingStyle,
+    };
+    let newsFeedPreferenceState: NewsFeedPreferenceState = {
+      feedId: 'google',
     };
 
     function syncActiveWatchedStyles(tradingStyle: TradingStyle): void {
@@ -958,6 +966,25 @@ export default fp(
       return stylePreferenceState.tradingStyle;
     }
 
+    function getNewsFeed(): import('../types/market-news-feed').MarketNewsFeedId {
+      return newsFeedPreferenceState.feedId;
+    }
+
+    async function setNewsFeed(
+      feedId: import('../types/market-news-feed').MarketNewsFeedId,
+    ): Promise<import('../types/market-news-feed').MarketNewsFeedId> {
+      newsFeedPreferenceState = await saveNewsFeedPreference(
+        fastify,
+        newsFeedPreferenceState,
+        feedId,
+      );
+      fastify.log.info(
+        { feedId: newsFeedPreferenceState.feedId },
+        'Telegram market news feed updated',
+      );
+      return newsFeedPreferenceState.feedId;
+    }
+
     async function setTradingStyle(
       tradingStyle: TradingStyle,
     ): Promise<TradingStyle> {
@@ -1041,6 +1068,8 @@ export default fp(
       setVetoOff,
       getTradingStyle,
       setTradingStyle,
+      getNewsFeed,
+      setNewsFeed,
       resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
@@ -1071,6 +1100,10 @@ export default fp(
         stylePreferenceState = await loadStylePreference(
           fastify,
           stylePreferenceState,
+        );
+        newsFeedPreferenceState = await loadNewsFeedPreference(
+          fastify,
+          newsFeedPreferenceState,
         );
         syncActiveWatchedStyles(stylePreferenceState.tradingStyle);
         if (pollingPauseState.alertsPaused) {

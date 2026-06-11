@@ -35,6 +35,12 @@ import {
   buildRiskRewardTelegramMessage,
 } from './account-commands';
 import { buildBestStrikeTelegramMessage } from './best-strike-command';
+import { buildNewsTelegramMessage } from './news-command';
+import {
+  formatNewsFeedStatusMessage,
+  parseNewsFeedCommandArgs,
+} from './news-feed-command';
+import { getNewsFeedOption } from './news-feed-preference';
 import { buildLearningTelegramMessage } from './session-learning';
 import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { mergeDeckKeyboard } from './deck-keyboard';
@@ -202,6 +208,10 @@ export class TelegramCommandPoller {
         await this.handleCoach(text, replyChatId);
       } else if (command === '/learning') {
         await this.handleLearning(text, replyChatId);
+      } else if (command === '/news' || command === '/headlines') {
+        await this.handleNews(text, replyChatId);
+      } else if (command === '/newsfeed' || command === '/newssource') {
+        await this.handleNewsFeed(text, replyChatId);
       } else if (command === '/best-strike' || command === '/beststrike') {
         await this.handleBestStrike(text, replyChatId);
       } else if (
@@ -538,6 +548,53 @@ export class TelegramCommandPoller {
         ? this.fyersAuthReplyOptions(replyChatId)
         : this.replyOptions(replyChatId);
       await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+      return;
+    }
+
+    await this.deps.sendMessage(result.message, this.replyOptions(replyChatId));
+  }
+
+  private async handleNewsFeed(
+    text: string,
+    replyChatId?: number,
+  ): Promise<void> {
+    const parsed = parseNewsFeedCommandArgs(text);
+
+    if (parsed.action !== 'status') {
+      const feedId = await this.fastify.telegramNotifications.setNewsFeed(
+        parsed.action,
+      );
+      const feed = getNewsFeedOption(feedId);
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>News feed → ${feed.label}</b>`,
+          `<i>${feed.description}</i>`,
+          '<i>Use <code>/news</code> to fetch headlines from this feed.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatNewsFeedStatusMessage(
+        this.fastify.telegramNotifications.getNewsFeed(),
+      ),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleNews(text: string, replyChatId?: number): Promise<void> {
+    const result = await buildNewsTelegramMessage(this.fastify, {
+      text,
+      voice: this.fastify.telegramNotifications.getVoice(),
+    });
+
+    if (result.error) {
+      await this.deps.sendMessage(
+        `⚠️ ${result.error}`,
+        this.replyOptions(replyChatId),
+      );
       return;
     }
 

@@ -1,4 +1,5 @@
 import { MarketNewsHeadline } from './market-news';
+import { formatMarketNewsSection as formatLinkedMarketNewsSection } from './market-news-formatter';
 import { LearningInsightProfile } from './learning-insights';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
@@ -51,24 +52,6 @@ function formatPatterns(
     .join('\n');
 }
 
-export function formatMarketNewsSection(
-  headlines: MarketNewsHeadline[],
-  voice: TelegramVoice = DEFAULT_TELEGRAM_VOICE,
-): string | null {
-  if (!headlines.length) return null;
-
-  const lines = headlines.slice(0, 3).map((item) => {
-    const source = item.source ? ` (${escapeHtml(item.source)})` : '';
-    return `• ${escapeHtml(item.title)}${source}`;
-  });
-
-  return wrapScenarioCallout(
-    'info',
-    `<b>📰 ${uiLearningHeadlinesTitle(voice)}</b>`,
-    lines,
-  );
-}
-
 export function formatLearningTelegramMessage(params: {
   profile: LearningInsightProfile;
   sessionDate: string;
@@ -118,7 +101,11 @@ export function formatLearningTelegramMessage(params: {
       : null;
 
   const newsBlock = params.includeNews
-    ? formatMarketNewsSection(params.newsHeadlines ?? [], voice)
+    ? formatLinkedMarketNewsSection(
+        params.newsHeadlines ?? [],
+        uiLearningHeadlinesTitle(voice),
+        3,
+      )
     : null;
 
   const footerBlock = preamble ? uiLearningFooter(voice) : null;

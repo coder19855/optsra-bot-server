@@ -49,9 +49,17 @@ export function formatCommandsReferenceMessage(
     `<i>Try:</i> <code>/coach</code> · <code>/coach ${style}</code> · <code>/coach ${today}</code>`,
   ]);
 
+  const newsBlock = commandBlock('📰 <b>Market headlines</b>', [
+    '<code>/news</code> — headlines from your active feed (tap to open)',
+    '<code>/newsfeed status</code> — Google multi-source vs CNBC-TV18 economy',
+    '<code>/newsfeed google</code> — Mint, ET, Reuters… (default)',
+    '<code>/newsfeed cnbc</code> — CNBC-TV18 economy desk',
+    '<i>Try:</i> <code>/news</code> · <code>/news 10</code>',
+  ]);
+
   const learningBlock = commandBlock('🧠 <b>Don’t repeat mistakes</b>', [
     '<code>/learning</code> — your leaks &amp; good habits from recent trades',
-    '<i>Try:</i> <code>/learning</code> · <code>/learning 14</code> · <code>/learning news</code>',
+    '<i>Try:</i> <code>/learning</code> · <code>/learning 14</code>',
   ]);
 
   const outcomesBlock = commandBlock('📊 <b>Paper scoreboard</b>', [
@@ -144,6 +152,7 @@ export function formatCommandsReferenceMessage(
     intro,
     whyBlock,
     coachBlock,
+    newsBlock,
     learningBlock,
     outcomesBlock,
     convictionBlock,
@@ -172,6 +181,8 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },
+  { command: 'news', description: 'Market headlines with links' },
+  { command: 'newsfeed', description: 'Switch Google / CNBC feed' },
   { command: 'learning', description: 'Habits from your trades' },
   { command: 'login', description: 'Wake up Fyers session' },
   { command: 'apiusage', description: 'Fyers API consumption' },
