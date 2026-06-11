@@ -129,6 +129,6 @@ describe('formatTelegramCoachSummaryMessage', () => {
     expect(message).toContain('Still open');
     expect(message).toContain('NIFTY2661623150PE');
     expect(message).toContain('09:16→10:12');
-    expect(message).toContain('75 lot');
+    expect(message).toContain('75 qty');
   });
 });

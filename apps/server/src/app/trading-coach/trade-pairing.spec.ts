@@ -1,5 +1,6 @@
 import { FyersTradeFill } from '../types/trading-coach';
-import { pairRoundTripTrades } from './trade-pairing';
+import { mergeRoundTripLegs, pairRoundTripTrades } from './trade-pairing';
+import { RoundTripTrade } from '../types/trading-coach';
 
 const SYMBOL = 'NSE:NIFTY2661623150PE';
 
@@ -76,5 +77,45 @@ describe('pairRoundTripTrades', () => {
     expect(openPositions).toHaveLength(1);
     expect(openPositions[0].qty).toBe(75);
     expect(openPositions[0].avgEntryPremium).toBe(100);
+  });
+});
+
+describe('mergeRoundTripLegs', () => {
+  function makeTrip(
+    overrides: Partial<RoundTripTrade> & Pick<RoundTripTrade, 'qty' | 'pnlInr'>,
+  ): RoundTripTrade {
+    const entryAtMs = Date.parse('2026-06-11T14:46:00+05:30');
+    const exitAtMs = Date.parse('2026-06-11T14:55:00+05:30');
+    return {
+      id: overrides.id ?? 'trip-1',
+      optionSymbol: overrides.optionSymbol ?? SYMBOL,
+      indexSymbol: 'NSE:NIFTY50-INDEX',
+      underlying: 'NIFTY',
+      optionType: 'PE',
+      direction: 'PE-BUY',
+      entryAtMs,
+      exitAtMs,
+      entryAtISO: new Date(entryAtMs).toISOString(),
+      exitAtISO: new Date(exitAtMs).toISOString(),
+      sessionDate: '2026-06-11',
+      entryPremium: 100,
+      exitPremium: 110,
+      pnlPremium: 10,
+      productType: 'INTRADAY',
+      entryFills: [],
+      exitFills: [],
+      ...overrides,
+    };
+  }
+
+  it('merges partial exits with the same symbol and entry/exit minute', () => {
+    const merged = mergeRoundTripLegs([
+      makeTrip({ id: 'a', qty: 65, pnlInr: 722 }),
+      makeTrip({ id: 'b', qty: 65, pnlInr: 722 }),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0].qty).toBe(130);
+    expect(merged[0].pnlInr).toBe(1444);
   });
 });

@@ -194,3 +194,59 @@ export function pairRoundTripTrades(fills: FyersTradeFill[]): CoachPairingResult
     openPositions: openPositions.sort((a, b) => b.entryAtMs - a.entryAtMs),
   };
 }
+
+function roundTripMergeKey(trade: RoundTripTrade): string {
+  const entryBucket = Math.floor(trade.entryAtMs / 60_000);
+  const exitBucket = Math.floor(trade.exitAtMs / 60_000);
+  return `${trade.optionSymbol}|${entryBucket}|${exitBucket}`;
+}
+
+function mergeRoundTripGroup(trips: RoundTripTrade[]): RoundTripTrade {
+  if (trips.length === 1) return trips[0];
+
+  const first = trips[0];
+  const qty = trips.reduce((sum, trip) => sum + trip.qty, 0);
+  const pnlInr = +trips.reduce((sum, trip) => sum + trip.pnlInr, 0).toFixed(2);
+  const entryPremium = weightedAvg(
+    trips.map((trip) => ({ qty: trip.qty, price: trip.entryPremium })),
+  );
+  const exitPremium = weightedAvg(
+    trips.map((trip) => ({ qty: trip.qty, price: trip.exitPremium })),
+  );
+  const pnlPremium = +(exitPremium - entryPremium).toFixed(2);
+  const entryAtMs = Math.min(...trips.map((trip) => trip.entryAtMs));
+  const exitAtMs = Math.max(...trips.map((trip) => trip.exitAtMs));
+
+  return {
+    ...first,
+    id: `${first.optionSymbol}-${entryAtMs}-${exitAtMs}-${qty}`,
+    qty,
+    entryPremium,
+    exitPremium,
+    pnlPremium,
+    pnlInr,
+    entryAtMs,
+    exitAtMs,
+    entryAtISO: toIso(entryAtMs),
+    exitAtISO: toIso(exitAtMs),
+    sessionDate: getIstSessionDate(entryAtMs),
+    entryFills: trips.flatMap((trip) => trip.entryFills),
+    exitFills: trips.flatMap((trip) => trip.exitFills),
+  };
+}
+
+/** Collapse partial-fill legs that share symbol + entry/exit minute into one coached trade. */
+export function mergeRoundTripLegs(roundTrips: RoundTripTrade[]): RoundTripTrade[] {
+  const groups = new Map<string, RoundTripTrade[]>();
+
+  for (const trip of roundTrips) {
+    const key = roundTripMergeKey(trip);
+    const bucket = groups.get(key) ?? [];
+    bucket.push(trip);
+    groups.set(key, bucket);
+  }
+
+  return [...groups.values()]
+    .map((trips) => mergeRoundTripGroup(trips))
+    .sort((a, b) => b.exitAtMs - a.exitAtMs);
+}

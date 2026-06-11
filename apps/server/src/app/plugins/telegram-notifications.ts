@@ -148,6 +148,7 @@ export default fp(
     let openPositionsMonitored = 0;
     let openPositionsTracked = 0;
     let commandPoller: TelegramCommandPoller | null = null;
+    let manualCoachInFlight = false;
     let lastFyersLoginReminderAt: Date | null = null;
     const messageJournal = new TelegramMessageJournal();
     const lastExactStrikeByKey = new Map<string, NonNullable<
@@ -544,6 +545,13 @@ export default fp(
           fastify,
           sessionCoachState,
         );
+
+        if (manualCoachInFlight) {
+          fastify.log.debug(
+            'Session coach skipped — manual /coach in progress',
+          );
+          return;
+        }
 
         if (!allowCoach && sessionCoachState.lastSessionDate === sessionDate) {
           return;
@@ -968,6 +976,7 @@ export default fp(
           );
         }
 
+        commandPoller?.stop();
         commandPoller = new TelegramCommandPoller(fastify, {
           botToken,
           defaultChatId: chatId,
@@ -979,6 +988,23 @@ export default fp(
           getExactStrikeForKey: (symbol, style) =>
             lastExactStrikeByKey.get(snapshotKey(symbol, style)),
           loadSnapshots: loadAllSnapshots,
+          onCoachCommandBegin: () => {
+            manualCoachInFlight = true;
+          },
+          onCoachCommandEnd: () => {
+            manualCoachInFlight = false;
+          },
+          onCoachCommandComplete: async (sessionDate) => {
+            sessionCoachState = await saveSessionCoachState(
+              fastify,
+              sessionCoachState,
+              {
+                lastSessionDate: sessionDate,
+                lastSentAt: new Date(),
+                lastError: null,
+              },
+            );
+          },
         });
 
         // Do not block onReady — pollAll + Telegram API can exceed Fastify's

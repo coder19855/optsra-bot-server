@@ -71,22 +71,60 @@ function pnlIcon(pnl: number): string {
   return paletteToken(scenarioForPnl(pnl)).accent;
 }
 
+function formatSignedInr(pnl: number, maxFractionDigits = 0): string {
+  if (pnl === 0) return '₹0';
+  const sign = pnl > 0 ? '+' : '-';
+  return `${sign}₹${Math.abs(pnl).toLocaleString('en-IN', {
+    maximumFractionDigits: maxFractionDigits,
+  })}`;
+}
+
 function verdictPrefix(verdict: CoachVerdict): string {
   return paletteToken(scenarioForCoachVerdict(verdict)).accent;
+}
+
+function formatEntryMinuteLabel(entryAtMs: number): string {
+  return formatIstClockFromMs(entryAtMs);
+}
+
+function formatGroupedTradeLines(reports: TradingCoachTradeReport[]): string {
+  const groups = new Map<number, TradingCoachTradeReport[]>();
+
+  for (const report of reports) {
+    const bucket = Math.floor(report.trade.entryAtMs / 60_000);
+    const bucketReports = groups.get(bucket) ?? [];
+    bucketReports.push(report);
+    groups.set(bucket, bucketReports);
+  }
+
+  const sortedBuckets = [...groups.keys()].sort((a, b) => b - a);
+
+  return sortedBuckets
+    .map((bucket) => {
+      const bucketReports = groups.get(bucket) ?? [];
+      const lines = bucketReports.map((report) => formatTradeLine(report));
+
+      if (bucketReports.length === 1) {
+        return lines[0];
+      }
+
+      const label = formatEntryMinuteLabel(bucketReports[0].trade.entryAtMs);
+      return joinTelegramLines(`🕐 <b>${label}</b> entry window`, ...lines);
+    })
+    .join('\n\n');
 }
 
 function formatTradeLine(report: TradingCoachTradeReport): string {
   const { trade, analysis } = report;
   const pnl = trade.pnlInr;
-  const sign = pnl >= 0 ? '+' : '';
   const time = formatTradeTimeRange(trade);
   const coaching = analysis.coaching[0] ?? '';
   const optionLabel = trade.optionSymbol.split(':').pop() ?? trade.optionSymbol;
   const approved = analysis.systemApproved ? '✅' : '⚠️ off-script';
-  const qtyLabel = trade.qty > 1 ? ` · ${trade.qty} lot` : '';
+  const qtyLabel = ` · ${trade.qty} qty`;
 
   return [
-    `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${time}${qtyLabel} · ${pnlIcon(pnl)} ${sign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${approved}`,
+    `${verdictPrefix(analysis.verdict)} <b>${escapeHtml(optionLabel)}</b> · ${time}${qtyLabel} · ${pnlIcon(pnl)} ${formatSignedInr(pnl)} · ${approved}`,
     coaching ? `   💡 ${escapeHtml(coaching)}` : null,
   ]
     .filter(Boolean)
@@ -96,7 +134,7 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
 function formatOpenPositionLine(pos: CoachOpenPosition): string {
   const optionLabel = pos.optionSymbol.split(':').pop() ?? pos.optionSymbol;
   const time = formatIstClockFromMs(pos.entryAtMs);
-  const qtyLabel = pos.qty > 1 ? `${pos.qty} lots` : '1 lot';
+  const qtyLabel = `${pos.qty} qty`;
   return `📂 <b>${escapeHtml(optionLabel)}</b> · ${time} · ${qtyLabel} · avg ₹${pos.avgEntryPremium.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
@@ -139,15 +177,13 @@ function buildCoachHeaderPnl(
 
   if (totalTrades === 0) {
     if (totalOpen > 0) {
-      const pnlSign = totalPnl >= 0 ? '+' : '';
       const lines = [
-        `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+        `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${formatSignedInr(totalPnl, 2)}`,
         `📂 ${totalOpen} position(s) still open — no closed legs yet`,
       ];
       if (brokerNet != null && Math.abs(brokerNet - totalPnl) >= 1) {
-        const brokerSign = brokerNet >= 0 ? '+' : '';
         lines.push(
-          `   📎 Fyers account net: ${brokerSign}₹${Math.abs(brokerNet).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+          `   📎 Fyers account net: ${formatSignedInr(brokerNet, 2)}`,
         );
       }
       return lines.join('\n');
@@ -155,22 +191,15 @@ function buildCoachHeaderPnl(
     return anyFills ? '📭 Fills logged — nothing closed yet' : emptyClosedLabel;
   }
 
-  const pnlSign = totalPnl >= 0 ? '+' : '';
   const lines = [
-    `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${pnlSign}₹${Math.abs(totalPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
+    `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${formatSignedInr(totalPnl, 2)}`,
     `🏁 ${totalTrades} closed leg(s)${totalOpen > 0 ? ` · 📂 ${totalOpen} open` : ''}`,
   ];
 
   if (totalOpen > 0 && Math.abs(closedPnl - totalPnl) >= 1) {
-    const closedSign = closedPnl >= 0 ? '+' : '';
-    lines.push(
-      `   📎 Closed legs only: ${closedSign}₹${Math.abs(closedPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-    );
+    lines.push(`   📎 Closed legs only: ${formatSignedInr(closedPnl, 2)}`);
   } else if (brokerNet != null && Math.abs(brokerNet - totalPnl) >= 1) {
-    const brokerSign = brokerNet >= 0 ? '+' : '';
-    lines.push(
-      `   📎 Fyers account net: ${brokerSign}₹${Math.abs(brokerNet).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`,
-    );
+    lines.push(`   📎 Fyers account net: ${formatSignedInr(brokerNet, 2)}`);
   }
 
   return lines.join('\n');
@@ -210,16 +239,14 @@ function formatStyleSection(
   }
 
   const closedPnl = summary.computedRoundTripPnlInr;
-  const closedSign = closedPnl >= 0 ? '+' : '';
+  const pnlText = formatSignedInr(closedPnl, 2);
   const stylePnlLine =
     summary.openPositionCount > 0 &&
     Math.abs(closedPnl - summary.totalPnlInr) >= 1
-      ? `💰 Closed legs ${closedSign}₹${Math.abs(closedPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`
-      : `💰 ${closedSign}₹${Math.abs(closedPnl).toLocaleString('en-IN', { maximumFractionDigits: 2 })} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`;
-  const tradeLines = coach.trades
-    .slice(0, 5)
-    .map((report) => formatTradeLine(report))
-    .join('\n\n');
+      ? `💰 Closed legs ${pnlText} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`
+      : `💰 ${pnlText} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`;
+  const visibleTrades = coach.trades.slice(0, 5);
+  const tradeLines = formatGroupedTradeLines(visibleTrades);
 
   const more =
     coach.trades.length > 5

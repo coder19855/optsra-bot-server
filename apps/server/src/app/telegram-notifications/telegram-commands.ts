@@ -75,11 +75,19 @@ export interface TelegramCommandDeps {
     chatId: number,
     options: { anchorMessageId: number; limit?: number },
   ) => Promise<{ deleted: number; failed: number }>;
+  /** Blocks auto day-wrap coach while manual /coach is running. */
+  onCoachCommandBegin?: () => void;
+  onCoachCommandEnd?: () => void;
+  /** Marks today's coach as delivered so auto wrap does not duplicate. */
+  onCoachCommandComplete?: (sessionDate: string) => Promise<void>;
 }
 
 export class TelegramCommandPoller {
   private offset = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private pollInFlight = false;
+  private coachInFlight = false;
+  private readonly seenUpdateIds = new Set<number>();
 
   constructor(
     private readonly fastify: FastifyInstance,
@@ -95,7 +103,7 @@ export class TelegramCommandPoller {
   }
 
   start(intervalMs = 5000): void {
-    if (this.timer) return;
+    this.stop();
     this.timer = setInterval(() => {
       void this.pollOnce();
     }, intervalMs);
@@ -119,8 +127,9 @@ export class TelegramCommandPoller {
   }
 
   private async pollOnce(): Promise<void> {
-    if (!this.deps.botToken) return;
+    if (!this.deps.botToken || this.pollInFlight) return;
 
+    this.pollInFlight = true;
     try {
       const url = `${TELEGRAM_API_BASE}/bot${this.deps.botToken}/getUpdates`;
       const res = await axios.get(url, {
@@ -129,11 +138,23 @@ export class TelegramCommandPoller {
 
       const updates = (res.data?.result ?? []) as TelegramUpdate[];
       for (const update of updates) {
-        this.offset = update.update_id + 1;
+        this.offset = Math.max(this.offset, update.update_id + 1);
+        if (this.seenUpdateIds.has(update.update_id)) continue;
+        this.rememberUpdateId(update.update_id);
         await this.handleUpdate(update);
       }
     } catch (err) {
       this.fastify.log.debug({ err }, 'Telegram command poll failed');
+    } finally {
+      this.pollInFlight = false;
+    }
+  }
+
+  private rememberUpdateId(updateId: number): void {
+    this.seenUpdateIds.add(updateId);
+    if (this.seenUpdateIds.size > 256) {
+      const oldest = this.seenUpdateIds.values().next().value;
+      if (oldest != null) this.seenUpdateIds.delete(oldest);
     }
   }
 
@@ -524,39 +545,56 @@ export class TelegramCommandPoller {
   }
 
   private async handleCoach(text: string, replyChatId?: number): Promise<void> {
-    const reply = this.replyOptions(replyChatId);
-    const sessionReady = await this.fastify.ensureFyersSession({
-      verifyWithApi: true,
-    });
-    if (!sessionReady) {
+    if (this.coachInFlight) {
       await this.deps.sendMessage(
-        FYERS_AUTH_ERROR_REPLY,
-        this.fyersAuthReplyOptions(replyChatId),
+        '⏳ Coach is already running — hang tight.',
+        this.replyOptions(replyChatId),
       );
       return;
     }
 
-    const { sessionDate, styleFilter } = parseCoachCommandArgs(text);
-    const snapshots = (await this.deps.loadSnapshots?.()) ?? [];
+    this.coachInFlight = true;
+    this.deps.onCoachCommandBegin?.();
 
-    const message = await buildCoachTelegramMessage(this.fastify, {
-      watchedSymbols: this.deps.watchedSymbols,
-      watchedStyles: this.deps.watchedStyles,
-      snapshots,
-      styleFilter,
-      sessionDate,
-      voice: this.fastify.telegramNotifications.getVoice(),
-    });
+    try {
+      const reply = this.replyOptions(replyChatId);
+      const sessionReady = await this.fastify.ensureFyersSession({
+        verifyWithApi: true,
+      });
+      if (!sessionReady) {
+        await this.deps.sendMessage(
+          FYERS_AUTH_ERROR_REPLY,
+          this.fyersAuthReplyOptions(replyChatId),
+        );
+        return;
+      }
 
-    if (message === FYERS_AUTH_ERROR_REPLY) {
-      await this.deps.sendMessage(
-        message,
-        this.fyersAuthReplyOptions(replyChatId),
-      );
-      return;
+      const { sessionDate, styleFilter } = parseCoachCommandArgs(text);
+      const snapshots = (await this.deps.loadSnapshots?.()) ?? [];
+
+      const message = await buildCoachTelegramMessage(this.fastify, {
+        watchedSymbols: this.deps.watchedSymbols,
+        watchedStyles: this.deps.watchedStyles,
+        snapshots,
+        styleFilter,
+        sessionDate,
+        voice: this.fastify.telegramNotifications.getVoice(),
+      });
+
+      if (message === FYERS_AUTH_ERROR_REPLY) {
+        await this.deps.sendMessage(
+          message,
+          this.fyersAuthReplyOptions(replyChatId),
+        );
+        return;
+      }
+
+      await this.deps.sendMessage(message, reply);
+      await this.deps.onCoachCommandComplete?.(sessionDate);
+    } finally {
+      this.coachInFlight = false;
+      this.deps.onCoachCommandEnd?.();
     }
-
-    await this.deps.sendMessage(message, reply);
   }
 
   private async handleOutcomes(replyChatId?: number): Promise<void> {

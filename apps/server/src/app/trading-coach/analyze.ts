@@ -17,7 +17,11 @@ import {
   sumRoundTripPnlInr,
 } from './fyers-trades';
 import { fetchIndexCandles, replayRoundTripTrade } from './replay';
-import { countInternalCarryFills, pairRoundTripTrades } from './trade-pairing';
+import {
+  countInternalCarryFills,
+  mergeRoundTripLegs,
+  pairRoundTripTrades,
+} from './trade-pairing';
 import { analyzeTradeVerdict } from './verdict';
 
 export interface TradingCoachAnalysisOptions {
@@ -63,6 +67,8 @@ export async function runTradingCoachAnalysis(
 
   if (tradeId) {
     roundTrips = roundTrips.filter((trade) => trade.id === tradeId);
+  } else {
+    roundTrips = mergeRoundTripLegs(roundTrips);
   }
 
   const deps = {

@@ -166,8 +166,16 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'commands', description: 'Re-send cheat sheet' },
 ] as const;
 
+export async function ensureTelegramPollingMode(botToken: string): Promise<void> {
+  if (!botToken) return;
+  await axios.post(`${TELEGRAM_API_BASE}/bot${botToken}/deleteWebhook`, {
+    drop_pending_updates: false,
+  });
+}
+
 export async function registerTelegramBotCommands(botToken: string): Promise<void> {
   if (!botToken) return;
+  await ensureTelegramPollingMode(botToken);
   await axios.post(`${TELEGRAM_API_BASE}/bot${botToken}/setMyCommands`, {
     commands: TELEGRAM_BOT_COMMANDS.map((c) => ({
       command: c.command,
