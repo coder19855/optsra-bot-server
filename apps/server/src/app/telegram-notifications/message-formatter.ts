@@ -267,7 +267,13 @@ function formatAdaptiveConvictionLine(
   conviction: number,
   voice: TelegramVoice,
 ): string | null {
-  if (!adaptive || adaptive.dataSource === 'defaults') return null;
+  if (
+    !adaptive ||
+    adaptive.dataSource === 'defaults' ||
+    adaptive.overallWinRate == null
+  ) {
+    return null;
+  }
 
   return adaptiveConvictionLine({
     voice,
