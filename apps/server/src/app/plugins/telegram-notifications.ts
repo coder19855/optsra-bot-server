@@ -872,15 +872,24 @@ export default fp(
             lastExactStrikeByKey.get(snapshotKey(symbol, style)),
           loadSnapshots: loadAllSnapshots,
         });
-        await commandPoller.setup();
-        commandPoller.start(
-          TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS,
-        );
-        try {
-          await pollAll();
-        } catch (err) {
-          fastify.log.warn({ err }, 'Initial Telegram poll failed');
-        }
+
+        // Do not block onReady — pollAll + Telegram API can exceed Fastify's
+        // default 10s hook timeout on cold Render deploys.
+        void (async () => {
+          try {
+            await commandPoller?.setup();
+            commandPoller?.start(
+              TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS,
+            );
+          } catch (err) {
+            fastify.log.warn({ err }, 'Telegram command poller setup failed');
+          }
+          try {
+            await pollAll();
+          } catch (err) {
+            fastify.log.warn({ err }, 'Initial Telegram poll failed');
+          }
+        })();
       });
     } else {
       fastify.log.warn(

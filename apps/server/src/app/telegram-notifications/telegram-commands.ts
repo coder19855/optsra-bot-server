@@ -40,6 +40,7 @@ import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { parseClearCommandLimit } from './telegram-message-journal';
 import { formatTelegramStatusMessage } from './status-formatter';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
+import { buildNowTelegramMessage } from './now-command';
 
 interface TelegramUpdate {
   update_id: number;
@@ -192,6 +193,8 @@ export class TelegramCommandPoller {
         await this.handleStop(replyChatId);
       } else if (command === '/status') {
         await this.handleStatus(replyChatId);
+      } else if (command === '/now') {
+        await this.handleNow(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -382,6 +385,25 @@ export class TelegramCommandPoller {
       formatTelegramStatusMessage(status),
       this.replyOptions(replyChatId),
     );
+  }
+
+  private async handleNow(text: string, replyChatId?: number): Promise<void> {
+    const result = await buildNowTelegramMessage(this.fastify, {
+      text,
+      watchedSymbols: this.deps.watchedSymbols,
+      watchedStyles: this.deps.watchedStyles,
+      isAlertsPaused: this.fastify.telegramNotifications.isAlertsPaused(),
+    });
+
+    if (result.error) {
+      const opts = isFyersAuthError(result.error)
+        ? this.fyersAuthReplyOptions(replyChatId)
+        : this.replyOptions(replyChatId);
+      await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+      return;
+    }
+
+    await this.deps.sendMessage(result.message, this.replyOptions(replyChatId));
   }
 
   private async handleWhy(text: string, replyChatId?: number): Promise<void> {

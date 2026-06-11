@@ -73,10 +73,15 @@ export function formatCommandsReferenceMessage(
     `<i>Try:</i> <code>/beststrike ${sym} ${style}</code> · <code>/beststrike CE</code>`,
   ]);
 
+  const nowBlock = commandBlock('📡 <b>Live market read</b>', [
+    '<code>/now</code> — current recommendation (all on watch)',
+    `<i>Try:</i> <code>/now ${sym} ${style}</code>`,
+  ]);
+
   const alertsBlock = commandBlock('⏯ <b>Alert cool-off</b>', [
     '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
     '<code>/start</code> — resume alerts (needs live Fyers session)',
-    '<code>/status</code> — paused vs active, market, TP watch',
+    '<code>/status</code> — bot health (polls, TP, Fyers token)',
   ]);
 
   const fyersBlock = commandBlock('🔐 <b>Fyers session</b>', [
@@ -119,6 +124,7 @@ export function formatCommandsReferenceMessage(
     outcomesBlock,
     convictionBlock,
     planBlock,
+    nowBlock,
     alertsBlock,
     fyersBlock,
     apiBlock,
@@ -132,6 +138,7 @@ export function formatCommandsReferenceMessage(
 export const TELEGRAM_BOT_COMMANDS = [
   { command: 'start', description: 'Resume signal alerts' },
   { command: 'stop', description: 'Pause signal alerts' },
+  { command: 'now', description: 'Live market recommendation' },
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },

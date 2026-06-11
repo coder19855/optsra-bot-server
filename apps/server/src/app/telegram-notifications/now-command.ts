@@ -1,0 +1,130 @@
+import { FastifyInstance } from 'fastify';
+import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
+import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
+import { TradingStyle } from '../types/trading-style';
+import { parseSymbolStyleCommandArgs } from './command-args';
+import {
+  formatNowTelegramMessage,
+  NowMarketContext,
+} from './now-formatter';
+import { fetchTradeDecisionAlert } from './trade-decision-fetch';
+import {
+  isIndianMarketOpen,
+  isWithinPostSessionCoachWindow,
+  isWithinPreSessionLearningWindow,
+} from './signal-tracker';
+
+function resolveWatchList(
+  text: string,
+  watchedSymbols: string[],
+  watchedStyles: TradingStyle[],
+  defaults: { symbol: string; style: TradingStyle },
+): Array<{ symbol: string; tradingStyle: TradingStyle }> {
+  const parts = text.split(/\s+/).filter(Boolean);
+  const hasArgs = parts.length > 1;
+
+  if (hasArgs) {
+    const { symbol, style } = parseSymbolStyleCommandArgs(text, defaults);
+    return [{ symbol, tradingStyle: style }];
+  }
+
+  const items: Array<{ symbol: string; tradingStyle: TradingStyle }> = [];
+  for (const symbol of watchedSymbols) {
+    for (const tradingStyle of watchedStyles) {
+      items.push({ symbol, tradingStyle });
+    }
+  }
+  return items;
+}
+
+export async function buildNowTelegramMessage(
+  fastify: FastifyInstance,
+  params: {
+    text: string;
+    watchedSymbols: string[];
+    watchedStyles: TradingStyle[];
+    isAlertsPaused: boolean;
+  },
+): Promise<{ message: string; error?: string }> {
+  const defaultSymbol = params.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
+  const defaultStyle = params.watchedStyles[0] ?? TradingStyle.Intraday;
+
+  const sessionReady = await fastify.ensureFyersSession({
+    verifyWithApi: true,
+  });
+  if (!sessionReady) {
+    return {
+      message: '',
+      error: 'Fyers session’s asleep — log in for a live market read.',
+    };
+  }
+
+  const now = Date.now();
+  const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+  const context: NowMarketContext = {
+    marketOpen: isIndianMarketOpen(
+      now,
+      timezone,
+      TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_OPEN,
+      TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+    ),
+    preSessionWindow: isWithinPreSessionLearningWindow(
+      now,
+      timezone,
+      TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_START,
+      TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_END,
+    ),
+    postSessionCoachWindow: isWithinPostSessionCoachWindow(
+      now,
+      timezone,
+      TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+      TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
+    ),
+    isTokenValid: true,
+    alertsPaused: params.isAlertsPaused,
+    fetchedAt: now,
+  };
+
+  const watchList = resolveWatchList(
+    params.text,
+    params.watchedSymbols,
+    params.watchedStyles,
+    { symbol: defaultSymbol, style: defaultStyle },
+  );
+
+  const items: TradeDecisionAlertPayload[] = [];
+  const errors: Array<{
+    symbol: string;
+    tradingStyle: TradingStyle;
+    error: string;
+  }> = [];
+
+  for (const watch of watchList) {
+    try {
+      const payload = await fetchTradeDecisionAlert(
+        fastify,
+        watch.symbol,
+        watch.tradingStyle,
+      );
+      if (payload) items.push(payload);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push({
+        symbol: watch.symbol,
+        tradingStyle: watch.tradingStyle,
+        error: msg,
+      });
+    }
+  }
+
+  if (!items.length && errors.length) {
+    return {
+      message: '',
+      error: errors[0]?.error ?? 'Could not load market read.',
+    };
+  }
+
+  return {
+    message: formatNowTelegramMessage({ context, items, errors }),
+  };
+}
