@@ -4,13 +4,30 @@ import {
 } from '../types/greeks-strike-insight';
 import {
   RecommendedStrategyAlert,
+  SignalAlertTone,
   SignalChangeKind,
   SignalSnapshot,
   TelegramPositionSizing,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
+import {
+  adaptiveConvictionLine,
+  playbookSectionNote,
+  playbookSectionTitle,
+  signalActionLabel,
+  signalChangeLine,
+  signalConvictionLine,
+  signalHeadline,
+  signalOptionRead,
+  signalPriceActionLine,
+  signalReadyText,
+  signalStrikeTitle,
+  walletSectionTitle,
+} from './voice-copy';
+import { formatTradeContextLines, formatVetoSection } from './trade-context-copy';
 import {
   formatEnginePickCallout,
   formatGreeksSectionHeader,
@@ -47,35 +64,46 @@ function isSignalFlip(
   );
 }
 
-function tradeHeadline(action: DecisionAction, flipped: boolean): string {
-  if (flipped) {
-    return formatScenarioBanner(
-      scenarioForSignalFlip(),
-      'Direction changed',
-    );
-  }
-  switch (action) {
-    case 'CE-BUY':
-      return formatScenarioBanner('bullish', 'BUY CALL · bet index goes UP');
-    case 'PE-BUY':
-      return formatScenarioBanner('bearish', 'BUY PUT · bet index goes DOWN');
-    case 'NEUTRAL':
-      return formatScenarioBanner('neutral', 'No direction · neutral strategies only');
-    default:
-      return formatScenarioBanner('muted', 'No trade · stay out');
-  }
-}
+function tradeHeadlineBanner(
+  action: DecisionAction,
+  flipped: boolean,
+  voice: TelegramVoice,
+  options?: {
+    alertTone?: SignalAlertTone;
+    exitReason?: string | null;
+    kinds?: SignalChangeKind[];
+  },
+): string {
+  const text = signalHeadline({
+    voice,
+    action,
+    flipped,
+    alertTone: options?.alertTone,
+    kinds: options?.kinds,
+    exitReason: options?.exitReason,
+  });
 
-function tradeActionLabel(action: DecisionAction): string {
+  if (options?.alertTone === 'hard_exit' || options?.kinds?.includes('HARD_EXIT')) {
+    return formatScenarioBanner('danger', text);
+  }
+  if (
+    options?.alertTone === 'caution' ||
+    options?.kinds?.includes('EDGE_FADE')
+  ) {
+    return formatScenarioBanner('warning', text);
+  }
+  if (flipped) {
+    return formatScenarioBanner(scenarioForSignalFlip(), text);
+  }
   switch (action) {
     case 'CE-BUY':
-      return 'Buy Call (CE)';
+      return formatScenarioBanner('bullish', text);
     case 'PE-BUY':
-      return 'Buy Put (PE)';
+      return formatScenarioBanner('bearish', text);
     case 'NEUTRAL':
-      return 'Neutral';
+      return formatScenarioBanner('neutral', text);
     default:
-      return 'No trade';
+      return formatScenarioBanner('muted', text);
   }
 }
 
@@ -87,42 +115,35 @@ function biasEmoji(bias: TradeBias): string {
   return '⏸';
 }
 
-function priceActionLine(paAction: string, confidence: number): string {
-  if (paAction === 'CE-BUY') {
-    return `📊 Price action: CE-BUY (bullish) · ${confidence}%`;
-  }
-  if (paAction === 'PE-BUY') {
-    return `📊 Price action: PE-BUY (bearish) · ${confidence}%`;
-  }
-  return `📊 Price action: ${paAction} · ${confidence}%`;
-}
+function priceActionLine(
+  pa: TradeDecisionAlertPayload['priceAction'],
+  brainAction: DecisionAction,
+  voice: TelegramVoice,
+): string {
+  const { action: paAction, confidence, structuralAction, vetoReason } = pa;
+  const beforeDecay = pa.confidenceBeforeDecay;
 
-function optionRead(
-  ofBias: string | undefined,
-  action: DecisionAction,
-): string | null {
-  if (!ofBias) return null;
+  const chartVetoed =
+    confidence === 0 ||
+    (brainAction === 'NO-TRADE' &&
+      (paAction === 'NO-TRADE' ||
+        structuralAction === 'CE-BUY' ||
+        structuralAction === 'PE-BUY'));
 
-  const lower = ofBias.toLowerCase();
-  const optionsUp = lower.includes('bullish');
-  const optionsDown = lower.includes('bearish');
-  if (!optionsUp && !optionsDown) return null;
-
-  if (action === 'CE-BUY' && optionsDown) {
-    return '⚠️ Options say DOWN — does not match this Call idea';
+  if (chartVetoed && vetoReason && voice === 'trader') {
+    return `📊 Price action: NO-TRADE · ${escapeHtml(vetoReason)}`;
   }
-  if (action === 'PE-BUY' && optionsUp) {
-    return '⚠️ Options say UP — does not match this Put idea';
-  }
-  if (optionsUp) return '🌊 Options agree: UP';
-  if (optionsDown) return '🌊 Options agree: DOWN';
-  return null;
-}
 
-function strikeTitle(action: DecisionAction): string {
-  if (action === 'CE-BUY') return '<b>BUY THIS CALL</b>';
-  if (action === 'PE-BUY') return '<b>BUY THIS PUT</b>';
-  return '<b>SUGGESTED STRIKE</b>';
+  return signalPriceActionLine({
+    voice,
+    paAction,
+    confidence,
+    brainAction,
+    chartVetoed,
+    structuralAction,
+    vetoReason,
+    beforeDecay,
+  });
 }
 
 function strategyRankEmoji(index: number): string {
@@ -133,23 +154,27 @@ function formatChangeLine(
   previous: SignalSnapshot | null,
   current: SignalSnapshot,
   kinds: SignalChangeKind[],
+  voice: TelegramVoice,
+  options?: { exitReason?: string | null },
 ): string | null {
+  const primary = signalChangeLine({
+    voice,
+    previous,
+    current,
+    kinds,
+    exitReason: options?.exitReason,
+    isFlip: Boolean(previous && isSignalFlip(previous, current)),
+  });
+  if (primary) return primary;
+
   if (!previous) return null;
-
-  if (isSignalFlip(previous, current)) {
-    return `🔄 Was ${tradeActionLabel(previous.action)} → now ${tradeActionLabel(current.action)}`;
-  }
-
-  if (kinds.includes('ACTION') || kinds.includes('INITIAL')) {
-    return `🔄 Was ${tradeActionLabel(previous.action)} → now ${tradeActionLabel(current.action)}`;
-  }
 
   const parts: string[] = [];
   if (kinds.includes('PA_SIGNAL') && previous.paAction !== current.paAction) {
     parts.push(`chart ${previous.paAction} → ${current.paAction}`);
   }
   if (kinds.includes('TRADE_READY')) {
-    parts.push('enter bar met');
+    parts.push(voice === 'trader' ? 'enter bar met' : 'enter bar OK');
   }
   return parts.length ? `🔄 ${parts.join(' · ')}` : null;
 }
@@ -207,7 +232,19 @@ export function formatPositionSizingTelegramSection(
     lines.push('Not enough margin for 1 lot at this stop.');
   }
 
-  return wrapScenarioCallout('info', '<b>🏦 Wallet</b>', lines);
+  return wrapScenarioCallout('info', `<b>🏦 ${walletSectionTitle('trader')}</b>`, lines);
+}
+
+function formatPositionSizingWithVoice(
+  sizing: TelegramPositionSizing | undefined,
+  voice: TelegramVoice,
+): string | null {
+  const section = formatPositionSizingTelegramSection(sizing);
+  if (!section || voice === 'trader') return section;
+  return section.replace(
+    '<b>🏦 Wallet</b>',
+    `<b>🏦 ${walletSectionTitle(voice)}</b>`,
+  );
 }
 
 function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
@@ -219,20 +256,26 @@ function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
 function formatExactStrikeSection(
   strike: TradeDecisionAlertPayload['exactStrikeRecommendation'],
   action: DecisionAction,
+  voice: TelegramVoice,
 ): string | null {
   if (!strike) return null;
-  return formatEnginePickCallout(strike, strikeTitle(action));
+  return formatEnginePickCallout(strike, signalStrikeTitle(action, voice));
 }
 
 function formatAdaptiveConvictionLine(
   adaptive: TradeDecisionAlertPayload['adaptiveConviction'],
   conviction: number,
+  voice: TelegramVoice,
 ): string | null {
   if (!adaptive || adaptive.dataSource === 'defaults') return null;
 
-  const meets = conviction >= adaptive.recommendedEnterThreshold;
-  const icon = meets ? '✅' : '⚠️';
-  return `${icon} Your enter bar: ${adaptive.recommendedEnterThreshold}% (${adaptive.overallWinRate}% wins on ${adaptive.sampleSize} past alerts)`;
+  return adaptiveConvictionLine({
+    voice,
+    recommendedEnterThreshold: adaptive.recommendedEnterThreshold,
+    overallWinRate: adaptive.overallWinRate,
+    sampleSize: adaptive.sampleSize,
+    conviction,
+  });
 }
 
 export function formatGreeksStrikeSection(
@@ -284,13 +327,14 @@ function formatStrategies(strategies: RecommendedStrategyAlert[]): string | null
 
 function formatPlaybookSection(
   strategies: RecommendedStrategyAlert[],
+  voice: TelegramVoice,
 ): string | null {
   const list = formatStrategies(strategies);
   if (!list) return null;
 
   return [
-    formatSectionHeader('info', 'Playbook', '🎲'),
-    '<i>Other option structures (spreads, condors, etc.) — not the single strike above.</i>',
+    formatSectionHeader('info', playbookSectionTitle(voice), '🎲'),
+    `<i>${playbookSectionNote(voice)}</i>`,
     list,
   ].join('\n');
 }
@@ -300,30 +344,47 @@ export function formatTelegramAlertMessage(params: {
   previous: SignalSnapshot | null;
   current: SignalSnapshot;
   kinds: SignalChangeKind[];
+  alertTone?: SignalAlertTone;
+  exitReason?: string | null;
+  voice?: TelegramVoice;
 }): string {
-  const { payload, previous, current, kinds } = params;
+  const {
+    payload,
+    previous,
+    current,
+    kinds,
+    alertTone,
+    exitReason,
+    voice = DEFAULT_TELEGRAM_VOICE,
+  } = params;
   const label = shortSymbol(payload.symbol);
   const flipped = isSignalFlip(previous, current);
-  const headline = tradeHeadline(payload.action, flipped);
+  const headline = tradeHeadlineBanner(payload.action, flipped, voice, {
+    alertTone,
+    exitReason,
+    kinds,
+  });
   const pa = payload.priceAction;
   const iv = payload.optionFlow?.ivRegime;
-  const change = formatChangeLine(previous, current, kinds);
+  const change = formatChangeLine(previous, current, kinds, voice, { exitReason });
   const exactStrike = formatExactStrikeSection(
     payload.exactStrikeRecommendation,
     payload.action,
+    voice,
   );
   const adaptiveLine = formatAdaptiveConvictionLine(
     payload.adaptiveConviction,
     payload.conviction,
+    voice,
   );
   const readyScenario = scenarioForTradeReady(
     payload.tradeGuidance.shouldConsiderTrade,
   );
   const readyIcon = readyScenario === 'success' ? '✅' : '⚠️';
-  const readyText =
-    readyScenario === 'success'
-      ? 'OK to enter'
-      : 'Wait or size down';
+  const readyText = signalReadyText(
+    payload.tradeGuidance.shouldConsiderTrade,
+    voice,
+  );
   const biasIcon = biasEmoji(payload.bias);
 
   const showGreeks = !exactStrike;
@@ -333,16 +394,37 @@ export function formatTelegramAlertMessage(params: {
       })
     : null;
 
-  const playbook = formatPlaybookSection(payload.recommendedStrategies);
+  const playbook = formatPlaybookSection(payload.recommendedStrategies, voice);
+
+  const contextLines = formatTradeContextLines(
+    payload.action,
+    payload.bias,
+    payload.conviction,
+    payload.structureContext,
+    voice,
+  );
+
+  const vetoSection = formatVetoSection(
+    {
+      action: payload.action,
+      bias: payload.bias,
+      conviction: payload.conviction,
+      structureContext: payload.structureContext,
+      priceAction: pa,
+    },
+    voice,
+  );
 
   const identityBlock = joinTelegramLines(
-    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${tradeActionLabel(payload.action)}`,
-    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)} · ${payload.conviction}% conviction`,
+    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${signalActionLabel(payload.action, voice)}`,
+    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)} · ${signalConvictionLine(payload.conviction, voice)}`,
+    ...contextLines,
+    vetoSection,
   );
 
   const readsBlock = joinTelegramLines(
-    priceActionLine(pa.action, pa.confidence),
-    optionRead(payload.optionFlow?.bias, payload.action),
+    vetoSection ? null : priceActionLine(pa, payload.action, voice),
+    signalOptionRead(payload.optionFlow?.bias, payload.action, voice),
     iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
   );
 
@@ -356,7 +438,7 @@ export function formatTelegramAlertMessage(params: {
     identityBlock,
     readsBlock,
     enterBlock,
-    formatPositionSizingTelegramSection(payload.positionSizing),
+    formatPositionSizingWithVoice(payload.positionSizing, voice),
     exactStrike,
     compactGreeks,
     playbook,

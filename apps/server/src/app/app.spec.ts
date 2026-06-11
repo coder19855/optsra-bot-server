@@ -12,7 +12,7 @@ describe('GET /', () => {
   it('should respond with a message', async () => {
     const response = await server.inject({
       method: 'GET',
-      url: '/',
+      url: '/api',
     });
 
     expect(response.json()).toEqual({ message: 'Hello API' });

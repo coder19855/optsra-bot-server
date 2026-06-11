@@ -278,9 +278,21 @@ export default fp(
                                      ((priceDirection === 'bullish' && (option.components.greeks ?? 0) < -0.5) ||
                                       (priceDirection === 'bearish' && (option.components.greeks ?? 0) > 0.5)));
 
-      if (conviction >= highThreshold && priceDirection !== 'neutral' && !optionStronglyAgainst) {
+      const structuralGatesOk =
+        conflictLevel !== 'HIGH' && alignedCount > 0 && !optionStronglyAgainst;
+
+      if (
+        conviction >= highThreshold &&
+        priceDirection !== 'neutral' &&
+        structuralGatesOk
+      ) {
         action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
-      } else if (conviction >= mediumThreshold && priceDirection === optionDirection && priceDirection !== 'neutral') {
+      } else if (
+        conviction >= mediumThreshold &&
+        priceDirection === optionDirection &&
+        priceDirection !== 'neutral' &&
+        structuralGatesOk
+      ) {
         action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
       } else if (conflictLevel === 'HIGH' || alignedCount === 0) {
         const hasNeutralOpportunity =
@@ -292,13 +304,11 @@ export default fp(
           conviction = Math.min(65, Math.max(25, Math.round(optionConviction * 0.7 + (ivRegime.includes('Crushed') ? 18 : 0))));
         } else {
           action = 'NO-TRADE';
-          conviction = Math.min(conviction, 25);
         }
       }
 
       if (style !== TradingStyle.Scalper && optionStronglyAgainst) {
         action = 'NO-TRADE';
-        conviction = Math.min(conviction, 28);
       }
 
       if (action !== 'NO-TRADE' && action !== 'NEUTRAL' && isQuiet && (ivRegime.includes('Crushed') || ivRegime.includes('Low IV')) && conviction < 55) {
@@ -316,7 +326,7 @@ export default fp(
       if (
         action === 'NO-TRADE' &&
         hasWeakOverrideSignal &&
-        !optionStronglyAgainst
+        structuralGatesOk
       ) {
         action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
         conviction = Math.min(mediumThreshold, conviction);

@@ -1,6 +1,19 @@
 import { MarketNewsHeadline } from './market-news';
 import { LearningInsightProfile } from './learning-insights';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
+import {
+  uiLearningEmptyLeaks,
+  uiLearningEmptyStrengths,
+  uiLearningFooter,
+  uiLearningHeadlinesTitle,
+  uiLearningLeaksTitle,
+  uiLearningBanner,
+  uiLearningRemindersTitle,
+  uiLearningStrengthsTitle,
+  uiLearningTodayTitle,
+  uiLearningTradeSummary,
+} from './voice-ui-copy';
 import {
   formatScenarioBanner,
   paletteToken,
@@ -38,7 +51,10 @@ function formatPatterns(
     .join('\n');
 }
 
-export function formatMarketNewsSection(headlines: MarketNewsHeadline[]): string | null {
+export function formatMarketNewsSection(
+  headlines: MarketNewsHeadline[],
+  voice: TelegramVoice = DEFAULT_TELEGRAM_VOICE,
+): string | null {
   if (!headlines.length) return null;
 
   const lines = headlines.slice(0, 3).map((item) => {
@@ -46,7 +62,11 @@ export function formatMarketNewsSection(headlines: MarketNewsHeadline[]): string
     return `• ${escapeHtml(item.title)}${source}`;
   });
 
-  return wrapScenarioCallout('info', '<b>📰 Headlines</b>', lines);
+  return wrapScenarioCallout(
+    'info',
+    `<b>📰 ${uiLearningHeadlinesTitle(voice)}</b>`,
+    lines,
+  );
 }
 
 export function formatLearningTelegramMessage(params: {
@@ -55,41 +75,42 @@ export function formatLearningTelegramMessage(params: {
   preamble?: boolean;
   newsHeadlines?: MarketNewsHeadline[];
   includeNews?: boolean;
+  voice?: TelegramVoice;
 }): string {
-  const { profile, sessionDate, preamble } = params;
+  const { profile, sessionDate, preamble, voice = DEFAULT_TELEGRAM_VOICE } = params;
   const dateLabel = formatIstDateLabel(sessionDate);
 
-  const tradeSummary =
-    profile.totalTrades > 0
-      ? `${profile.lookbackDays}d · ${profile.totalTrades} trades · ✅${profile.verdicts.good} ⚠️${profile.verdicts.bad} 🚨${profile.verdicts.ugly}`
-      : `${profile.lookbackDays}d · no closed trades yet`;
+  const tradeSummary = uiLearningTradeSummary({
+    lookbackDays: profile.lookbackDays,
+    totalTrades: profile.totalTrades,
+    verdicts: profile.verdicts,
+    voice,
+  });
 
   const header = joinTelegramLines(
-    preamble
-      ? formatScenarioBanner('learning', '🌅 Pre-session brief')
-      : formatScenarioBanner('learning', 'Your trade lessons'),
+    formatScenarioBanner('learning', uiLearningBanner(Boolean(preamble), voice)),
     `📅 ${dateLabel} · ${tradeSummary}`,
   );
 
-  const leaksBlock = wrapScenarioCallout('warning', '<b>🕳️ Leaks</b>', [
-    formatPatterns(profile.leaks, 'No repeat leaks tagged.', 'warning'),
+  const leaksBlock = wrapScenarioCallout('warning', `<b>🕳️ ${uiLearningLeaksTitle(voice)}</b>`, [
+    formatPatterns(profile.leaks, uiLearningEmptyLeaks(voice), 'warning'),
   ]);
 
-  const strengthsBlock = wrapScenarioCallout('success', '<b>💪 Strengths</b>', [
+  const strengthsBlock = wrapScenarioCallout('success', `<b>💪 ${uiLearningStrengthsTitle(voice)}</b>`, [
     formatPatterns(
       profile.strengths,
-      'Keep taking engine-approved entries.',
+      uiLearningEmptyStrengths(voice),
       'success',
     ),
   ]);
 
-  const todayBlock = wrapScenarioCallout('pick', '<b>🎯 Today</b>', [
+  const todayBlock = wrapScenarioCallout('pick', `<b>🎯 ${uiLearningTodayTitle(voice)}</b>`, [
     escapeHtml(profile.intention),
   ]);
 
   const remindersBlock =
     profile.recentMistakeNotes.length > 0
-      ? wrapScenarioCallout('danger', '<b>📝 Reminders</b>', [
+      ? wrapScenarioCallout('danger', `<b>📝 ${uiLearningRemindersTitle(voice)}</b>`, [
           ...profile.recentMistakeNotes
             .slice(0, 2)
             .map((note) => escapeHtml(note)),
@@ -97,10 +118,10 @@ export function formatLearningTelegramMessage(params: {
       : null;
 
   const newsBlock = params.includeNews
-    ? formatMarketNewsSection(params.newsHeadlines ?? [])
+    ? formatMarketNewsSection(params.newsHeadlines ?? [], voice)
     : null;
 
-  const footerBlock = preamble ? 'Full detail: <code>/learning</code>' : null;
+  const footerBlock = preamble ? uiLearningFooter(voice) : null;
 
   const body = joinTelegramSections(
     header,

@@ -49,6 +49,20 @@ export interface CoachPnlSummary {
   reconciliationNote?: string;
 }
 
+export interface CoachOpenPosition {
+  optionSymbol: string;
+  indexSymbol: string;
+  underlying: string;
+  optionType: 'CE' | 'PE';
+  direction: TradeAction;
+  qty: number;
+  avgEntryPremium: number;
+  entryAtMs: number;
+  entryAtISO: string;
+  sessionDate: string;
+  entryFills: FyersTradeFill[];
+}
+
 export interface RoundTripTrade {
   id: string;
   optionSymbol: string;
@@ -149,6 +163,12 @@ export interface TradingCoachSummary {
   systemApprovedCount: number;
   winCount: number;
   lossCount: number;
+  openPositionCount: number;
+}
+
+export interface CoachPairingResult {
+  roundTrips: RoundTripTrade[];
+  openPositions: CoachOpenPosition[];
 }
 
 export type CoachTradeSource = 'fyers_tradebook' | 'fyers_trade_history';
@@ -168,6 +188,7 @@ export interface TradingCoachResponse {
   summary: TradingCoachSummary;
   pnlSummary: CoachPnlSummary | null;
   symbolPnl: CoachSymbolPnl[];
+  openPositions: CoachOpenPosition[];
   trades: TradingCoachTradeReport[];
   skippedTrades: Array<{ reason: string; symbol?: string; entryAtISO?: string }>;
 }

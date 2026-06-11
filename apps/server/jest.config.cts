@@ -18,4 +18,20 @@ module.exports = {
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
   coverageDirectory: 'test-output/jest/coverage',
+  collectCoverageFrom: [
+    'src/app/**/*.ts',
+    '!src/app/**/*.spec.ts',
+    '!src/app/testing/**',
+    '!src/app/telegram-notifications/**',
+    '!src/app/trading-coach/**',
+    '!src/app/plugins/telegram-notifications.ts',
+  ],
+  coverageThreshold: {
+    global: {
+      branches: 50,
+      functions: 75,
+      lines: 75,
+      statements: 75,
+    },
+  },
 };

@@ -52,6 +52,22 @@ export interface SignalSnapshot {
   updatedAt: Date;
   lastNotifiedAt?: Date;
   lastNotifiedFingerprint?: string;
+  /** Consecutive polls with the same CE/PE action (used for entry confirmation). */
+  directionalStreak?: number;
+  /** Consecutive polls with NO-TRADE (used for exit confirmation). */
+  noTradeStreak?: number;
+  /** True while a directional read is waiting for SIGNAL_ENTRY_CONFIRM_POLLS. */
+  awaitingEntryConfirmation?: boolean;
+  /** True while a CE/PE exit is waiting for SIGNAL_EXIT_CONFIRM_POLLS (flat / no open leg). */
+  awaitingExitConfirmation?: boolean;
+  /** True while an engaged hard exit waits for NO-TRADE + conviction + decay confirmation. */
+  awaitingHardExitConfirmation?: boolean;
+  /** True while an engaged opposite-direction exit waits for confirm polls. */
+  awaitingOppositeExitConfirmation?: boolean;
+  /** Dedupes repeated EDGE_FADE caution alerts for the same fingerprint. */
+  lastEdgeFadeFingerprint?: string | null;
+  /** Direction held while engaged — set only when a live Fyers open leg exists. */
+  engagedDirection?: 'CE-BUY' | 'PE-BUY';
 }
 
 export interface TelegramPositionSizingTier {
@@ -92,6 +108,13 @@ export interface RecommendedStrategyAlert {
   executionHint?: string;
 }
 
+export interface TradeStructureContext {
+  primaryTimeframe: '5m' | '15m' | '1h';
+  primaryScore: number;
+  timeframeScores: Record<'5m' | '15m' | '1h', number>;
+  enterThreshold: number;
+}
+
 export interface TradeDecisionAlertPayload {
   symbol: string;
   tradingStyle: TradingStyle;
@@ -99,6 +122,7 @@ export interface TradeDecisionAlertPayload {
   action: DecisionAction;
   bias: TradeBias;
   conviction: number;
+  structureContext?: TradeStructureContext;
   recommendation: string;
   humanSummary: string;
   tradeGuidance: {
@@ -109,6 +133,10 @@ export interface TradeDecisionAlertPayload {
   priceAction: {
     action: PriceActionSignal;
     confidence: number;
+    /** Chart direction before momentum-decay veto (when action is NO-TRADE). */
+    structuralAction?: PriceActionSignal;
+    vetoReason?: string;
+    confidenceBeforeDecay?: number;
   };
   optionFlow?: {
     bias?: string;
@@ -120,6 +148,8 @@ export interface TradeDecisionAlertPayload {
   exactStrikeRecommendation?: ExactStrikeRecommendation;
   whyContext?: AlertWhyContext;
   adaptiveConviction?: AdaptiveConvictionInsight;
+  tradeSetup?: TradeSetup | null;
+  momentumDecayPercent?: number | null;
 }
 
 export type TpAlertKind =
@@ -240,11 +270,22 @@ export type SignalChangeKind =
   | 'BIAS'
   | 'TRADE_READY'
   | 'STRATEGY'
-  | 'INITIAL';
+  | 'INITIAL'
+  | 'EDGE_FADE'
+  | 'HARD_EXIT';
+
+export type SignalAlertTone = 'standard' | 'caution' | 'hard_exit';
 
 export interface SignalChangeResult {
   shouldNotify: boolean;
   kinds: SignalChangeKind[];
   previous: SignalSnapshot | null;
   current: SignalSnapshot;
+  alertTone?: SignalAlertTone;
+  exitReason?: string | null;
+  engagedFlags?: {
+    awaitingHardExitConfirmation?: boolean;
+    awaitingOppositeExitConfirmation?: boolean;
+    lastEdgeFadeFingerprint?: string | null;
+  };
 }

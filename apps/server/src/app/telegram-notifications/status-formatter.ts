@@ -1,46 +1,45 @@
 import { TelegramNotificationStatus } from '../types/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { formatSectionHeader } from './telegram-palette';
-
-function formatIstTime(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
+import {
+  uiNowFyersLine,
+  uiNowMarketLine,
+  uiStatusAlertState,
+  uiStatusFyersTokenMissing,
+  uiStatusPausedNote,
+  uiStatusPausedSince,
+  uiStatusPollLine,
+  uiStatusTitle,
+  uiStatusTpLine,
+  uiStatusVoiceLine,
+  uiStatusWatchTitle,
+} from './voice-ui-copy';
 
 export function formatTelegramStatusMessage(
   status: TelegramNotificationStatus,
+  voice: TelegramVoice = DEFAULT_TELEGRAM_VOICE,
 ): string {
-  const alertState = status.alertsPaused
-    ? '⏸ <b>Paused</b> — no signal or pre-session pings'
-    : '▶️ <b>Active</b> — watching for signal flips';
+  const alertState = uiStatusAlertState(status.alertsPaused, voice);
 
   const fyersState = status.isTokenValid
-    ? '✅ Fyers session live'
-    : '⚠️ Fyers token missing or expired — <code>/login</code>';
+    ? uiNowFyersLine(true, voice)
+    : uiStatusFyersTokenMissing(voice);
 
-  const marketState = status.marketOpen
-    ? '🟢 Market open'
-    : status.preSessionLearningWindow
-      ? '🌅 Pre-session window'
-      : status.postSessionCoachWindow
-        ? '📚 Post-session coach window'
-        : '🌙 Outside session hours';
+  const marketState = uiNowMarketLine(
+    {
+      marketOpen: status.marketOpen,
+      preSessionWindow: status.preSessionLearningWindow,
+      postSessionCoachWindow: status.postSessionCoachWindow,
+      isTokenValid: status.isTokenValid,
+      alertsPaused: status.alertsPaused,
+    },
+    voice,
+  );
 
-  const pollState = status.lastPollAt
-    ? `Last poll ${formatIstTime(status.lastPollAt)}`
-    : 'No poll yet this boot';
+  const pollState = uiStatusPollLine(status.lastPollAt, voice);
 
-  const tpLine =
-    status.openPositionsTracked > 0
-      ? `🎯 TP tracking ${status.openPositionsTracked} position(s) (${status.openPositionsMonitored} monitored)`
-      : status.openPositionsMonitored > 0
-        ? `👀 ${status.openPositionsMonitored} open position(s) — none on TP track yet`
-        : '📭 No open positions on watch';
+  const tpLine = uiStatusTpLine(status, voice);
 
   const watchLabels = status.watched
     .map((w) => {
@@ -51,10 +50,11 @@ export function formatTelegramStatusMessage(
     .join('\n');
 
   const statusBlock = joinTelegramLines(
-    formatSectionHeader('info', 'Bot status', '📡'),
+    formatSectionHeader('info', uiStatusTitle(voice), '📡'),
     alertState,
     fyersState,
     marketState,
+    uiStatusVoiceLine(voice),
   );
 
   const activityBlock = joinTelegramLines(
@@ -62,15 +62,15 @@ export function formatTelegramStatusMessage(
     status.lastPollError ? `⚠️ ${status.lastPollError}` : null,
     tpLine,
     status.alertsPaused && status.alertsPausedAt
-      ? `Paused since ${formatIstTime(status.alertsPausedAt)} — <code>/start</code> or <code>/login</code> to resume`
+      ? uiStatusPausedSince(status.alertsPausedAt, voice)
       : null,
     status.alertsPaused
-      ? '<i>TP/hold nudges and commands still work while paused.</i>'
+      ? `<i>${uiStatusPausedNote(voice)}</i>`
       : null,
   );
 
   const watchBlock = watchLabels
-    ? joinTelegramLines('<b>On watch</b>', watchLabels)
+    ? joinTelegramLines(`<b>${uiStatusWatchTitle(voice)}</b>`, watchLabels)
     : null;
 
   return joinTelegramSections(statusBlock, activityBlock, watchBlock);

@@ -182,14 +182,16 @@ export function sumRoundTripPnlInr(roundTrips: RoundTripTrade[]): number {
 }
 
 /**
- * Fyers realised-profit API often returns gross_pnl=0 intraday while the tradebook FIFO is correct.
- * Prefer FIFO session PnL unless Fyers reconciles with it.
+ * Prefer Fyers broker PnL (net realised) when available — it includes charges and
+ * all closed symbols. FIFO session PnL only sums coached round-trip legs and ignores
+ * open lots; use it only when Fyers has not published figures yet (common intraday).
  */
 export function resolveCoachDisplayPnlInr(params: {
   fifoSessionPnlInr: number;
   pnlSummary: CoachPnlSummary | null;
   symbolPnl: CoachSymbolPnl[];
   indexFilter: string | null;
+  tradeSource?: CoachTradeSource;
 }): number {
   const fifo = +params.fifoSessionPnlInr.toFixed(2);
   if (!params.pnlSummary) return fifo;
@@ -201,10 +203,43 @@ export function resolveCoachDisplayPnlInr(params: {
       .toFixed(2);
   }
 
-  if (fifo !== 0 && fyersGross === 0) return fifo;
-  if (params.pnlSummary.reconciled) return fyersGross;
-  if (Math.abs(fyersGross - fifo) < 1) return fyersGross;
-  return fifo;
+  const fyersNet = params.pnlSummary.netPnlInr;
+
+  if (fyersGross === 0 && fyersNet === 0 && fifo !== 0) return fifo;
+
+  // Live tradebook session: FIFO matches the coached legs listed below.
+  // Fyers realised net can include other symbols, charges, and carry rows.
+  if (params.tradeSource === 'fyers_tradebook' && !params.pnlSummary.reconciled) {
+    return fifo;
+  }
+
+  if (params.pnlSummary.reconciled) {
+    return params.indexFilter ? fyersGross : fyersNet;
+  }
+
+  if (
+    Math.abs(fyersGross - fifo) >= 1 ||
+    Math.abs(fyersNet - fifo) >= 1
+  ) {
+    if (params.indexFilter && params.symbolPnl.length > 0) return fyersGross;
+    return fyersNet !== 0 ? fyersNet : fyersGross;
+  }
+
+  return fyersNet !== 0 ? fyersNet : fyersGross;
+}
+
+export function resolveCoachBrokerNetPnlInr(params: {
+  pnlSummary: CoachPnlSummary | null;
+  symbolPnl: CoachSymbolPnl[];
+  indexFilter: string | null;
+}): number | null {
+  if (!params.pnlSummary) return null;
+  if (params.indexFilter && params.symbolPnl.length > 0) {
+    return +params.symbolPnl
+      .reduce((sum, row) => sum + row.realizedPnlInr, 0)
+      .toFixed(2);
+  }
+  return params.pnlSummary.netPnlInr;
 }
 
 export async function fetchRealisedProfitSummary(

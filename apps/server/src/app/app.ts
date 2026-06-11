@@ -14,9 +14,12 @@ export async function app(fastify: FastifyInstance, opts: AppOptions) {
   // This loads all plugins defined in plugins
   // those should be support plugins that are reused
   // through your application
+  const ignoreSpecs = /\.spec\.(ts|js|cts|mts)$/;
+
   fastify.register(AutoLoad, {
     dir: path.join(__dirname, 'plugins'),
     options: { ...opts },
+    ignoreFilter: ignoreSpecs,
   });
 
   // This loads all plugins defined in routes
@@ -24,5 +27,6 @@ export async function app(fastify: FastifyInstance, opts: AppOptions) {
   fastify.register(AutoLoad, {
     dir: path.join(__dirname, 'routes'),
     options: { ...opts },
+    ignoreFilter: ignoreSpecs,
   });
 }

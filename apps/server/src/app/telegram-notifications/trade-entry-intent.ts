@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
 
+/** Entry alerts the bot sent — used for TP tracking, not engaged exit policy. */
 export interface TradeEntryIntent {
   key: string;
   indexSymbol: string;

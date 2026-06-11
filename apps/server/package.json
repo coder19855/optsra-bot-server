@@ -98,6 +98,7 @@
       "test": {
         "executor": "@nx/jest:jest",
         "options": {
+          "jestConfig": "apps/server/jest.config.cts",
           "passWithNoTests": true
         }
       }

@@ -41,6 +41,12 @@ import { parseClearCommandLimit } from './telegram-message-journal';
 import { formatTelegramStatusMessage } from './status-formatter';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { buildNowTelegramMessage } from './now-command';
+import {
+  formatVoicePreviewMessage,
+  formatVoiceStatusMessage,
+  parseVoiceCommandArgs,
+} from './voice-command';
+import { voiceDisplayName } from './voice-copy';
 
 interface TelegramUpdate {
   update_id: number;
@@ -195,6 +201,8 @@ export class TelegramCommandPoller {
         await this.handleStatus(replyChatId);
       } else if (command === '/now') {
         await this.handleNow(text, replyChatId);
+      } else if (command === '/voice') {
+        await this.handleVoice(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -381,8 +389,9 @@ export class TelegramCommandPoller {
 
   private async handleStatus(replyChatId?: number): Promise<void> {
     const status = await this.fastify.telegramNotifications.getStatus();
+    const voice = this.fastify.telegramNotifications.getVoice();
     await this.deps.sendMessage(
-      formatTelegramStatusMessage(status),
+      formatTelegramStatusMessage(status, voice),
       this.replyOptions(replyChatId),
     );
   }
@@ -393,6 +402,7 @@ export class TelegramCommandPoller {
       watchedSymbols: this.deps.watchedSymbols,
       watchedStyles: this.deps.watchedStyles,
       isAlertsPaused: this.fastify.telegramNotifications.isAlertsPaused(),
+      voice: this.fastify.telegramNotifications.getVoice(),
     });
 
     if (result.error) {
@@ -451,6 +461,8 @@ export class TelegramCommandPoller {
       why: resolved.why,
       exactStrike: resolved.exactStrike,
       adaptive,
+      structureContext: resolved.structureContext,
+      voice: this.fastify.telegramNotifications.getVoice(),
     });
     await this.deps.sendMessage(message, this.replyOptions(replyChatId));
   }
@@ -497,6 +509,7 @@ export class TelegramCommandPoller {
       text,
       watchedSymbols: this.deps.watchedSymbols,
       watchedStyles: this.deps.watchedStyles,
+      voice: this.fastify.telegramNotifications.getVoice(),
     });
 
     if (result.error) {
@@ -532,6 +545,7 @@ export class TelegramCommandPoller {
       snapshots,
       styleFilter,
       sessionDate,
+      voice: this.fastify.telegramNotifications.getVoice(),
     });
 
     if (message === FYERS_AUTH_ERROR_REPLY) {
@@ -599,6 +613,38 @@ export class TelegramCommandPoller {
           ? joinTelegramLines('📊 <b>By conviction bucket</b>', bucketLines)
           : null,
       ),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleVoice(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseVoiceCommandArgs(text);
+
+    if (parsed.action === 'preview') {
+      await this.deps.sendMessage(
+        formatVoicePreviewMessage(),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    if (parsed.action === 'set' && parsed.voice) {
+      const voice = await this.fastify.telegramNotifications.setVoice(
+        parsed.voice,
+      );
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          '✅ <b>Voice updated</b>',
+          `Alerts will now sound like: <b>${voiceDisplayName(voice)}</b>`,
+          '<i>Signals, TP, /now, /why, /status, /learning, and session briefs use this voice.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatVoiceStatusMessage(this.fastify.telegramNotifications.getVoice()),
       this.replyOptions(replyChatId),
     );
   }

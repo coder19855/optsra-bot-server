@@ -3,6 +3,7 @@ import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notificati
 import { runTradingCoachAnalysis } from '../trading-coach/analyze';
 import { resolveCoachDateRange } from '../trading-coach/fyers-trades';
 import { SignalSnapshot } from '../types/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { TradingStyle } from '../types/trading-style';
 import {
   FYERS_AUTH_ERROR_REPLY,
@@ -41,8 +42,10 @@ export async function buildCoachTelegramMessage(
     snapshots: SignalSnapshot[];
     styleFilter?: TradingStyle | null;
     sessionDate: string;
+    voice?: TelegramVoice;
   },
 ): Promise<string> {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const styles = params.styleFilter
     ? [params.styleFilter]
     : watchedStylesForCoach(params.watchedStyles);
@@ -73,6 +76,7 @@ export async function buildCoachTelegramMessage(
     sessionDate: params.sessionDate,
     coaches,
     snapshots: params.snapshots,
+    voice,
   });
 }
 

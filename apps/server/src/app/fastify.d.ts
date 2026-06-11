@@ -383,6 +383,10 @@ declare module 'fastify' {
       getStatus: () => Promise<TelegramNotificationStatus>;
       isAlertsPaused: () => boolean;
       setAlertsPaused: (paused: boolean) => Promise<void>;
+      getVoice: () => import('./types/telegram-voice').TelegramVoice;
+      setVoice: (
+        voice: import('./types/telegram-voice').TelegramVoice,
+      ) => Promise<import('./types/telegram-voice').TelegramVoice>;
       resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;

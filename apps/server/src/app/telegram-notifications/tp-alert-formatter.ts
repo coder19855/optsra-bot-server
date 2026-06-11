@@ -2,7 +2,15 @@ import {
   PositionTpEvaluation,
   TpAlertKind,
 } from '../types/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
+import {
+  tpCoachTitle,
+  tpEngineLine,
+  tpHoldHeadline,
+  tpKindHeadline,
+  translateTpHoldReason,
+} from './voice-copy';
 import {
   formatScenarioBanner,
   scenarioForHoldAdvice,
@@ -16,13 +24,6 @@ function escapeHtml(text: string): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
-}
-
-function kindHeadline(kinds: TpAlertKind[]): string {
-  if (kinds.includes('SIGNAL_CONFLICT')) return '⚔️ Position vs engine';
-  if (kinds.includes('REACHED')) return '🎉 Target hit';
-  if (kinds.includes('APPROACHING')) return '👀 Target near';
-  return '🧭 Hold check';
 }
 
 function formatRrSummary(evaluation: PositionTpEvaluation): string {
@@ -51,8 +52,9 @@ function formatRrSummary(evaluation: PositionTpEvaluation): string {
 export function formatTelegramTpAlertMessage(params: {
   evaluation: PositionTpEvaluation;
   kinds: TpAlertKind[];
+  voice?: TelegramVoice;
 }): string {
-  const { evaluation, kinds } = params;
+  const { evaluation, kinds, voice = DEFAULT_TELEGRAM_VOICE } = params;
   const { position } = evaluation;
   const pnlSign = position.unrealizedPnl >= 0 ? '+' : '';
   const tpScenario = scenarioForTpKinds(kinds);
@@ -61,23 +63,37 @@ export function formatTelegramTpAlertMessage(params: {
 
   const reasons = evaluation.holdReasons
     .slice(0, 2)
-    .map((line) => escapeHtml(line))
+    .map((line) => escapeHtml(translateTpHoldReason(line, voice)))
     .join('\n');
 
+  const localizedHold = tpHoldHeadline({
+    voice,
+    original: evaluation.holdHeadline,
+    holdAdvice: evaluation.holdAdvice,
+    alertKind: evaluation.alertKind,
+    highestHitRr: evaluation.highestHitTp?.rr ?? null,
+    nextTpRr: evaluation.nextTp?.rr ?? null,
+  });
+
   const header = joinTelegramLines(
-    formatScenarioBanner(tpScenario, kindHeadline(kinds)),
+    formatScenarioBanner(tpScenario, tpKindHeadline(kinds, voice)),
     `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
   );
 
   const positionBlock = joinTelegramLines(
     `${pnlScenario === 'success' ? '✅' : pnlScenario === 'danger' ? '🚨' : '⚠️'} P&L ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${position.netQty} qty @ ₹${position.buyAvg.toFixed(1)}`,
-    `Engine: ${evaluation.signalAction} ${evaluation.conviction}% · ${escapeHtml(evaluation.bias)}`,
+    tpEngineLine({
+      voice,
+      signalAction: evaluation.signalAction,
+      conviction: evaluation.conviction,
+      bias: evaluation.bias,
+    }),
   );
 
   const rrBlock = formatRrSummary(evaluation);
 
-  const coachBlock = wrapScenarioCallout(holdScenario, '<b>🧭 Coach</b>', [
-    escapeHtml(evaluation.holdHeadline),
+  const coachBlock = wrapScenarioCallout(holdScenario, tpCoachTitle(voice), [
+    escapeHtml(localizedHold),
     reasons || null,
   ].filter((line): line is string => line != null));
 

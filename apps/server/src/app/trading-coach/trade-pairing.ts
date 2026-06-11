@@ -1,6 +1,11 @@
 import { FyersAPI } from 'fyers-api-v3';
 import { TradeAction } from '../types/technical-analysis';
-import { FyersTradeFill, RoundTripTrade } from '../types/trading-coach';
+import {
+  CoachOpenPosition,
+  CoachPairingResult,
+  FyersTradeFill,
+  RoundTripTrade,
+} from '../types/trading-coach';
 import { sessionCoachFills } from './fyers-trades';
 import {
   getIstSessionDate,
@@ -66,7 +71,7 @@ export function countInternalCarryFills(fills: FyersTradeFill[]): number {
   return fills.filter((fill) => fill.isInternalCarry).length;
 }
 
-export function pairRoundTripTrades(fills: FyersTradeFill[]): RoundTripTrade[] {
+export function pairRoundTripTrades(fills: FyersTradeFill[]): CoachPairingResult {
   const sessionFills = sessionCoachFills(fills);
   const bySymbol = new Map<string, FyersTradeFill[]>();
 
@@ -77,6 +82,7 @@ export function pairRoundTripTrades(fills: FyersTradeFill[]): RoundTripTrade[] {
   }
 
   const roundTrips: RoundTripTrade[] = [];
+  const openPositions: CoachOpenPosition[] = [];
 
   for (const [optionSymbol, symbolFills] of bySymbol.entries()) {
     const meta = resolveOptionMeta(optionSymbol);
@@ -125,11 +131,14 @@ export function pairRoundTripTrades(fills: FyersTradeFill[]): RoundTripTrade[] {
       const pnlPremium = +(exitPremium - entryPremium).toFixed(2);
       const pnlInr = +(pnlPremium * qty).toFixed(2);
 
-      const entryAtMs = parseFyersIstDateTime(matchedEntryFills[0].orderDateTime);
       const exitAtMs = parseFyersIstDateTime(fill.orderDateTime);
 
+      const entryAtMs = Math.min(
+        ...matchedEntryFills.map((f) => parseFyersIstDateTime(f.orderDateTime)),
+      );
+
       roundTrips.push({
-        id: `${fill.tradeNumber}-${matchedEntryFills[0].tradeNumber}`,
+        id: `${fill.tradeNumber}-${matchedEntryFills[0].tradeNumber}-${qty}`,
         optionSymbol,
         indexSymbol: meta.indexSymbol,
         underlying: meta.underlying,
@@ -150,7 +159,38 @@ export function pairRoundTripTrades(fills: FyersTradeFill[]): RoundTripTrade[] {
         exitFills: [{ ...fill, tradedQty: qty, tradeValue: +(qty * exitPremium).toFixed(2) }],
       });
     }
+
+    if (openLots.length > 0) {
+      const totalQty = openLots.reduce((sum, lot) => sum + lot.qty, 0);
+      const avgEntryPremium = weightedAvg(
+        openLots.map((lot) => ({ qty: lot.qty, price: lot.price })),
+      );
+      const entryAtMs = Math.min(
+        ...openLots.map((lot) => parseFyersIstDateTime(lot.fill.orderDateTime)),
+      );
+
+      openPositions.push({
+        optionSymbol,
+        indexSymbol: meta.indexSymbol,
+        underlying: meta.underlying,
+        optionType: meta.optionType,
+        direction: directionFromOptionType(meta.optionType),
+        qty: totalQty,
+        avgEntryPremium,
+        entryAtMs,
+        entryAtISO: toIso(entryAtMs),
+        sessionDate: getIstSessionDate(entryAtMs),
+        entryFills: openLots.map((lot) => ({
+          ...lot.fill,
+          tradedQty: lot.qty,
+          tradeValue: +(lot.qty * lot.price).toFixed(2),
+        })),
+      });
+    }
   }
 
-  return roundTrips.sort((a, b) => b.exitAtMs - a.exitAtMs);
+  return {
+    roundTrips: roundTrips.sort((a, b) => b.exitAtMs - a.exitAtMs),
+    openPositions: openPositions.sort((a, b) => b.entryAtMs - a.entryAtMs),
+  };
 }

@@ -1,11 +1,57 @@
+import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
 import {
   SignalChangeKind,
   SignalChangeResult,
   SignalSnapshot,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
+import { DecisionAction } from '../types/trade-decision';
 import { TradeBias } from '../types/trade-decision';
 import { TradingStyle } from '../types/trading-style';
+import {
+  evaluateEngagedExitDecision,
+  SignalEngagementContext,
+  SignalExitTelemetry,
+} from './signal-exit-policy';
+
+function isDirectionalAction(action: DecisionAction): boolean {
+  return action === 'CE-BUY' || action === 'PE-BUY';
+}
+
+export function computeDirectionalStreak(
+  previous: SignalSnapshot | null,
+  currentAction: DecisionAction,
+): number {
+  if (!isDirectionalAction(currentAction)) return 0;
+  if (previous?.action === currentAction) {
+    return (previous.directionalStreak ?? 1) + 1;
+  }
+  return 1;
+}
+
+export function computeNoTradeStreak(
+  previous: SignalSnapshot | null,
+  currentAction: DecisionAction,
+): number {
+  if (currentAction !== 'NO-TRADE') return 0;
+  if (previous?.action === 'NO-TRADE') {
+    return (previous.noTradeStreak ?? 1) + 1;
+  }
+  return 1;
+}
+
+/** Mongo JSON often stores dates as strings — normalize before grace math. */
+export function hydrateSignalSnapshot(
+  snapshot: SignalSnapshot,
+): SignalSnapshot {
+  return {
+    ...snapshot,
+    updatedAt: new Date(snapshot.updatedAt),
+    lastNotifiedAt: snapshot.lastNotifiedAt
+      ? new Date(snapshot.lastNotifiedAt)
+      : undefined,
+  };
+}
 
 export function snapshotKey(symbol: string, tradingStyle: TradingStyle): string {
   return `${symbol}:${tradingStyle}`;
@@ -67,26 +113,79 @@ export function buildSignalSnapshot(
 export function detectSignalChange(
   previous: SignalSnapshot | null,
   current: SignalSnapshot,
-  options?: { minConvictionForInitial?: number },
+  options?: {
+    minConvictionForInitial?: number;
+    minDirectionalStreakForEntry?: number;
+    minNoTradeStreakForExit?: number;
+    engagement?: SignalEngagementContext;
+    telemetry?: SignalExitTelemetry;
+    minOppositePolls?: number;
+  },
 ): SignalChangeResult {
-  const kinds: SignalChangeKind[] = [];
-  const minInitial = options?.minConvictionForInitial ?? 0;
-
-  if (!previous) {
-    const actionable =
-      current.action !== 'NO-TRADE' &&
-      current.shouldConsiderTrade &&
-      current.conviction >= minInitial;
-    if (actionable) kinds.push('INITIAL');
-    return {
-      shouldNotify: actionable,
-      kinds,
+  if (previous && options?.engagement?.engaged && options.telemetry) {
+    const engaged = evaluateEngagedExitDecision({
       previous,
       current,
-    };
+      engagement: options.engagement,
+      telemetry: options.telemetry,
+      minExitPolls:
+        options.minNoTradeStreakForExit ??
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_EXIT_CONFIRM_POLLS,
+      minOppositePolls:
+        options.minOppositePolls ??
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_OPPOSITE_CONFIRM_POLLS,
+    });
+    if (engaged) {
+      return {
+        shouldNotify: engaged.notify && engaged.kinds.length > 0,
+        kinds: engaged.kinds,
+        previous,
+        current,
+        alertTone: engaged.alertTone,
+        exitReason: engaged.exitReason,
+        engagedFlags: {
+          awaitingHardExitConfirmation: engaged.awaitingHardExitConfirmation,
+          awaitingOppositeExitConfirmation:
+            engaged.awaitingOppositeExitConfirmation,
+          lastEdgeFadeFingerprint: engaged.lastEdgeFadeFingerprint,
+        },
+      };
+    }
+  }
+
+  const skipFlatExit = options?.engagement?.engaged === true;
+  const kinds: SignalChangeKind[] = [];
+  const minInitial = options?.minConvictionForInitial ?? 0;
+  const minEntryStreak = options?.minDirectionalStreakForEntry ?? 1;
+  const minExitStreak = options?.minNoTradeStreakForExit ?? 1;
+
+  const entryStreakReady =
+    isDirectionalAction(current.action) &&
+    current.shouldConsiderTrade &&
+    current.conviction >= minInitial &&
+    (current.directionalStreak ?? 0) >= minEntryStreak;
+
+  const exitStreakReady =
+    current.action === 'NO-TRADE' &&
+    (current.noTradeStreak ?? 0) >= minExitStreak;
+
+  if (!previous) {
+    return { shouldNotify: false, kinds, previous, current };
   }
 
   if (previous.fingerprint === current.fingerprint) {
+    if (previous.awaitingEntryConfirmation && entryStreakReady) {
+      kinds.push('ACTION');
+      return { shouldNotify: true, kinds, previous, current };
+    }
+    if (
+      !skipFlatExit &&
+      previous.awaitingExitConfirmation &&
+      exitStreakReady
+    ) {
+      kinds.push('ACTION');
+      return { shouldNotify: true, kinds, previous, current };
+    }
     return { shouldNotify: false, kinds, previous, current };
   }
 
@@ -106,22 +205,40 @@ export function detectSignalChange(
     kinds.push('STRATEGY');
   }
 
-  const exitedTrade =
-    previous.action !== 'NO-TRADE' && current.action === 'NO-TRADE';
-  const enteredDirectional =
+  const exitedDirectional =
+    isDirectionalAction(previous.action) && current.action === 'NO-TRADE';
+  const continuingExitConfirm =
     previous.action === 'NO-TRADE' &&
-    (current.action === 'CE-BUY' || current.action === 'PE-BUY');
+    current.action === 'NO-TRADE' &&
+    Boolean(previous.awaitingExitConfirmation);
+  const inExitConfirmPath =
+    !skipFlatExit && (exitedDirectional || continuingExitConfirm);
+
+  const exitedNonDirectional =
+    previous.action !== 'NO-TRADE' &&
+    current.action === 'NO-TRADE' &&
+    !isDirectionalAction(previous.action);
+
+  const enteredDirectional =
+    previous.action === 'NO-TRADE' && isDirectionalAction(current.action);
   const flippedDirection =
     (previous.action === 'CE-BUY' && current.action === 'PE-BUY') ||
     (previous.action === 'PE-BUY' && current.action === 'CE-BUY');
 
-  const shouldNotify =
-    kinds.length > 0 &&
-    (exitedTrade ||
-      enteredDirectional ||
-      flippedDirection ||
-      current.shouldConsiderTrade ||
-      current.action === 'NEUTRAL');
+  let notify = false;
+  if (inExitConfirmPath) {
+    notify = exitStreakReady;
+  } else if (exitedNonDirectional) {
+    notify = true;
+  } else if (enteredDirectional || flippedDirection) {
+    notify = entryStreakReady;
+  } else if (current.action === 'NEUTRAL') {
+    notify = true;
+  } else if (current.shouldConsiderTrade) {
+    notify = isDirectionalAction(current.action) ? entryStreakReady : true;
+  }
+
+  const shouldNotify = kinds.length > 0 && notify;
 
   return { shouldNotify, kinds, previous, current };
 }

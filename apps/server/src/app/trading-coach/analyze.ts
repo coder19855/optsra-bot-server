@@ -52,10 +52,13 @@ export async function runTradingCoachAnalysis(
   const tradePayload = await fetchCoachTradeFills(fastify.fyers, dateRange);
 
   const internalCarryFillsExcluded = countInternalCarryFills(tradePayload.fills);
-  let roundTrips = pairRoundTripTrades(tradePayload.fills);
+  const pairing = pairRoundTripTrades(tradePayload.fills);
+  let roundTrips = pairing.roundTrips;
+  let openPositions = pairing.openPositions;
 
   if (indexFilter) {
     roundTrips = roundTrips.filter((trade) => trade.indexSymbol === indexFilter);
+    openPositions = openPositions.filter((pos) => pos.indexSymbol === indexFilter);
   }
 
   if (tradeId) {
@@ -153,6 +156,7 @@ export async function runTradingCoachAnalysis(
     pnlSummary,
     symbolPnl,
     indexFilter: indexFilter ?? null,
+    tradeSource: tradePayload.source,
   });
 
   const disclaimer =
@@ -183,9 +187,11 @@ export async function runTradingCoachAnalysis(
       systemApprovedCount,
       winCount,
       lossCount,
+      openPositionCount: openPositions.length,
     },
     pnlSummary,
     symbolPnl,
+    openPositions,
     trades: reports,
     skippedTrades,
   };

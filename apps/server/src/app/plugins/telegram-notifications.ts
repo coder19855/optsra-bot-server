@@ -27,8 +27,11 @@ import {
 } from '../telegram-notifications/session-learning';
 import {
   buildSignalSnapshot,
+  computeDirectionalStreak,
+  computeNoTradeStreak,
   detectSignalChange,
   getIstSessionClock,
+  hydrateSignalSnapshot,
   isIndianMarketOpen,
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
@@ -41,6 +44,11 @@ import {
   recordSignalOutcome,
   updateOpenSignalOutcomes,
 } from '../telegram-notifications/signal-outcome-tracker';
+import {
+  buildEngagementContext,
+  buildExitTelemetry,
+  resolveEngagedHeldDirection,
+} from '../telegram-notifications/signal-exit-policy';
 import { fetchTradeDecisionAlert } from '../telegram-notifications/trade-decision-fetch';
 import { recordTradeEntryIntent } from '../telegram-notifications/trade-entry-intent';
 import {
@@ -58,6 +66,12 @@ import {
   PollingPauseState,
   savePollingPauseState,
 } from '../telegram-notifications/polling-pause';
+import {
+  loadVoicePreference,
+  saveVoicePreference,
+  VoicePreferenceState,
+} from '../telegram-notifications/voice-preference';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import {
   SignalSnapshot,
   TelegramNotificationStatus,
@@ -126,6 +140,9 @@ export default fp(
       alertsPaused: false,
       pausedAt: null,
     };
+    let voicePreferenceState: VoicePreferenceState = {
+      voice: DEFAULT_TELEGRAM_VOICE,
+    };
     const tpMemory = new Map<string, TpMonitorSnapshot>();
     let lastTpAlertAt: Date | null = null;
     let openPositionsMonitored = 0;
@@ -151,9 +168,10 @@ export default fp(
       const col = getCollection();
       if (col) {
         const doc = await col.findOne({ key });
-        if (doc) return doc;
+        if (doc) return hydrateSignalSnapshot(doc);
       }
-      return memorySnapshots.get(key) ?? null;
+      const cached = memorySnapshots.get(key);
+      return cached ? hydrateSignalSnapshot(cached) : null;
     }
 
     async function saveSnapshot(snapshot: SignalSnapshot): Promise<void> {
@@ -243,10 +261,70 @@ export default fp(
 
       const previous = await loadSnapshot(symbol, tradingStyle);
       const current = buildSignalSnapshot(payload);
+      current.directionalStreak = computeDirectionalStreak(
+        previous,
+        current.action,
+      );
+      current.noTradeStreak = computeNoTradeStreak(previous, current.action);
+      const minEntryPolls =
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_ENTRY_CONFIRM_POLLS;
+      const minExitPolls =
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_EXIT_CONFIRM_POLLS;
+      const minOppositePolls =
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_OPPOSITE_CONFIRM_POLLS;
+      current.awaitingEntryConfirmation =
+        (current.action === 'CE-BUY' || current.action === 'PE-BUY') &&
+        current.shouldConsiderTrade &&
+        (current.directionalStreak ?? 0) < minEntryPolls;
+
+      const heldDirection = await resolveEngagedHeldDirection(fastify, {
+        indexSymbol: symbol,
+      });
+      const enterThreshold =
+        payload.structureContext?.enterThreshold ?? 60;
+      const engagement = buildEngagementContext({
+        enterThreshold,
+        heldDirection,
+      });
+      const telemetry = buildExitTelemetry(payload, heldDirection);
+
+      if (engagement.engaged && heldDirection) {
+        current.engagedDirection = heldDirection;
+        current.awaitingExitConfirmation = false;
+      } else {
+        current.engagedDirection = undefined;
+        current.awaitingHardExitConfirmation = undefined;
+        current.awaitingOppositeExitConfirmation = undefined;
+        const continuingExit =
+          previous?.action === 'CE-BUY' ||
+          previous?.action === 'PE-BUY' ||
+          previous?.awaitingExitConfirmation === true;
+        current.awaitingExitConfirmation =
+          current.action === 'NO-TRADE' &&
+          continuingExit &&
+          (current.noTradeStreak ?? 0) < minExitPolls;
+      }
+
       const change = detectSignalChange(previous, current, {
         minConvictionForInitial:
           TELEGRAM_NOTIFICATION_DEFAULTS.MIN_CONVICTION_FOR_INITIAL_ALERT,
+        minDirectionalStreakForEntry: minEntryPolls,
+        minNoTradeStreakForExit: minExitPolls,
+        minOppositePolls,
+        engagement,
+        telemetry,
       });
+
+      if (engagement.engaged && heldDirection && change.engagedFlags) {
+        current.awaitingHardExitConfirmation =
+          change.engagedFlags.awaitingHardExitConfirmation;
+        current.awaitingOppositeExitConfirmation =
+          change.engagedFlags.awaitingOppositeExitConfirmation;
+        if (change.engagedFlags.lastEdgeFadeFingerprint != null) {
+          current.lastEdgeFadeFingerprint =
+            change.engagedFlags.lastEdgeFadeFingerprint;
+        }
+      }
 
       const polledAt = new Date();
       if (payload.whyContext) {
@@ -277,10 +355,17 @@ export default fp(
           previous: change.previous,
           current: change.current,
           kinds: change.kinds.length ? change.kinds : ['ACTION'],
+          alertTone: change.alertTone,
+          exitReason: change.exitReason,
+          voice: voicePreferenceState.voice,
         });
         await sendTelegramMessage(message, { channel: 'signal' });
         current.lastNotifiedAt = notifiedAt;
         current.lastNotifiedFingerprint = current.fingerprint;
+        current.awaitingEntryConfirmation = false;
+        current.awaitingExitConfirmation = false;
+        current.awaitingHardExitConfirmation = false;
+        current.awaitingOppositeExitConfirmation = false;
 
         if (payload.whyContext) {
           try {
@@ -388,6 +473,7 @@ export default fp(
           await sendPreSessionLearningBrief(fastify, {
             watchedSymbols,
             watchedStyles,
+            voice: voicePreferenceState.voice,
             sendMessage: (text) =>
               sendTelegramMessage(text, { channel: 'default' }),
           });
@@ -471,9 +557,10 @@ export default fp(
             symbols: watchedSymbols,
             styles: watchedStyles,
             snapshots,
-          sendMessage: (text) =>
-            sendTelegramMessage(text, { channel: 'coach' }),
-        });
+            voice: voicePreferenceState.voice,
+            sendMessage: (text) =>
+              sendTelegramMessage(text, { channel: 'coach' }),
+          });
         sessionCoachState = await saveSessionCoachState(
             fastify,
             sessionCoachState,
@@ -614,6 +701,7 @@ export default fp(
             watchedSymbols,
             tradingStyle: tpStyle,
             tpMemory,
+            voice: voicePreferenceState.voice,
             sendMessage: (text) =>
               sendTelegramMessage(text, { channel: 'tp' }),
             force: options?.force,
@@ -774,6 +862,20 @@ export default fp(
       };
     }
 
+    function getVoice(): TelegramVoice {
+      return voicePreferenceState.voice;
+    }
+
+    async function setVoice(voice: TelegramVoice): Promise<TelegramVoice> {
+      voicePreferenceState = await saveVoicePreference(
+        fastify,
+        voicePreferenceState,
+        voice,
+      );
+      fastify.log.info({ voice }, 'Telegram alert voice updated');
+      return voicePreferenceState.voice;
+    }
+
     async function setAlertsPaused(paused: boolean): Promise<void> {
       pollingPauseState = await savePollingPauseState(
         fastify,
@@ -823,6 +925,8 @@ export default fp(
       getStatus,
       isAlertsPaused: () => pollingPauseState.alertsPaused,
       setAlertsPaused,
+      getVoice,
+      setVoice,
       resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
@@ -841,6 +945,10 @@ export default fp(
         pollingPauseState = await loadPollingPauseState(
           fastify,
           pollingPauseState,
+        );
+        voicePreferenceState = await loadVoicePreference(
+          fastify,
+          voicePreferenceState,
         );
         if (pollingPauseState.alertsPaused) {
           fastify.log.info(

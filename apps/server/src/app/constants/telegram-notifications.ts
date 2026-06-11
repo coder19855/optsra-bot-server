@@ -20,9 +20,19 @@ export const TELEGRAM_NOTIFICATION_DEFAULTS = {
   DEFAULT_TRADING_STYLES: [TradingStyle.Intraday],
   /** Skip alerts when conviction is below this on first poll (avoids startup noise). */
   MIN_CONVICTION_FOR_INITIAL_ALERT: 35,
+  /** Consecutive polls with the same CE/PE action before a new entry alert fires. */
+  SIGNAL_ENTRY_CONFIRM_POLLS: 2,
+  /** Consecutive NO-TRADE polls after CE/PE before a flat (no-position) exit alert fires (~3 min at 60s poll). */
+  SIGNAL_EXIT_CONFIRM_POLLS: 3,
+  /** Consecutive opposite-direction polls before an engaged hard-exit alert fires. */
+  SIGNAL_OPPOSITE_CONFIRM_POLLS: 2,
+  /** Engaged exit: conviction must fall below enterThreshold × this ratio (e.g. 60% → 42%). */
+  SIGNAL_EXIT_CONVICTION_RATIO: 0.7,
+  /** Floor for engaged hard-exit conviction check regardless of enter threshold. */
+  SIGNAL_EXIT_CONVICTION_FLOOR_MIN: 35,
   /** Mongo collection for open-position take-profit alert deduplication. */
   TP_SNAPSHOT_COLLECTION: 'position-tp-snapshots',
-  /** Recent system entry alerts used to qualify an open Fyers leg for TP coaching. */
+  /** Recent system entry alerts — TP coaching only; not used for engaged exit alerts. */
   ENTRY_INTENT_COLLECTION: 'trade-entry-intents',
   ALERT_WHY_CONTEXT_COLLECTION: 'alert-why-context',
   SIGNAL_OUTCOMES_COLLECTION: 'signal-outcomes',

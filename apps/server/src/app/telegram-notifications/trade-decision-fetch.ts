@@ -7,9 +7,44 @@ import { AdaptiveConvictionInsight } from '../types/adaptive-conviction';
 import { AlertWhyContext } from '../types/alert-intelligence';
 import { PriceActionResponse } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
-import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
+import {
+  TradeDecisionAlertPayload,
+  TradeStructureContext,
+} from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
+
+function buildStructureContext(
+  body: Record<string, unknown>,
+  tradingStyle: TradingStyle,
+): TradeStructureContext | undefined {
+  const rawPrice = (body._debug as { rawPrice?: PriceActionResponse } | undefined)
+    ?.rawPrice;
+  const scores = rawPrice?.timeframeScores;
+  if (!scores) return undefined;
+
+  const thresholds = body.convictionThresholds as
+    | { enter?: number }
+    | undefined;
+  const primaryTF =
+    (body.primaryTimeframe as TradeStructureContext['primaryTimeframe']) ||
+    (tradingStyle === TradingStyle.Scalper
+      ? '5m'
+      : tradingStyle === TradingStyle.Positional
+        ? '1h'
+        : '15m');
+
+  return {
+    primaryTimeframe: primaryTF,
+    primaryScore: scores[primaryTF] ?? 0,
+    timeframeScores: {
+      '5m': scores['5m'] ?? 0,
+      '15m': scores['15m'] ?? 0,
+      '1h': scores['1h'] ?? 0,
+    },
+    enterThreshold: thresholds?.enter ?? 60,
+  };
+}
 
 function parseTradingStyle(value: string): TradingStyle {
   const upper = value.toUpperCase();
@@ -43,8 +78,24 @@ export async function fetchTradeDecisionAlert(
   const optionFlow = body.optionFlow as Record<string, unknown> | undefined;
   const strategies = (body.recommendedStrategies as Array<Record<string, unknown>>) || [];
 
-  const paAction = (overallSignal?.action as string) || 'NO-TRADE';
-  const paConfidence = Number(overallSignal?.confidence ?? 0);
+  let paAction = (overallSignal?.action as string) || 'NO-TRADE';
+  let paConfidence = Number(overallSignal?.confidence ?? 0);
+  const structuralAction = overallSignal?.structuralAction as string | undefined;
+  const vetoReason = overallSignal?.vetoReason
+    ? String(overallSignal.vetoReason)
+    : undefined;
+  const confidenceBeforeDecay =
+    overallSignal?.confidenceBeforeDecay != null
+      ? Number(overallSignal.confidenceBeforeDecay)
+      : undefined;
+
+  // Chart veto: avoid showing "PE-BUY · 0%" when momentum decay zeroed confidence.
+  if (
+    paConfidence === 0 &&
+    (paAction === 'CE-BUY' || paAction === 'PE-BUY')
+  ) {
+    paAction = 'NO-TRADE';
+  }
 
   let action = (body.action as DecisionAction) || 'NO-TRADE';
   if (!body.action) {
@@ -98,6 +149,8 @@ export async function fetchTradeDecisionAlert(
     }
   }
 
+  const structureContext = buildStructureContext(body, tradingStyle);
+
   return {
     symbol: String(body.symbol || symbol),
     tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
@@ -105,6 +158,7 @@ export async function fetchTradeDecisionAlert(
     action,
     bias: body.bias as TradeDecisionAlertPayload['bias'],
     conviction: Number(body.conviction ?? 0),
+    structureContext,
     recommendation: String(body.recommendation ?? ''),
     humanSummary: String(body.humanSummary ?? ''),
     tradeGuidance: {
@@ -117,6 +171,12 @@ export async function fetchTradeDecisionAlert(
     priceAction: {
       action: paAction as TradeDecisionAlertPayload['priceAction']['action'],
       confidence: paConfidence,
+      structuralAction:
+        structuralAction === 'CE-BUY' || structuralAction === 'PE-BUY'
+          ? structuralAction
+          : undefined,
+      vetoReason,
+      confidenceBeforeDecay,
     },
     optionFlow: optionFlow
       ? {
@@ -139,5 +199,7 @@ export async function fetchTradeDecisionAlert(
       executionHint: s.executionHint ? String(s.executionHint) : undefined,
     })),
     positionSizing,
+    tradeSetup,
+    momentumDecayPercent: rawPrice?.momentumDecay?.decayPercent ?? null,
   };
 }

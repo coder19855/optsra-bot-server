@@ -1,9 +1,28 @@
 import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
-import { TradingStyle } from '../types/trading-style';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { formatScenarioBanner } from './telegram-palette';
+import { formatTradeContextLines, formatVetoSection } from './trade-context-copy';
+import {
+  signalActionLabel,
+  signalConvictionLine,
+  signalHeadline,
+  signalOptionRead,
+  signalPriceActionLine,
+} from './voice-copy';
+import {
+  uiNowAlertsLine,
+  uiNowBanner,
+  uiNowClosedNote,
+  uiNowEnterBarMet,
+  uiNowFooter,
+  uiNowFyersLine,
+  uiNowMarketLine,
+  uiNowNoStrike,
+  uiNowTopPlaybook,
+} from './voice-ui-copy';
 
 function escapeHtml(text: string): string {
   return text
@@ -17,68 +36,32 @@ function shortSymbol(symbol: string): string {
   return part.replace('-INDEX', '');
 }
 
-function tradeActionLabel(action: DecisionAction): string {
-  switch (action) {
-    case 'CE-BUY':
-      return 'Buy Call (CE)';
-    case 'PE-BUY':
-      return 'Buy Put (PE)';
-    case 'NEUTRAL':
-      return 'Neutral';
-    default:
-      return 'No trade';
-  }
-}
-
-function tradeHeadline(action: DecisionAction): string {
-  switch (action) {
-    case 'CE-BUY':
-      return '📈 BUY CALL · index may go UP';
-    case 'PE-BUY':
-      return '📉 BUY PUT · index may go DOWN';
-    case 'NEUTRAL':
-      return '⏸ Neutral · spreads / no direction';
-    default:
-      return '💤 No trade · stay out';
-  }
-}
-
 function biasEmoji(bias: TradeBias): string {
   if (bias.includes('Bullish')) return '📈';
   if (bias.includes('Bearish')) return '📉';
   return '⏸';
 }
 
-function priceActionLine(paAction: string, confidence: number): string {
-  if (paAction === 'CE-BUY') {
-    return `📊 Price action: CE-BUY (bullish) · ${confidence}%`;
-  }
-  if (paAction === 'PE-BUY') {
-    return `📊 Price action: PE-BUY (bearish) · ${confidence}%`;
-  }
-  return `📊 Price action: ${paAction} · ${confidence}%`;
-}
+function priceActionLine(
+  pa: TradeDecisionAlertPayload['priceAction'],
+  brainAction: DecisionAction,
+  voice: TelegramVoice,
+): string {
+  const { action: paAction, confidence, structuralAction } = pa;
+  const chartVetoed =
+    confidence === 0 ||
+    (brainAction === 'NO-TRADE' &&
+      (paAction === 'NO-TRADE' || structuralAction != null));
 
-function optionRead(
-  ofBias: string | undefined,
-  action: DecisionAction,
-): string | null {
-  if (!ofBias) return null;
-
-  const lower = ofBias.toLowerCase();
-  const optionsUp = lower.includes('bullish');
-  const optionsDown = lower.includes('bearish');
-  if (!optionsUp && !optionsDown) return null;
-
-  if (action === 'CE-BUY' && optionsDown) {
-    return '⚠️ Options say DOWN — does not match this Call idea';
-  }
-  if (action === 'PE-BUY' && optionsUp) {
-    return '⚠️ Options say UP — does not match this Put idea';
-  }
-  if (optionsUp) return '🌊 Options agree: UP';
-  if (optionsDown) return '🌊 Options agree: DOWN';
-  return null;
+  return signalPriceActionLine({
+    voice,
+    paAction,
+    confidence,
+    brainAction,
+    chartVetoed,
+    structuralAction,
+    beforeDecay: pa.confidenceBeforeDecay,
+  });
 }
 
 function formatIstTime(now = Date.now()): string {
@@ -99,32 +82,24 @@ export interface NowMarketContext {
   fetchedAt?: number;
 }
 
-export function formatNowMarketContextBlock(ctx: NowMarketContext): string {
-  const marketLine = ctx.marketOpen
-    ? '🟢 Market open'
-    : ctx.preSessionWindow
-      ? '🌅 Pre-session window'
-      : ctx.postSessionCoachWindow
-        ? '📚 Post-session coach window'
-        : '🌙 Outside market hours';
-
+export function formatNowMarketContextBlock(
+  ctx: NowMarketContext,
+  voice: TelegramVoice = DEFAULT_TELEGRAM_VOICE,
+): string {
   return joinTelegramLines(
-    formatScenarioBanner('info', 'Right now'),
+    formatScenarioBanner('info', uiNowBanner(voice)),
     `🕐 ${formatIstTime(ctx.fetchedAt)} IST`,
-    marketLine,
-    ctx.isTokenValid
-      ? '✅ Fyers session live'
-      : '⚠️ Fyers not connected — <code>/login</code>',
-    ctx.alertsPaused
-      ? '⏸ Auto alerts paused — <code>/start</code> to resume'
-      : '▶️ Auto alerts active',
-    !ctx.marketOpen
-      ? '<i>Market closed — read is informational, not a live alert.</i>'
-      : null,
+    uiNowMarketLine(ctx, voice),
+    uiNowFyersLine(ctx.isTokenValid, voice),
+    uiNowAlertsLine(ctx.alertsPaused, voice),
+    !ctx.marketOpen ? `<i>${uiNowClosedNote(voice)}</i>` : null,
   );
 }
 
-export function formatNowWatchItem(payload: TradeDecisionAlertPayload): string {
+export function formatNowWatchItem(
+  payload: TradeDecisionAlertPayload,
+  voice: TelegramVoice = DEFAULT_TELEGRAM_VOICE,
+): string {
   const label = shortSymbol(payload.symbol);
   const pa = payload.priceAction;
   const iv = payload.optionFlow?.ivRegime;
@@ -132,41 +107,83 @@ export function formatNowWatchItem(payload: TradeDecisionAlertPayload): string {
   const strike = payload.exactStrikeRecommendation;
   const ready = payload.tradeGuidance.shouldConsiderTrade;
 
+  const contextLines = formatTradeContextLines(
+    payload.action,
+    payload.bias,
+    payload.conviction,
+    payload.structureContext,
+    voice,
+  );
+
+  const vetoSection = formatVetoSection(
+    {
+      action: payload.action,
+      bias: payload.bias,
+      conviction: payload.conviction,
+      structureContext: payload.structureContext,
+      priceAction: pa,
+    },
+    voice,
+  );
+
   const readsBlock = joinTelegramLines(
-    priceActionLine(pa.action, pa.confidence),
-    optionRead(payload.optionFlow?.bias, payload.action),
+    vetoSection ? null : priceActionLine(pa, payload.action, voice),
+    signalOptionRead(payload.optionFlow?.bias, payload.action, voice),
     iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
   );
 
-  const recBlock = joinTelegramLines(
-    tradeHeadline(payload.action),
-    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${tradeActionLabel(payload.action)}`,
-    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasEmoji(payload.bias)} ${escapeHtml(payload.bias)} · ${payload.conviction}% conviction`,
+  const headline = signalHeadline({
+    voice,
+    action: payload.action,
+    flipped: false,
+  });
+
+  return joinTelegramLines(
+    formatScenarioBanner(
+      payload.action === 'CE-BUY'
+        ? 'bullish'
+        : payload.action === 'PE-BUY'
+          ? 'bearish'
+          : 'muted',
+      headline,
+    ),
+    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${signalActionLabel(payload.action, voice)}`,
+    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasEmoji(payload.bias)} ${escapeHtml(payload.bias)} · ${signalConvictionLine(payload.conviction, voice)}`,
+    ...contextLines,
+    vetoSection,
     readsBlock,
-    ready ? '✅ Meets enter bar' : '⚠️ Below enter bar — wait or size down',
+    uiNowEnterBarMet(ready, voice),
     strike
       ? `🎯 <code>${escapeHtml(strike.fyersSymbol)}</code> · ${strike.moneyness} @ ${strike.strike.toLocaleString('en-IN')}`
       : payload.action === 'CE-BUY' || payload.action === 'PE-BUY'
-        ? 'No strike pick — chain data thin'
+        ? uiNowNoStrike(voice)
         : null,
     topStrategy
-      ? `🎲 Top playbook: <b>${escapeHtml(topStrategy.strategy)}</b>${topStrategy.confidenceScore != null ? ` · ${topStrategy.confidenceScore}%` : ''}`
+      ? uiNowTopPlaybook(
+          escapeHtml(topStrategy.strategy),
+          topStrategy.confidenceScore ?? null,
+          voice,
+        )
       : null,
   );
-
-  return recBlock;
 }
 
 export function formatNowTelegramMessage(params: {
   context: NowMarketContext;
   items: TradeDecisionAlertPayload[];
-  errors?: Array<{ symbol: string; tradingStyle: TradingStyle; error: string }>;
+  errors?: Array<{ symbol: string; tradingStyle: string; error: string }>;
+  voice?: TelegramVoice;
 }): string {
-  const watchBlocks = params.items.map((item) => formatNowWatchItem(item));
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
+  const watchBlocks = params.items.map((item) => formatNowWatchItem(item, voice));
   const errorBlock =
     params.errors && params.errors.length > 0
       ? joinTelegramLines(
-          '⚠️ Could not load:',
+          voice === 'trader'
+            ? '⚠️ Could not load:'
+            : voice === 'marathi'
+              ? '⚠️ Load nahi zala:'
+              : '⚠️ Load nahi ho paya:',
           ...params.errors.map(
             (e) =>
               `• ${shortSymbol(e.symbol)} · ${e.tradingStyle}: ${escapeHtml(e.error)}`,
@@ -175,9 +192,9 @@ export function formatNowTelegramMessage(params: {
       : null;
 
   return joinTelegramSections(
-    formatNowMarketContextBlock(params.context),
+    formatNowMarketContextBlock(params.context, voice),
     ...watchBlocks,
     errorBlock,
-    '<i>On-demand snapshot — not an alert. Detail: <code>/why live</code></i>',
+    `<i>${uiNowFooter(voice)}</i>`,
   );
 }

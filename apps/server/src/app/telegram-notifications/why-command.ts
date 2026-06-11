@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { FYERS_OPTION_INDEX_SYMBOLS } from '../constants/fyers-symbols';
 import { AlertWhyContext } from '../types/alert-intelligence';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
+import { TradeStructureContext } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
 import { loadAlertWhyContext } from './alert-context-store';
 import { fetchTradeDecisionAlert } from './trade-decision-fetch';
@@ -78,6 +79,7 @@ export async function resolveWhyContext(
 ): Promise<{
   why: AlertWhyContext | null;
   exactStrike?: ExactStrikeRecommendation;
+  structureContext?: TradeStructureContext;
   error?: string;
 }> {
   const args = parseWhyArgs(params.text, {
@@ -128,6 +130,7 @@ export async function resolveWhyContext(
         alertedAt: new Date().toISOString(),
       },
       exactStrike: payload.exactStrikeRecommendation,
+      structureContext: payload.structureContext,
     };
   } catch (err) {
     return {

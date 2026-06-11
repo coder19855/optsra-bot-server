@@ -507,6 +507,7 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
           strength: confluentSignal.strength,
           vetoReason: confluentSignal.entryVetoReason,
           structuralAction: confluentSignal.structuralAction,
+          confidenceBeforeDecay: confluentSignal.confidenceBeforeDecay,
         },
         candlestick: {
           primary: candlestickPrimary.pattern,

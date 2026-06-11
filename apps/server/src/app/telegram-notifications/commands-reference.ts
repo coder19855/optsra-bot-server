@@ -78,6 +78,15 @@ export function formatCommandsReferenceMessage(
     `<i>Try:</i> <code>/now ${sym} ${style}</code>`,
   ]);
 
+  const voiceBlock = commandBlock('🎙 <b>Alert personality</b>', [
+    '<code>/voice</code> — current style',
+    '<code>/voice trader</code> — English · jargon',
+    '<code>/voice simple</code> — Hindi · easy',
+    '<code>/voice tapori</code> — Hinglish · bhai mode',
+    '<code>/voice marathi</code> — Marathi-English mix',
+    '<code>/voice preview</code> — sample all four',
+  ]);
+
   const alertsBlock = commandBlock('⏯ <b>Alert cool-off</b>', [
     '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
     '<code>/start</code> — resume alerts (needs live Fyers session)',
@@ -125,6 +134,7 @@ export function formatCommandsReferenceMessage(
     convictionBlock,
     planBlock,
     nowBlock,
+    voiceBlock,
     alertsBlock,
     fyersBlock,
     apiBlock,
@@ -139,6 +149,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'start', description: 'Resume signal alerts' },
   { command: 'stop', description: 'Pause signal alerts' },
   { command: 'now', description: 'Live market recommendation' },
+  { command: 'voice', description: 'Alert language & style' },
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },

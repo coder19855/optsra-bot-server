@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { TradingStyle } from '../types/trading-style';
 import { buildLearningInsightProfile } from './learning-insights';
 import { formatLearningTelegramMessage } from './learning-formatter';
@@ -78,8 +79,10 @@ export async function buildLearningTelegramMessage(
     watchedStyles: TradingStyle[];
     preamble?: boolean;
     includeNews?: boolean;
+    voice?: TelegramVoice;
   },
 ): Promise<{ message: string; error?: string }> {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
   if (!sessionReady) {
     return {
@@ -116,6 +119,7 @@ export async function buildLearningTelegramMessage(
       preamble: params.preamble,
       includeNews: includeNews && isMarketNewsEnabled(),
       newsHeadlines,
+      voice,
     }),
   };
 }
@@ -126,6 +130,7 @@ export async function sendPreSessionLearningBrief(
     watchedSymbols: string[];
     watchedStyles: TradingStyle[];
     sendMessage: (text: string) => Promise<void>;
+    voice?: TelegramVoice;
   },
 ): Promise<void> {
   const includeNews = isMarketNewsEnabled();
@@ -134,6 +139,7 @@ export async function sendPreSessionLearningBrief(
     watchedStyles: params.watchedStyles,
     preamble: true,
     includeNews,
+    voice: params.voice,
   });
 
   if (built.error) {

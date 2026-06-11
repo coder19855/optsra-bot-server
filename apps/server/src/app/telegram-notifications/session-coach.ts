@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
 import { runTradingCoachAnalysis } from '../trading-coach/analyze';
 import { SignalSnapshot } from '../types/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { TradingStyle } from '../types/trading-style';
 import {
   formatTelegramCoachErrorMessage,
@@ -91,8 +92,10 @@ export async function sendSessionCoachSummary(
     styles: TradingStyle[];
     snapshots: SignalSnapshot[];
     sendMessage: (text: string) => Promise<void>;
+    voice?: TelegramVoice;
   },
 ): Promise<{ sent: boolean; message?: string }> {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   try {
     const coaches = await buildSessionCoachSummaries(fastify, {
       sessionDate: params.sessionDate,
@@ -104,6 +107,7 @@ export async function sendSessionCoachSummary(
       sessionDate: params.sessionDate,
       coaches,
       snapshots: params.snapshots,
+      voice,
     });
 
     await params.sendMessage(message);

@@ -21,6 +21,7 @@ import {
   TradeTakeProfitLevel,
 } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
+import { TelegramVoice } from '../types/telegram-voice';
 import { fetchTradeDecisionAlert } from './trade-decision-fetch';
 import { formatTelegramTpAlertMessage } from './tp-alert-formatter';
 import { hasRecentTradeEntryIntent, pruneExpiredEntryIntents } from './trade-entry-intent';
@@ -441,6 +442,7 @@ export async function evaluateOpenPositionTpAlerts(
     tradingStyle: TradingStyle;
     tpMemory: Map<string, TpMonitorSnapshot>;
     sendMessage: (text: string) => Promise<void>;
+    voice?: TelegramVoice;
     force?: boolean;
   },
 ): Promise<{ monitored: number; tracked: number; notified: number }> {
@@ -547,6 +549,7 @@ export async function evaluateOpenPositionTpAlerts(
       const message = formatTelegramTpAlertMessage({
         evaluation,
         kinds: change.kinds,
+        voice: params.voice,
       });
       await params.sendMessage(message);
       notified += 1;

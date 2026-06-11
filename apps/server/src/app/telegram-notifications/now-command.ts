@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notifications';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
+import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { TradingStyle } from '../types/trading-style';
 import { parseSymbolStyleCommandArgs } from './command-args';
 import {
@@ -44,8 +45,13 @@ export async function buildNowTelegramMessage(
     watchedSymbols: string[];
     watchedStyles: TradingStyle[];
     isAlertsPaused: boolean;
+    voice?: TelegramVoice;
   },
 ): Promise<{ message: string; error?: string }> {
+  const voice =
+    params.voice ??
+    fastify.telegramNotifications?.getVoice?.() ??
+    DEFAULT_TELEGRAM_VOICE;
   const defaultSymbol = params.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
   const defaultStyle = params.watchedStyles[0] ?? TradingStyle.Intraday;
 
@@ -125,6 +131,6 @@ export async function buildNowTelegramMessage(
   }
 
   return {
-    message: formatNowTelegramMessage({ context, items, errors }),
+    message: formatNowTelegramMessage({ context, items, errors, voice }),
   };
 }
