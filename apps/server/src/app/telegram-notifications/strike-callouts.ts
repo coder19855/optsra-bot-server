@@ -103,5 +103,6 @@ export function gammaRowPrefix(profile: GreeksStrikeProfile): string {
 
 export function formatGreeksSectionHeader(optionSide: 'CE' | 'PE'): string {
   const scenario = optionSide === 'CE' ? 'bullish' : 'bearish';
-  return formatSectionHeader(scenario, `Greeks · ${optionSide}`, '📐');
+  const label = optionSide === 'CE' ? 'Call strikes' : 'Put strikes';
+  return formatSectionHeader(scenario, label, '📐');
 }

@@ -9,7 +9,7 @@ import {
   TelegramPositionSizing,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
-import { DecisionAction, TradeBias } from '../types/trade-decision';
+import { DecisionAction } from '../types/trade-decision';
 import {
   formatEnginePickCallout,
   formatGreeksSectionHeader,
@@ -18,8 +18,6 @@ import {
 import {
   formatScenarioBanner,
   formatSectionHeader,
-  paletteToken,
-  scenarioForAction,
   scenarioForSignalFlip,
   scenarioForTradeReady,
   wrapScenarioCallout,
@@ -48,48 +46,70 @@ function isSignalFlip(
   );
 }
 
-function actionBanner(action: DecisionAction, flipped: boolean): string {
+function tradeHeadline(action: DecisionAction, flipped: boolean): string {
   if (flipped) {
     return formatScenarioBanner(
       scenarioForSignalFlip(),
-      'Plot twist — direction flipped!',
+      'Direction changed',
     );
   }
   switch (action) {
     case 'CE-BUY':
-      return formatScenarioBanner('bullish', 'Calls are cooking');
+      return formatScenarioBanner('bullish', 'BUY CALL · bet index goes UP');
     case 'PE-BUY':
-      return formatScenarioBanner('bearish', 'Puts have the mic');
+      return formatScenarioBanner('bearish', 'BUY PUT · bet index goes DOWN');
     case 'NEUTRAL':
-      return formatScenarioBanner('neutral', 'Chop zone — sit tight');
+      return formatScenarioBanner('neutral', 'No direction · neutral strategies only');
     default:
-      return formatScenarioBanner('muted', 'Nothing to chase');
+      return formatScenarioBanner('muted', 'No trade · stay out');
   }
 }
 
-function actionEmoji(action: DecisionAction): string {
-  return paletteToken(scenarioForAction(action)).accent;
+function tradeActionLabel(action: DecisionAction): string {
+  switch (action) {
+    case 'CE-BUY':
+      return 'Buy Call (CE)';
+    case 'PE-BUY':
+      return 'Buy Put (PE)';
+    case 'NEUTRAL':
+      return 'Neutral';
+    default:
+      return 'No trade';
+  }
 }
 
-function biasEmoji(bias: TradeBias): string {
-  if (bias === 'Strong Bullish') return '📈📈';
-  if (bias === 'Moderate Bullish') return '📈';
-  if (bias === 'Strong Bearish') return '📉📉';
-  if (bias === 'Moderate Bearish') return '📉';
-  return '⏸';
+function chartRead(paAction: string): string {
+  if (paAction === 'CE-BUY') return '📊 Chart says UP';
+  if (paAction === 'PE-BUY') return '📊 Chart says DOWN';
+  return '📊 Chart flat';
 }
 
-function convictionMeter(conviction: number): string {
-  if (conviction >= 75) return '🔥🔥🔥';
-  if (conviction >= 55) return '🔥🔥';
-  if (conviction >= 35) return '🔥';
-  return '💤';
+function optionRead(
+  ofBias: string | undefined,
+  action: DecisionAction,
+): string | null {
+  if (!ofBias) return null;
+
+  const lower = ofBias.toLowerCase();
+  const optionsUp = lower.includes('bullish');
+  const optionsDown = lower.includes('bearish');
+  if (!optionsUp && !optionsDown) return null;
+
+  if (action === 'CE-BUY' && optionsDown) {
+    return '⚠️ Options say DOWN — does not match this Call idea';
+  }
+  if (action === 'PE-BUY' && optionsUp) {
+    return '⚠️ Options say UP — does not match this Put idea';
+  }
+  if (optionsUp) return '🌊 Options agree: UP';
+  if (optionsDown) return '🌊 Options agree: DOWN';
+  return null;
 }
 
-function paEmoji(action: string): string {
-  if (action === 'CE-BUY') return '📈';
-  if (action === 'PE-BUY') return '📉';
-  return '➖';
+function strikeTitle(action: DecisionAction): string {
+  if (action === 'CE-BUY') return '<b>BUY THIS CALL</b>';
+  if (action === 'PE-BUY') return '<b>BUY THIS PUT</b>';
+  return '<b>SUGGESTED STRIKE</b>';
 }
 
 function strategyRankEmoji(index: number): string {
@@ -104,26 +124,19 @@ function formatChangeLine(
   if (!previous) return null;
 
   if (isSignalFlip(previous, current)) {
-    return `🚨 ${previous.action} ➜ ${current.action}`;
+    return `🔄 Was ${tradeActionLabel(previous.action)} → now ${tradeActionLabel(current.action)}`;
+  }
+
+  if (kinds.includes('ACTION') || kinds.includes('INITIAL')) {
+    return `🔄 Was ${tradeActionLabel(previous.action)} → now ${tradeActionLabel(current.action)}`;
   }
 
   const parts: string[] = [];
-  if (kinds.includes('ACTION') || kinds.includes('INITIAL')) {
-    parts.push(`${previous.action} ➜ ${current.action}`);
-  }
-  if (kinds.includes('PA_SIGNAL')) {
-    parts.push(`PA ${previous.paAction} ➜ ${current.paAction}`);
-  }
-  if (kinds.includes('BIAS') && previous.bias !== current.bias) {
-    parts.push(`${previous.bias} ➜ ${current.bias}`);
+  if (kinds.includes('PA_SIGNAL') && previous.paAction !== current.paAction) {
+    parts.push(`chart ${previous.paAction} → ${current.paAction}`);
   }
   if (kinds.includes('TRADE_READY')) {
-    parts.push('Trade-ready');
-  }
-  if (kinds.includes('STRATEGY')) {
-    parts.push(
-      `${previous.topStrategy || '—'} ➜ ${current.topStrategy || '—'}`,
-    );
+    parts.push('enter bar met');
   }
   return parts.length ? `🔄 ${parts.join(' · ')}` : null;
 }
@@ -192,9 +205,10 @@ function gammaEmoji(level: GreeksStrikeProfile['gammaLevel']): string {
 
 function formatExactStrikeSection(
   strike: TradeDecisionAlertPayload['exactStrikeRecommendation'],
+  action: DecisionAction,
 ): string | null {
   if (!strike) return null;
-  return formatEnginePickCallout(strike, '<b>🎯 STRIKE</b>');
+  return formatEnginePickCallout(strike, strikeTitle(action));
 }
 
 function formatAdaptiveConvictionLine(
@@ -205,7 +219,7 @@ function formatAdaptiveConvictionLine(
 
   const meets = conviction >= adaptive.recommendedEnterThreshold;
   const icon = meets ? '✅' : '⚠️';
-  return `${icon} Enter bar ${adaptive.recommendedEnterThreshold}% · ${adaptive.overallWinRate}% wins (${adaptive.sampleSize} alerts)`;
+  return `${icon} Your enter bar: ${adaptive.recommendedEnterThreshold}% (${adaptive.overallWinRate}% wins on ${adaptive.sampleSize} past alerts)`;
 }
 
 export function formatGreeksStrikeSection(
@@ -264,35 +278,31 @@ export function formatTelegramAlertMessage(params: {
   const { payload, previous, current, kinds } = params;
   const label = shortSymbol(payload.symbol);
   const flipped = isSignalFlip(previous, current);
-  const banner = actionBanner(payload.action, flipped);
-  const emoji = actionEmoji(payload.action);
+  const headline = tradeHeadline(payload.action, flipped);
   const pa = payload.priceAction;
   const iv = payload.optionFlow?.ivRegime;
-  const ofBias = payload.optionFlow?.bias;
   const change = formatChangeLine(previous, current, kinds);
-  const strategies = formatStrategies(payload.recommendedStrategies);
   const exactStrike = formatExactStrikeSection(
     payload.exactStrikeRecommendation,
+    payload.action,
   );
   const adaptiveLine = formatAdaptiveConvictionLine(
     payload.adaptiveConviction,
     payload.conviction,
   );
-  const meter = convictionMeter(payload.conviction);
-  const biasIcon = biasEmoji(payload.bias);
   const readyScenario = scenarioForTradeReady(
     payload.tradeGuidance.shouldConsiderTrade,
   );
   const readyIcon = readyScenario === 'success' ? '✅' : '⚠️';
   const readyText =
-    readyScenario === 'success' ? 'Trade-ready' : 'Below bar — wait/size down';
-  const flowBits = [
-    `${paEmoji(pa.action)} PA ${pa.action} ${pa.confidence}%`,
-    ofBias ? `🌊 ${escapeHtml(ofBias)}` : null,
-    iv ? `🌡 ${escapeHtml(iv)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+    readyScenario === 'success'
+      ? 'OK to enter'
+      : 'Wait or size down';
+  const contextLines = [
+    chartRead(pa.action),
+    optionRead(payload.optionFlow?.bias, payload.action),
+    iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
+  ].filter(Boolean);
 
   const showGreeks = !exactStrike;
   const compactGreeks = showGreeks
@@ -301,19 +311,22 @@ export function formatTelegramAlertMessage(params: {
       })
     : null;
 
+  const strategies = formatStrategies(payload.recommendedStrategies);
+
   return [
-    banner,
-    `${emoji} <b>${escapeHtml(label)} · ${payload.tradingStyle} · ${payload.action}</b> · ${meter} ${payload.conviction}%`,
-    `💰 ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)}`,
-    flowBits || null,
+    headline,
+    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${tradeActionLabel(payload.action)}`,
+    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${payload.conviction}% conviction`,
+    ...contextLines,
     adaptiveLine,
     `${readyIcon} ${readyText}${payload.tradeGuidance.sizeRecommendation ? ` · ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}` : ''}`,
     formatPositionSizingTelegramSection(payload.positionSizing),
     exactStrike,
     compactGreeks,
-    strategies ? formatSectionHeader('info', 'Playbook', '🎲') : null,
-    strategies,
-    `🧠 ${escapeHtml(payload.humanSummary)}`,
+    payload.action === 'NEUTRAL' && strategies
+      ? formatSectionHeader('info', 'Neutral ideas', '🎲')
+      : null,
+    payload.action === 'NEUTRAL' ? strategies : null,
     change,
   ]
     .filter((line) => line !== null && line !== '')
