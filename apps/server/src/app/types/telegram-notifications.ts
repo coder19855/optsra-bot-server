@@ -13,7 +13,10 @@ export type TelegramAlertChannel = 'signal' | 'tp' | 'coach' | 'test' | 'default
 
 export interface TelegramInlineButton {
   text: string;
-  url: string;
+  /** Opens in the device browser. */
+  url?: string;
+  /** Opens the Telegram Mini App (in-chat web view). */
+  webAppUrl?: string;
 }
 
 export interface TelegramSendOptions {

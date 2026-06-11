@@ -1,6 +1,9 @@
 import { TradingCoachResponse } from '../types/trading-coach';
 import { TradingStyle } from '../types/trading-style';
-import { formatTelegramCoachSummaryMessage } from './coach-summary-formatter';
+import {
+  formatTelegramCoachOnDemandMessage,
+  formatTelegramCoachSummaryMessage,
+} from './coach-summary-formatter';
 
 function minimalCoach(
   overrides: Partial<TradingCoachResponse> = {},
@@ -93,7 +96,9 @@ function minimalCoach(
           exitQuality: 'acceptable',
           verdict: 'good',
           tags: ['lucky_override'],
-          coaching: ['Discretionary win'],
+          coaching: [
+            'Discretionary win — price action did not fully approve this entry. Do not treat this as proof the filters are too strict.',
+          ],
         },
       },
     ],
@@ -130,5 +135,28 @@ describe('formatTelegramCoachSummaryMessage', () => {
     expect(message).toContain('NIFTY2661623150PE');
     expect(message).toContain('09:16→10:12');
     expect(message).toContain('75 qty');
+  });
+
+  it('localizes coach body copy for tapori voice', () => {
+    const message = formatTelegramCoachOnDemandMessage({
+      sessionDate: '2026-06-11',
+      coaches: [minimalCoach()],
+      snapshots: [],
+      voice: 'tapori',
+    });
+
+    expect(message).toContain('Bhai aaj ke trades ka check');
+    expect(message).toContain('trade close hue bhai');
+    expect(message).toContain('Abhi open bhai');
+    expect(message).toContain('Discipline clean sheet bhai');
+    expect(message).toContain('lucky off-script win bhai');
+    expect(message).toContain('bina engine approval ke start hue bhai');
+    expect(message).toContain('Discretionary win bhai');
+    expect(message).not.toContain(
+      'Clean sheet on discipline — rinse and repeat the approved-entry playbook.',
+    );
+    expect(message).not.toContain(
+      'Discretionary win — price action did not fully approve this entry.',
+    );
   });
 });

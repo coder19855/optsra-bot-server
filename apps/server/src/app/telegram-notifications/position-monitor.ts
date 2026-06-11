@@ -484,6 +484,7 @@ export async function evaluateOpenPositionTpAlerts(
           fastify,
           position.indexSymbol,
           params.tradingStyle,
+          { vetoMode: fastify.telegramNotifications.getVetoMode() },
         );
         if (!fetched) continue;
         decision = fetched;

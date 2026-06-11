@@ -13,6 +13,7 @@ import { analyzeSessionBias } from '../technical-analysis/session-bias';
 import { analyzeTrendQuality } from '../technical-analysis/trend-quality';
 import { analyzeVolatilityRegime } from '../technical-analysis/volatility-regime';
 import { ResponseStatus } from '../types';
+import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
 import { TradingStyle } from '../trading-style';
 
 export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
@@ -22,9 +23,20 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
         symbol,
         range_to,
         tradingStyle: styleQuery,
+        vetoOff: vetoOffQuery,
+        vetoMode: vetoModeQuery,
+        skipVeto: skipVetoQuery,
       } = request.query as FyersAPI.HistoryQueryRequest & {
         tradingStyle?: string;
+        vetoOff?: string;
+        vetoMode?: string;
+        skipVeto?: string;
       };
+
+      const entryVetoMode = parseVetoModeQuery(
+        vetoModeQuery,
+        vetoOffQuery ?? skipVetoQuery,
+      );
 
       const MS_PER_DAY = 24 * 60 * 60 * 1000;
       const toEpochSeconds = (ms: number) => Math.floor(ms / 1000).toString();
@@ -425,6 +437,7 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
       // One clear confluent actionable signal (MTF aware)
       const confluentSignal =
         fastify.technicalAnalysisPlugin.getConfluentTradeSignal({
+          entryVetoMode,
           tradingStyle: activeStyle,
           scores: { score5m, score15m, score1h },
           structures: { ms5m, ms15m, ms1h },

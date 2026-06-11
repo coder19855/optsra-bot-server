@@ -118,6 +118,7 @@ export async function sendSessionCoachSummary(
       sessionDate: params.sessionDate,
       error,
       snapshots: params.snapshots,
+      voice,
     });
     await params.sendMessage(message);
     return { sent: true, message };

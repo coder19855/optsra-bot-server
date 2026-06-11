@@ -181,25 +181,32 @@ export default fp(
 
       let deltaP = 0;
       let deltaC = 0;
-      let gammaCluster = 0;
+      let gammaSupport = 0;
+      let gammaResistance = 0;
 
       for (const row of chain) {
         const delta = row.greeks?.delta ?? 0;
-        const gamma = row.greeks?.gamma ?? 0;
+        const gammaOi = (row.greeks?.gamma ?? 0) * (row.oi ?? 0);
 
-        if (row.option_type === OptionType.PE && row.strike_price < spot)
+        if (row.option_type === OptionType.PE && row.strike_price < spot) {
           deltaP += delta;
+          gammaSupport += gammaOi;
+        }
 
-        if (row.option_type === OptionType.CE && row.strike_price > spot)
+        if (row.option_type === OptionType.CE && row.strike_price > spot) {
           deltaC += delta;
-
-        gammaCluster += gamma;
+          gammaResistance += gammaOi;
+        }
       }
 
       // Adjusted scales for Greek magnitudes
       const deltaScore = fastify.utilsPlugin.norm(deltaP - deltaC, 2);
-      // Gamma is tiny (e.g. 0.002), needs a tiny scale to be visible
-      const gammaScore = fastify.utilsPlugin.norm(-gammaCluster, 0.02);
+      const gammaImbalance = gammaSupport - gammaResistance;
+      const gammaScale = Math.max(
+        1,
+        (gammaSupport + gammaResistance) / 4,
+      );
+      const gammaScore = fastify.utilsPlugin.norm(gammaImbalance, gammaScale);
       const vegaScore =
         atm.vega !== null ? fastify.utilsPlugin.norm(10 - atm.vega, 5) : 0;
       const thetaScore =

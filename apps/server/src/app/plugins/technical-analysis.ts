@@ -607,6 +607,8 @@ export default fp(
     };
 
     const getConfluentTradeSignal = (params: {
+      skipEntryVeto?: boolean;
+      entryVetoMode?: import('../types/veto-mode').VetoMode;
       tradingStyle: TradingStyle;
       scores: { score5m: number; score15m: number; score1h: number };
       structures: { ms5m: number; ms15m: number; ms1h: number };
@@ -640,6 +642,11 @@ export default fp(
       };
     }) => {
       const { tradingStyle, scores, structures, primary, momentum } = params;
+      const entryVetoMode =
+        params.entryVetoMode ??
+        (params.skipEntryVeto ? 'off' : 'strict');
+      const vetoOff = entryVetoMode === 'off';
+      const vetoRelaxed = entryVetoMode === 'relaxed';
       const regime = REGIME_FILTERS;
       const veto = ENTRY_VETO;
       const enhance = CONFLUENCE_ENHANCEMENTS;
@@ -943,23 +950,29 @@ export default fp(
 
       let action: 'CE-BUY' | 'PE-BUY' | 'NO-TRADE' = 'NO-TRADE';
 
-      if (allowTrade && isBullishPrimary) action = 'CE-BUY';
-      if (allowTrade && isBearishPrimary) action = 'PE-BUY';
+      if (vetoOff) {
+        if (isBullishPrimary) action = 'CE-BUY';
+        else if (isBearishPrimary) action = 'PE-BUY';
+      } else {
+        if (allowTrade && isBullishPrimary) action = 'CE-BUY';
+        if (allowTrade && isBearishPrimary) action = 'PE-BUY';
 
-      // If 1h is strongly against for intraday/positional, veto
-      if (
-        tradingStyle !== TradingStyle.Scalper &&
-        ((isBullishPrimary && scores.score1h < -0.4) || (isBearishPrimary && scores.score1h > 0.4))
-      ) {
-        action = 'NO-TRADE';
-        noteVeto('1h score strongly opposes trade direction');
+        // If 1h is strongly against for intraday/positional, veto
+        if (
+          tradingStyle !== TradingStyle.Scalper &&
+          ((isBullishPrimary && scores.score1h < -0.4) ||
+            (isBearishPrimary && scores.score1h > 0.4))
+        ) {
+          action = 'NO-TRADE';
+          noteVeto('1h score strongly opposes trade direction');
+        }
       }
 
       if (action === 'NO-TRADE' && !entryVetoReason && !allowTrade) {
         noteVeto('Insufficient confluence or conviction for entry');
       }
 
-      const entry = action === 'NO-TRADE' ? 0 : primary.lastPrice;
+      let entry = action === 'NO-TRADE' ? 0 : primary.lastPrice;
 
       // SL from primary swings (most recent opposing swing), ATR-clamped when available
       let rawStopLoss = 0;
@@ -985,14 +998,6 @@ export default fp(
         ).stopLoss;
       }
 
-      // Risk for targets (avoid zero risk)
-      const risk =
-        action === 'CE-BUY'
-          ? Math.max(1, entry - stopLoss)
-          : Math.max(1, stopLoss - entry);
-
-      // Actionable targets: 1.5R, 2.5R, 4R (more realistic than 5)
-      const rrMultipliers = action === 'NO-TRADE' ? [] : [1.5, 2.5, 4.0];
       const rrLabels = ['1:1.5', '1:2.5', '1:4'];
 
       const baseConfidence = Math.min(
@@ -1075,39 +1080,93 @@ export default fp(
           decay.reasons.length >= 2 ||
           decay.decayPercent >= veto.OPPOSED_STRUCTURE_DECAY_VETO + 0.05;
 
-        if (finalConfidence < MIN_CONFIDENCE_AFTER_DECAY[tradingStyle]) {
-          vetoedByDecay = true;
-          action = 'NO-TRADE';
-          finalConfidence = 0;
-          noteVeto(
-            `Confidence after decay (${finalConfidence}) below minimum ${MIN_CONFIDENCE_AFTER_DECAY[tradingStyle]}`,
-          );
-        } else if (decay.decayPercent >= veto.HARD_DECAY_VETO) {
-          vetoedByDecay = true;
-          action = 'NO-TRADE';
-          finalConfidence = 0;
-          noteVeto(
-            `Hard decay veto: ${Math.round(decay.decayPercent * 100)}% decay`,
-          );
-        } else if (
-          opposingStructure.hasAny &&
-          decay.decayPercent >= veto.OPPOSED_STRUCTURE_DECAY_VETO &&
-          multiFactorDecay
-        ) {
-          vetoedByDecay = true;
-          action = 'NO-TRADE';
-          finalConfidence = 0;
-          noteVeto(
-            `Opposing 15m structure with multi-factor decay (${Math.round(decay.decayPercent * 100)}%)`,
+        if (!vetoOff) {
+          if (
+            !vetoRelaxed &&
+            finalConfidence < MIN_CONFIDENCE_AFTER_DECAY[tradingStyle]
+          ) {
+            vetoedByDecay = true;
+            action = 'NO-TRADE';
+            finalConfidence = 0;
+            noteVeto(
+              `Confidence after decay (${finalConfidence}) below minimum ${MIN_CONFIDENCE_AFTER_DECAY[tradingStyle]}`,
+            );
+          } else if (decay.decayPercent >= veto.HARD_DECAY_VETO) {
+            vetoedByDecay = true;
+            action = 'NO-TRADE';
+            finalConfidence = 0;
+            noteVeto(
+              `Hard decay veto: ${Math.round(decay.decayPercent * 100)}% decay`,
+            );
+          } else if (
+            !vetoRelaxed &&
+            opposingStructure.hasAny &&
+            decay.decayPercent >= veto.OPPOSED_STRUCTURE_DECAY_VETO &&
+            multiFactorDecay
+          ) {
+            vetoedByDecay = true;
+            action = 'NO-TRADE';
+            finalConfidence = 0;
+            noteVeto(
+              `Opposing 15m structure with multi-factor decay (${Math.round(decay.decayPercent * 100)}%)`,
+            );
+          }
+        } else {
+          finalConfidence = Math.max(
+            finalConfidence,
+            MIN_CONFIDENCE_AFTER_DECAY[tradingStyle],
           );
         }
       }
 
-      const takeProfits = rrMultipliers.map((mult, i) => {
+      if (vetoOff) {
+        const directional = isBullishPrimary
+          ? 'CE-BUY'
+          : isBearishPrimary
+            ? 'PE-BUY'
+            : 'NO-TRADE';
+        if (directional !== 'NO-TRADE' && action === 'NO-TRADE') {
+          action = directional;
+          vetoedByDecay = false;
+          finalConfidence = Math.max(
+            confidenceBeforeDecay ?? finalConfidence,
+            MIN_CONFIDENCE_AFTER_DECAY[tradingStyle],
+            TA_CONFIDENCE.MIN_ACTIONABLE,
+          );
+          entry = primary.lastPrice;
+          let rawSl =
+            directional === 'CE-BUY'
+              ? primary.swings.lows.at(-1)?.price || primary.support || 0
+              : primary.swings.highs.at(-1)?.price || primary.resistance || 0;
+          stopLoss = rawSl;
+          if (
+            momentum?.primaryAtr &&
+            momentum.primaryAtr > 0 &&
+            rawSl > 0
+          ) {
+            stopLoss = normalizeStopLoss(
+              directional,
+              entry,
+              rawSl,
+              momentum.primaryAtr,
+            ).stopLoss;
+          }
+        }
+      }
+
+      const liveRisk =
+        action === 'CE-BUY'
+          ? Math.max(1, entry - stopLoss)
+          : action === 'PE-BUY'
+            ? Math.max(1, stopLoss - entry)
+            : 1;
+      const liveRrMultipliers = action === 'NO-TRADE' ? [] : [1.5, 2.5, 4.0];
+
+      const takeProfits = liveRrMultipliers.map((mult, i) => {
         const price =
           action === 'CE-BUY'
-            ? +(entry + risk * mult).toFixed(2)
-            : +(entry - risk * mult).toFixed(2);
+            ? +(entry + liveRisk * mult).toFixed(2)
+            : +(entry - liveRisk * mult).toFixed(2);
         const decay = 0.15 * i;
         return {
           price,

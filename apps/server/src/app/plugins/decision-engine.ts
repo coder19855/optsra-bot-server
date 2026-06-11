@@ -7,6 +7,13 @@ import {
   PriceActionResponse,
   TradeDecisionResult,
 } from '../types';
+import { isVetoOff, VetoMode } from '../types/veto-mode';
+
+export interface DecisionEngineOptions {
+  vetoMode?: VetoMode;
+  /** @deprecated use vetoMode */
+  vetoOff?: boolean;
+}
 
 export default fp(
   async (fastify: FastifyInstance) => {
@@ -20,7 +27,12 @@ export default fp(
       price: PriceActionResponse,
       option: OptionMetricsResponse,
       style: TradingStyle,
+      options?: DecisionEngineOptions,
     ): TradeDecisionResult {
+      const vetoMode: VetoMode =
+        options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
+      const vetoOff = isVetoOff(vetoMode);
+      const vetoRelaxed = vetoMode === 'relaxed';
       // Use per-TF primary scoring from the evolved PA engine (style-aware)
       // Primary TF score drives conviction for the chosen style.
       // Alignment is now count of TFs agreeing with primary.
@@ -230,6 +242,13 @@ export default fp(
       ) {
         alignment = 1;
         blended -= 8;
+      } else if (vetoOff) {
+        alignment = 1;
+        blended -= 8;
+      } else if (vetoRelaxed) {
+        alignment = 0;
+        conflictLevel = 'MEDIUM';
+        blended -= 16;
       } else {
         alignment = 0;
         conflictLevel = 'HIGH';
@@ -272,14 +291,20 @@ export default fp(
       const mediumThreshold = convictionThreshold.medium;
       const strongThreshold = convictionThreshold.strong;
 
-      const optionStronglyAgainst = (priceDirection === 'bullish' && optionDirection === 'bearish') ||
-                                    (priceDirection === 'bearish' && optionDirection === 'bullish') ||
-                                    (option.components && 
-                                     ((priceDirection === 'bullish' && (option.components.greeks ?? 0) < -0.5) ||
-                                      (priceDirection === 'bearish' && (option.components.greeks ?? 0) > 0.5)));
+      const optionStronglyAgainst = vetoOff
+        ? false
+        : (priceDirection === 'bullish' && optionDirection === 'bearish') ||
+          (priceDirection === 'bearish' && optionDirection === 'bullish') ||
+          (option.components &&
+            ((priceDirection === 'bullish' &&
+              (option.components.greeks ?? 0) < -0.5) ||
+              (priceDirection === 'bearish' &&
+                (option.components.greeks ?? 0) > 0.5)));
 
       const structuralGatesOk =
-        conflictLevel !== 'HIGH' && alignedCount > 0 && !optionStronglyAgainst;
+        (vetoOff || vetoRelaxed || conflictLevel !== 'HIGH') &&
+        alignedCount > 0 &&
+        !optionStronglyAgainst;
 
       if (
         conviction >= highThreshold &&
@@ -884,8 +909,9 @@ export default fp(
         priceData: PriceActionResponse,
         optionData: OptionMetricsResponse,
         style: TradingStyle,
+        options?: DecisionEngineOptions,
       ): TradeDecisionResult => {
-        return computeConfluentDecision(priceData, optionData, style);
+        return computeConfluentDecision(priceData, optionData, style, options);
       },
     };
 

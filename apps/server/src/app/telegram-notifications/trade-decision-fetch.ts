@@ -57,10 +57,18 @@ export async function fetchTradeDecisionAlert(
   fastify: FastifyInstance,
   symbol: string,
   tradingStyle: TradingStyle,
+  options?: {
+    vetoMode?: import('../types/veto-mode').VetoMode;
+    /** @deprecated use vetoMode */
+    vetoOff?: boolean;
+  },
 ): Promise<TradeDecisionAlertPayload | null> {
+  const vetoMode =
+    options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
+  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
   const res = await fastify.inject({
     method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}`,
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}`,
   });
 
   if (res.statusCode !== 200) {

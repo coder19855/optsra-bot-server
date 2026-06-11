@@ -8,6 +8,31 @@ import {
 import { SignalSnapshot } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
+import {
+  buildCoachSessionTakeaway,
+  translateCoachCoachingLine,
+  uiCoachClosedLegsOnly,
+  uiCoachClosedLegsSummary,
+  uiCoachEntryWindow,
+  uiCoachFillsLoggedNothingClosed,
+  uiCoachFillsNothingClosed,
+  uiCoachFyersAccountNet,
+  uiCoachMoreTrades,
+  uiCoachNoClosedAcrossStyles,
+  uiCoachNoClosedToday,
+  uiCoachNoFillsToday,
+  uiCoachNoSignalsToday,
+  uiCoachOffScript,
+  uiCoachOpenNoClosedYet,
+  uiCoachPnlLabel,
+  uiCoachPositionsStillOpen,
+  uiCoachSignalsTitle,
+  uiCoachStillOpenTitle,
+  uiCoachStylePnlLine,
+  uiCoachTradesTitle,
+  uiCoachTrimmed,
+  uiCoachAvgPremium,
+} from './voice-coach-copy';
 import { uiCoachBanner } from './voice-ui-copy';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
@@ -87,7 +112,10 @@ function formatEntryMinuteLabel(entryAtMs: number): string {
   return formatIstClockFromMs(entryAtMs);
 }
 
-function formatGroupedTradeLines(reports: TradingCoachTradeReport[]): string {
+function formatGroupedTradeLines(
+  reports: TradingCoachTradeReport[],
+  voice: TelegramVoice,
+): string {
   const groups = new Map<number, TradingCoachTradeReport[]>();
 
   for (const report of reports) {
@@ -102,25 +130,31 @@ function formatGroupedTradeLines(reports: TradingCoachTradeReport[]): string {
   return sortedBuckets
     .map((bucket) => {
       const bucketReports = groups.get(bucket) ?? [];
-      const lines = bucketReports.map((report) => formatTradeLine(report));
+      const lines = bucketReports.map((report) => formatTradeLine(report, voice));
 
       if (bucketReports.length === 1) {
         return lines[0];
       }
 
       const label = formatEntryMinuteLabel(bucketReports[0].trade.entryAtMs);
-      return joinTelegramLines(`🕐 <b>${label}</b> entry window`, ...lines);
+      return joinTelegramLines(uiCoachEntryWindow(label, voice), ...lines);
     })
     .join('\n\n');
 }
 
-function formatTradeLine(report: TradingCoachTradeReport): string {
+function formatTradeLine(
+  report: TradingCoachTradeReport,
+  voice: TelegramVoice,
+): string {
   const { trade, analysis } = report;
   const pnl = trade.pnlInr;
   const time = formatTradeTimeRange(trade);
-  const coaching = analysis.coaching[0] ?? '';
+  const coachingRaw = analysis.coaching[0] ?? '';
+  const coaching = coachingRaw
+    ? translateCoachCoachingLine(coachingRaw, voice)
+    : '';
   const optionLabel = trade.optionSymbol.split(':').pop() ?? trade.optionSymbol;
-  const approved = analysis.systemApproved ? '✅' : '⚠️ off-script';
+  const approved = analysis.systemApproved ? '✅' : uiCoachOffScript(voice);
   const qtyLabel = ` · ${trade.qty} qty`;
 
   return [
@@ -131,15 +165,22 @@ function formatTradeLine(report: TradingCoachTradeReport): string {
     .join('\n');
 }
 
-function formatOpenPositionLine(pos: CoachOpenPosition): string {
+function formatOpenPositionLine(
+  pos: CoachOpenPosition,
+  voice: TelegramVoice,
+): string {
   const optionLabel = pos.optionSymbol.split(':').pop() ?? pos.optionSymbol;
   const time = formatIstClockFromMs(pos.entryAtMs);
   const qtyLabel = `${pos.qty} qty`;
-  return `📂 <b>${escapeHtml(optionLabel)}</b> · ${time} · ${qtyLabel} · avg ₹${pos.avgEntryPremium.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  const avgLabel = uiCoachAvgPremium(voice);
+  return `📂 <b>${escapeHtml(optionLabel)}</b> · ${time} · ${qtyLabel} · ${avgLabel} ₹${pos.avgEntryPremium.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
 }
 
-function formatSignalRecap(snapshots: SignalSnapshot[]): string {
-  if (!snapshots.length) return '📡 No signals logged today.';
+function formatSignalRecap(
+  snapshots: SignalSnapshot[],
+  voice: TelegramVoice,
+): string {
+  if (!snapshots.length) return uiCoachNoSignalsToday(voice);
 
   return snapshots
     .map((snap) => {
@@ -159,6 +200,7 @@ function accountCoachSummary(
 function buildCoachHeaderPnl(
   coaches: TradingCoachResponse[],
   emptyClosedLabel: string,
+  voice: TelegramVoice,
 ): string {
   const primary = coaches[0];
   const summary = accountCoachSummary(coaches);
@@ -174,32 +216,39 @@ function buildCoachHeaderPnl(
     symbolPnl: primary.symbolPnl,
     indexFilter: primary.indexFilter,
   });
+  const pnlLabel = uiCoachPnlLabel(voice);
 
   if (totalTrades === 0) {
     if (totalOpen > 0) {
       const lines = [
-        `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${formatSignedInr(totalPnl, 2)}`,
-        `📂 ${totalOpen} position(s) still open — no closed legs yet`,
+        `${pnlIcon(totalPnl)} 💰 <b>${pnlLabel}</b> ${formatSignedInr(totalPnl, 2)}`,
+        uiCoachOpenNoClosedYet(totalOpen, voice),
       ];
       if (brokerNet != null && Math.abs(brokerNet - totalPnl) >= 1) {
         lines.push(
-          `   📎 Fyers account net: ${formatSignedInr(brokerNet, 2)}`,
+          `   📎 ${uiCoachFyersAccountNet(voice)} ${formatSignedInr(brokerNet, 2)}`,
         );
       }
       return lines.join('\n');
     }
-    return anyFills ? '📭 Fills logged — nothing closed yet' : emptyClosedLabel;
+    return anyFills
+      ? uiCoachFillsLoggedNothingClosed(voice)
+      : emptyClosedLabel;
   }
 
   const lines = [
-    `${pnlIcon(totalPnl)} 💰 <b>PnL:</b> ${formatSignedInr(totalPnl, 2)}`,
-    `🏁 ${totalTrades} closed leg(s)${totalOpen > 0 ? ` · 📂 ${totalOpen} open` : ''}`,
+    `${pnlIcon(totalPnl)} 💰 <b>${pnlLabel}</b> ${formatSignedInr(totalPnl, 2)}`,
+    uiCoachClosedLegsSummary(totalTrades, totalOpen, voice),
   ];
 
   if (totalOpen > 0 && Math.abs(closedPnl - totalPnl) >= 1) {
-    lines.push(`   📎 Closed legs only: ${formatSignedInr(closedPnl, 2)}`);
+    lines.push(
+      `   📎 ${uiCoachClosedLegsOnly(voice)} ${formatSignedInr(closedPnl, 2)}`,
+    );
   } else if (brokerNet != null && Math.abs(brokerNet - totalPnl) >= 1) {
-    lines.push(`   📎 Fyers account net: ${formatSignedInr(brokerNet, 2)}`);
+    lines.push(
+      `   📎 ${uiCoachFyersAccountNet(voice)} ${formatSignedInr(brokerNet, 2)}`,
+    );
   }
 
   return lines.join('\n');
@@ -208,56 +257,80 @@ function buildCoachHeaderPnl(
 function formatStyleSection(
   coach: TradingCoachResponse,
   snapshots: SignalSnapshot[],
+  voice: TelegramVoice,
 ): string {
   const style = coach.tradingStyle;
   const { summary } = coach;
   const styleSnapshots = snapshots.filter((s) => s.tradingStyle === style);
   const openLines = coach.openPositions
-    .map((pos) => formatOpenPositionLine(pos))
+    .map((pos) => formatOpenPositionLine(pos, voice))
     .join('\n');
 
   if (summary.totalRoundTrips === 0) {
     const emptyTradeHint =
       coach.openPositions.length > 0
         ? joinTelegramLines(
-            `📂 ${coach.openPositions.length} position(s) still open`,
+            uiCoachPositionsStillOpen(coach.openPositions.length, voice),
             openLines,
           )
         : coach.rawFillCount > 0
-          ? `📭 ${coach.rawFillCount} fill(s) — nothing closed yet`
-          : '📭 No fills today';
+          ? uiCoachFillsNothingClosed(coach.rawFillCount, voice)
+          : uiCoachNoFillsToday(voice);
     return joinTelegramSections(
       joinTelegramLines(
         formatSectionHeader('coach', String(style), '📊'),
         emptyTradeHint,
       ),
       joinTelegramLines(
-        formatSectionHeader('info', 'Signals', '📡'),
-        formatSignalRecap(styleSnapshots),
+        formatSectionHeader('info', uiCoachSignalsTitle(voice), '📡'),
+        formatSignalRecap(styleSnapshots, voice),
       ),
     );
   }
 
   const closedPnl = summary.computedRoundTripPnlInr;
   const pnlText = formatSignedInr(closedPnl, 2);
-  const stylePnlLine =
+  const closedLegsOnly =
     summary.openPositionCount > 0 &&
-    Math.abs(closedPnl - summary.totalPnlInr) >= 1
-      ? `💰 Closed legs ${pnlText} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`
-      : `💰 ${pnlText} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`;
+    Math.abs(closedPnl - summary.totalPnlInr) >= 1;
+  const stylePnlLine = uiCoachStylePnlLine({
+    voice,
+    pnlText,
+    winCount: summary.winCount,
+    lossCount: summary.lossCount,
+    good: summary.verdicts.good,
+    bad: summary.verdicts.bad,
+    ugly: summary.verdicts.ugly,
+    closedLegsOnly,
+  });
   const visibleTrades = coach.trades.slice(0, 5);
-  const tradeLines = formatGroupedTradeLines(visibleTrades);
+  const tradeLines = formatGroupedTradeLines(visibleTrades, voice);
 
   const more =
     coach.trades.length > 5
-      ? `\n\n… +${coach.trades.length - 5} more trade(s) — full detail in /api/trading-coach`
+      ? `\n\n${uiCoachMoreTrades(coach.trades.length - 5, voice)}`
       : '';
 
-  const takeaway = buildSessionTakeaway(coach);
+  const ugly = coach.trades.filter((t) => t.analysis.verdict === 'ugly');
+  const discretionaryWins = coach.trades.filter((t) =>
+    t.analysis.tags.includes('lucky_override'),
+  );
+  const earlyExits = coach.trades.filter((t) =>
+    t.analysis.tags.includes('early_exit'),
+  );
+  const takeaway = buildCoachSessionTakeaway(
+    {
+      summary,
+      uglyCount: ugly.length,
+      luckyWinCount: discretionaryWins.length,
+      earlyExitCount: earlyExits.length,
+    },
+    voice,
+  );
   const openSection =
     openLines.length > 0
       ? joinTelegramLines(
-          formatSectionHeader('coach', 'Still open', '📂'),
+          formatSectionHeader('coach', uiCoachStillOpenTitle(voice), '📂'),
           openLines,
         )
       : null;
@@ -268,68 +341,16 @@ function formatStyleSection(
       stylePnlLine,
     ),
     joinTelegramLines(
-      formatSectionHeader('coach', 'Trades', '🎬'),
+      formatSectionHeader('coach', uiCoachTradesTitle(voice), '🎬'),
       tradeLines + more,
     ),
     openSection,
     `💬 ${escapeHtml(takeaway)}`,
     joinTelegramLines(
-      formatSectionHeader('info', 'Signals', '📡'),
-      formatSignalRecap(styleSnapshots),
+      formatSectionHeader('info', uiCoachSignalsTitle(voice), '📡'),
+      formatSignalRecap(styleSnapshots, voice),
     ),
   );
-}
-
-function buildSessionTakeaway(coach: TradingCoachResponse): string {
-  const { summary, trades } = coach;
-
-  if (summary.totalRoundTrips === 0) {
-    return 'Flat day — no trades to roast. Use the signal snapshot to plan tomorrow’s watchlist.';
-  }
-
-  const ugly = trades.filter((t) => t.analysis.verdict === 'ugly');
-  const discretionaryWins = trades.filter(
-    (t) => t.analysis.tags.includes('lucky_override'),
-  );
-  const earlyExits = trades.filter((t) => t.analysis.tags.includes('early_exit'));
-
-  const parts: string[] = [];
-
-  if (summary.verdicts.good > 0 && summary.verdicts.ugly === 0) {
-    parts.push('Clean sheet on discipline — rinse and repeat the approved-entry playbook.');
-  } else if (summary.verdicts.ugly > 0) {
-    parts.push(
-      `${summary.verdicts.ugly} ugly trade(s) — plug the leaks before you size up.`,
-    );
-  }
-
-  if (ugly.length) {
-    parts.push(
-      'Biggest leak: entries the engine didn’t bless — walk past those tomorrow.',
-    );
-  }
-
-  if (discretionaryWins.length) {
-    parts.push(
-      `${discretionaryWins.length} lucky off-script win(s) — don’t let them fool you into loosening rules.`,
-    );
-  }
-
-  if (earlyExits.length) {
-    parts.push(
-      `${earlyExits.length} early bail(s) — spot kept paying after you left the party.`,
-    );
-  }
-
-  if (summary.systemApprovedCount < summary.analyzed) {
-    parts.push(
-      `${summary.analyzed - summary.systemApprovedCount} trade(s) started without engine approval.`,
-    );
-  }
-
-  return parts.length
-    ? parts.join(' ')
-    : 'Quick replay: did every entry earn its conviction and every exit earn its keep?';
 }
 
 export function formatTelegramCoachOnDemandMessage(params: {
@@ -338,14 +359,20 @@ export function formatTelegramCoachOnDemandMessage(params: {
   snapshots: SignalSnapshot[];
   voice?: TelegramVoice;
 }): string {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const { sessionDate, coaches, snapshots } = params;
   const dateLabel = formatIstDateLabel(sessionDate);
 
-  const sections = coaches.map((coach) => formatStyleSection(coach, snapshots));
+  const sections = coaches.map((coach) =>
+    formatStyleSection(coach, snapshots, voice),
+  );
 
-  const headerPnl = buildCoachHeaderPnl(coaches, '📭 No closed trades today');
+  const headerPnl = buildCoachHeaderPnl(
+    coaches,
+    uiCoachNoClosedToday(voice),
+    voice,
+  );
 
-  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const body = joinTelegramSections(
     joinTelegramLines(
       formatScenarioBanner('coach', uiCoachBanner(true, voice)),
@@ -356,7 +383,7 @@ export function formatTelegramCoachOnDemandMessage(params: {
   );
 
   if (body.length <= 3900) return body;
-  return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
+  return `${body.slice(0, 3850)}\n\n${uiCoachTrimmed(voice)}`;
 }
 
 export function formatTelegramCoachSummaryMessage(params: {
@@ -365,17 +392,20 @@ export function formatTelegramCoachSummaryMessage(params: {
   snapshots: SignalSnapshot[];
   voice?: TelegramVoice;
 }): string {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const { sessionDate, coaches, snapshots } = params;
   const dateLabel = formatIstDateLabel(sessionDate);
 
-  const sections = coaches.map((coach) => formatStyleSection(coach, snapshots));
+  const sections = coaches.map((coach) =>
+    formatStyleSection(coach, snapshots, voice),
+  );
 
   const headerPnl = buildCoachHeaderPnl(
     coaches,
-    '📭 No closed trades across your watched styles.',
+    uiCoachNoClosedAcrossStyles(voice),
+    voice,
   );
 
-  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const body = joinTelegramSections(
     joinTelegramLines(
       formatScenarioBanner('coach', uiCoachBanner(false, voice)),
@@ -386,7 +416,7 @@ export function formatTelegramCoachSummaryMessage(params: {
   );
 
   if (body.length <= 3900) return body;
-  return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
+  return `${body.slice(0, 3850)}\n\n${uiCoachTrimmed(voice)}`;
 }
 
 export { FYERS_AUTH_ERROR_REPLY } from './fyers-login-reminder';
@@ -418,14 +448,16 @@ export function formatTelegramCoachErrorMessage(params: {
   sessionDate: string;
   error: string;
   snapshots: SignalSnapshot[];
+  voice?: TelegramVoice;
 }): string {
+  const voice = params.voice ?? DEFAULT_TELEGRAM_VOICE;
   const dateLabel = formatIstDateLabel(params.sessionDate);
   return joinTelegramSections(
     joinTelegramLines('🏁 <b>Day’s wrap</b>', `📅 ${dateLabel}`),
     `😬 Trade review hit a wall: ${escapeHtml(params.error)}`,
     joinTelegramLines(
-      '📡 <b>End-of-day signal snapshot</b>',
-      formatSignalRecap(params.snapshots),
+      `📡 <b>${uiCoachSignalsTitle(voice)}</b>`,
+      formatSignalRecap(params.snapshots, voice),
     ),
   );
 }

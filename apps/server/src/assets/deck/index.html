@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>Optra Deck</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="vendor/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="loading-overlay" class="loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="loading-spinner" role="status"></div>
+      <span class="loading-text">Fetching data…</span>
+    </div>
+
+    <div id="app">
+      <header class="top-bar">
+        <div class="top-left">
+          <h1 id="symbol-label">—</h1>
+          <span id="style-label" class="pill">INTRADAY</span>
+        </div>
+        <div class="top-right">
+          <span id="live-badge" class="live-badge hidden">LIVE</span>
+          <span id="clock-label" class="muted">—</span>
+        </div>
+      </header>
+
+      <section class="action-card" id="action-card">
+        <div class="action-main">
+          <span id="action-label" class="action-label">—</span>
+          <span id="conviction-label" class="conviction">—</span>
+        </div>
+        <p id="status-line" class="status-line">Loading…</p>
+      </section>
+
+      <nav class="tab-bar" id="tab-bar">
+        <button type="button" class="tab-btn active" data-tab="signal">Signal</button>
+        <button type="button" class="tab-btn" data-tab="components">Components</button>
+        <button type="button" class="tab-btn" data-tab="charts">Charts</button>
+        <button type="button" class="tab-btn" data-tab="events">Events</button>
+      </nav>
+
+      <div id="tab-signal" class="tab-panel active">
+        <section class="gauge-block">
+          <div class="gauge-head">
+            <span>Option flow</span>
+            <span id="option-value" class="gauge-readout">0.00 CE</span>
+          </div>
+          <div class="gauge-track option" id="gauge-option">
+            <div class="gauge-zone pe">PE</div>
+            <div class="gauge-zone ce">CE</div>
+            <div class="gauge-needle" id="needle-option"></div>
+            <div class="gauge-ghost hidden" id="ghost-option"></div>
+          </div>
+          <div class="gauge-scale"><span>-1</span><span>0</span><span>+1</span></div>
+        </section>
+
+        <section class="gauge-block">
+          <div class="gauge-head">
+            <span>Price action</span>
+            <span id="pa-value" class="gauge-readout">0.00 CE</span>
+          </div>
+          <div class="gauge-track pa" id="gauge-pa">
+            <div class="gauge-zone pe">PE</div>
+            <div class="gauge-zone ce">CE</div>
+            <div class="gauge-needle" id="needle-pa"></div>
+            <div class="gauge-ghost hidden" id="ghost-pa"></div>
+          </div>
+          <div class="gauge-scale"><span>-1</span><span>0</span><span>+1</span></div>
+        </section>
+
+        <section class="lane-block">
+          <div class="lane-row">
+            <span>Option</span>
+            <div class="lane-bar"><div id="lane-option" class="lane-fill option"></div></div>
+            <span id="lane-option-pct">0%</span>
+          </div>
+          <div class="lane-row">
+            <span>PA</span>
+            <div class="lane-bar"><div id="lane-pa" class="lane-fill pa"></div></div>
+            <span id="lane-pa-pct">0%</span>
+          </div>
+          <div class="lane-row">
+            <span>Combined</span>
+            <div class="lane-bar"><div id="lane-combined" class="lane-fill combined"></div></div>
+            <span id="lane-combined-pct">0%</span>
+          </div>
+        </section>
+      </div>
+
+      <div id="tab-components" class="tab-panel">
+        <section class="component-panel">
+          <div class="panel-head">
+            <span>Option components</span>
+            <span id="option-components-note" class="panel-note hidden"></span>
+          </div>
+          <div id="option-components" class="component-list"></div>
+        </section>
+
+        <section class="component-panel">
+          <div class="panel-head">
+            <span>Price action components</span>
+          </div>
+          <div id="pa-components" class="component-list"></div>
+        </section>
+      </div>
+
+      <div id="tab-charts" class="tab-panel">
+        <section class="chart-block replay-only hidden" id="veto-section">
+          <div class="chart-title">Veto timeline</div>
+          <div id="veto-strip" class="veto-strip" title="Amber = chart veto blocked entry"></div>
+          <div class="veto-mode-bar" id="veto-mode-bar">
+            <span class="veto-mode-label">Veto mode</span>
+            <div class="veto-mode-options" id="veto-mode-options">
+              <button type="button" class="veto-mode-btn" data-veto-mode="strict">Strict</button>
+              <button type="button" class="veto-mode-btn" data-veto-mode="relaxed">Relaxed</button>
+              <button type="button" class="veto-mode-btn" data-veto-mode="off">Off</button>
+            </div>
+          </div>
+          <p id="veto-mode-note" class="veto-mode-note hidden"></p>
+        </section>
+
+        <section class="chart-block">
+          <div class="chart-title">Spot <span id="spot-scrub-label" class="spot-scrub-label"></span></div>
+          <div class="chart-shell">
+            <div id="spot-chart" class="chart"></div>
+            <p id="spot-chart-empty" class="chart-empty hidden">No candle data for this session</p>
+            <p id="spot-chart-error" class="chart-error hidden"></p>
+          </div>
+        </section>
+
+        <section class="chart-block replay-only hidden" id="pnl-section">
+          <div class="chart-title">Session PnL</div>
+          <p id="pnl-note" class="pnl-note hidden"></p>
+          <div id="pnl-chart" class="chart chart-sm"></div>
+        </section>
+      </div>
+
+      <div id="tab-events" class="tab-panel">
+        <section class="events-panel">
+          <div class="panel-head">
+            <span>Session events</span>
+            <span id="events-count" class="panel-note">—</span>
+          </div>
+          <p class="events-hint">Signal flips, vetoes, and trades · tap to jump on chart</p>
+          <div id="events-list" class="event-list"></div>
+        </section>
+      </div>
+
+      <p id="error-line" class="error-line hidden"></p>
+    </div>
+
+    <div id="replay-dock" class="replay-dock replay-only hidden">
+      <div class="replay-meta" id="replay-meta">—</div>
+      <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

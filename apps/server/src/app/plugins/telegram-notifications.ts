@@ -71,6 +71,12 @@ import {
   saveVoicePreference,
   VoicePreferenceState,
 } from '../telegram-notifications/voice-preference';
+import {
+  loadVetoPreference,
+  saveVetoPreference,
+  VetoPreferenceState,
+} from '../telegram-notifications/veto-preference';
+import { mergeDeckKeyboard } from '../telegram-notifications/deck-keyboard';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import {
   SignalSnapshot,
@@ -143,6 +149,9 @@ export default fp(
     let voicePreferenceState: VoicePreferenceState = {
       voice: DEFAULT_TELEGRAM_VOICE,
     };
+    let vetoPreferenceState: VetoPreferenceState = {
+      vetoMode: 'strict',
+    };
     const tpMemory = new Map<string, TpMonitorSnapshot>();
     let lastTpAlertAt: Date | null = null;
     let openPositionsMonitored = 0;
@@ -203,7 +212,16 @@ export default fp(
         disable_notification: send.disableNotification,
       };
       if (options?.inlineKeyboard?.length) {
-        payload.reply_markup = { inline_keyboard: options.inlineKeyboard };
+        payload.reply_markup = {
+          inline_keyboard: options.inlineKeyboard.map((row) =>
+            row.map((btn) => {
+              if (btn.webAppUrl) {
+                return { text: btn.text, web_app: { url: btn.webAppUrl } };
+              }
+              return { text: btn.text, url: btn.url ?? '' };
+            }),
+          ),
+        };
       }
       const res = await axios.post(url, payload);
       const messageId = res.data?.result?.message_id as number | undefined;
@@ -255,6 +273,7 @@ export default fp(
         fastify,
         symbol,
         tradingStyle,
+        { vetoMode: vetoPreferenceState.vetoMode },
       );
       if (!payload) {
         throw new Error(`No trade decision payload for ${symbol}`);
@@ -360,7 +379,13 @@ export default fp(
           exitReason: change.exitReason,
           voice: voicePreferenceState.voice,
         });
-        await sendTelegramMessage(message, { channel: 'signal' });
+        await sendTelegramMessage(
+          message,
+          mergeDeckKeyboard({ channel: 'signal' }, {
+            symbol,
+            tradingStyle: String(tradingStyle),
+          }),
+        );
         current.lastNotifiedAt = notifiedAt;
         current.lastNotifiedFingerprint = current.fingerprint;
         current.awaitingEntryConfirmation = false;
@@ -567,7 +592,17 @@ export default fp(
             snapshots,
             voice: voicePreferenceState.voice,
             sendMessage: (text) =>
-              sendTelegramMessage(text, { channel: 'coach' }),
+              sendTelegramMessage(
+                text,
+                mergeDeckKeyboard({ channel: 'coach' }, {
+                  symbol: watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX',
+                  tradingStyle: String(
+                    watchedStyles[0] ?? TradingStyle.Intraday,
+                  ),
+                  sessionDate,
+                  includeReplay: true,
+                }),
+              ),
           });
         sessionCoachState = await saveSessionCoachState(
             fastify,
@@ -874,6 +909,34 @@ export default fp(
       return voicePreferenceState.voice;
     }
 
+    function getVetoMode(): import('../types/veto-mode').VetoMode {
+      return vetoPreferenceState.vetoMode;
+    }
+
+    function isVetoOff(): boolean {
+      return vetoPreferenceState.vetoMode === 'off';
+    }
+
+    async function setVetoMode(
+      vetoMode: import('../types/veto-mode').VetoMode,
+    ): Promise<import('../types/veto-mode').VetoMode> {
+      vetoPreferenceState = await saveVetoPreference(
+        fastify,
+        vetoPreferenceState,
+        vetoMode,
+      );
+      fastify.log.info(
+        { vetoMode: vetoPreferenceState.vetoMode },
+        'Telegram chart veto mode updated',
+      );
+      return vetoPreferenceState.vetoMode;
+    }
+
+    async function setVetoOff(vetoOff: boolean): Promise<boolean> {
+      await setVetoMode(vetoOff ? 'off' : 'strict');
+      return isVetoOff();
+    }
+
     async function setVoice(voice: TelegramVoice): Promise<TelegramVoice> {
       voicePreferenceState = await saveVoicePreference(
         fastify,
@@ -935,6 +998,10 @@ export default fp(
       setAlertsPaused,
       getVoice,
       setVoice,
+      getVetoMode,
+      isVetoOff,
+      setVetoMode,
+      setVetoOff,
       resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
@@ -957,6 +1024,10 @@ export default fp(
         voicePreferenceState = await loadVoicePreference(
           fastify,
           voicePreferenceState,
+        );
+        vetoPreferenceState = await loadVetoPreference(
+          fastify,
+          vetoPreferenceState,
         );
         if (pollingPauseState.alertsPaused) {
           fastify.log.info(

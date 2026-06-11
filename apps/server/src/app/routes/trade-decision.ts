@@ -6,6 +6,8 @@ import { buildExactStrikeRecommendation } from '../option-flow/exact-strike-reco
 import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { OptionMetricsResponse, PriceActionResponse } from '../types';
+import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
+import { isVetoOff } from '../types/veto-mode';
 
 export default async function tradeDecisionRoute(fastify: FastifyInstance) {
   fastify.get('/api/trade-decision', async (request, reply) => {
@@ -13,11 +15,18 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       symbol,
       tradingStyle: styleQuery,
       strikeCount,
+      vetoOff: vetoOffQuery,
+      vetoMode: vetoModeQuery,
     } = request.query as {
       symbol: string;
       tradingStyle?: string;
       strikeCount?: number;
+      vetoOff?: string;
+      vetoMode?: string;
     };
+
+    const vetoMode = parseVetoModeQuery(vetoModeQuery, vetoOffQuery);
+    const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
 
     if (!symbol) {
       return reply.code(400).send({ error: 'symbol is required' });
@@ -42,7 +51,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       const [priceRes, optionRes] = await Promise.all([
         fastify.inject({
           method: 'GET',
-          url: `/api/technical-analysis?symbol=${encodeURIComponent(symbol)}&tradingStyle=${styleParam}`,
+          url: `/api/technical-analysis?symbol=${encodeURIComponent(symbol)}&tradingStyle=${styleParam}${vetoQuery}`,
         }),
         fastify.inject({
           method: 'GET',
@@ -68,6 +77,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         priceData,
         optionData,
         activeStyle,
+        { vetoMode },
       );
 
       const scoringConfig = getStyleScoringConfig(activeStyle);
@@ -207,6 +217,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
             "Current volatility environment. 'IV Crushed' means options are cheap — often good for buying premium or long vol strategies.";
 
         return {
+          id: key,
           name: exp.name || key.toUpperCase(),
           score: exp.score ?? exp.value ?? 0,
           interpretation: exp.interpretation || 'Neutral',
@@ -412,7 +423,12 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         risk: coreDecision.risk,
         recommendation: coreDecision.recommendation,
         conviction: coreDecision.conviction,
+        priceConviction: coreDecision.priceConviction,
+        priceConvictionBeforeDecay: coreDecision.priceConvictionBeforeDecay,
+        optionConviction: coreDecision.optionConviction,
         momentumDecay: coreDecision.momentumDecay,
+        vetoMode,
+        vetoOff: isVetoOff(vetoMode),
         scoringWeights: {
           priceAction: scoringConfig.priceActionWeight,
           optionFlow: scoringConfig.optionFlowWeight,

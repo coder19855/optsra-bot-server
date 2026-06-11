@@ -78,6 +78,14 @@ export function formatCommandsReferenceMessage(
     `<i>Try:</i> <code>/now ${sym} ${style}</code>`,
   ]);
 
+  const vetoBlock = commandBlock('⛔ <b>Chart veto (what-if)</b>', [
+    '<code>/veto status</code> — strict / relaxed / off',
+    '<code>/veto strict</code> — full chart vetoes (default)',
+    '<code>/veto relaxed</code> — hard decay only, softer option gates',
+    '<code>/veto off</code> — bypass all vetoes (research)',
+    '<code>/veto on</code> — alias for strict',
+  ]);
+
   const voiceBlock = commandBlock('🎙 <b>Alert personality</b>', [
     '<code>/voice</code> — current style',
     '<code>/voice trader</code> — English · jargon',
@@ -134,6 +142,7 @@ export function formatCommandsReferenceMessage(
     convictionBlock,
     planBlock,
     nowBlock,
+    vetoBlock,
     voiceBlock,
     alertsBlock,
     fyersBlock,
@@ -150,6 +159,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'stop', description: 'Pause signal alerts' },
   { command: 'now', description: 'Live market recommendation' },
   { command: 'voice', description: 'Alert language & style' },
+  { command: 'veto', description: 'Chart veto what-if mode' },
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },

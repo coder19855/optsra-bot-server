@@ -45,4 +45,26 @@ describe('metric-calculation plugin', () => {
 
     await app.close();
   });
+
+  it('does not pin greeks score to max bearish from summed gamma', async () => {
+    const app = await buildPluginApp(metricCalculationPlugin, async (f) => {
+      await f.register(utilsPlugin);
+    });
+    const chain = sampleOptionChain(25000).map((row) => ({
+      ...row,
+      oi: row.oi ?? 25000,
+      greeks: {
+        delta: row.option_type === 'CE' ? 0.35 : -0.35,
+        gamma: 0.004,
+        vega: 9,
+        theta: -4,
+        iv: 14,
+      },
+    }));
+    const score = app.metricCalculationPlugin.calcGreeksScore(chain, 25000);
+    expect(score).not.toBeNull();
+    expect(score!).toBeGreaterThan(-0.95);
+
+    await app.close();
+  });
 });

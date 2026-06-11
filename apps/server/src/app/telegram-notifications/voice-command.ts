@@ -30,7 +30,7 @@ export function formatVoicePreviewMessage(): string {
 
   return joinTelegramSections(
     '🎙 <b>Voice preview</b>',
-    '<i>Signals, TP, commands, and session briefs use your chosen voice. Numbers &amp; symbols stay the same.</i>',
+    '<i>Signals, TP, /now, /why, /status, /learning, /coach, and session briefs use your chosen voice. Numbers &amp; symbols stay the same.</i>',
     ...blocks,
   );
 }

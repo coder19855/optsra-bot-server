@@ -47,7 +47,12 @@ export async function buildNowTelegramMessage(
     isAlertsPaused: boolean;
     voice?: TelegramVoice;
   },
-): Promise<{ message: string; error?: string }> {
+): Promise<{
+  message: string;
+  error?: string;
+  deckSymbol?: string;
+  deckStyle?: string;
+}> {
   const voice =
     params.voice ??
     fastify.telegramNotifications?.getVoice?.() ??
@@ -111,6 +116,7 @@ export async function buildNowTelegramMessage(
         fastify,
         watch.symbol,
         watch.tradingStyle,
+        { vetoMode: fastify.telegramNotifications.getVetoMode() },
       );
       if (payload) items.push(payload);
     } catch (err) {
@@ -130,7 +136,12 @@ export async function buildNowTelegramMessage(
     };
   }
 
+  const primaryItem = items[0];
   return {
     message: formatNowTelegramMessage({ context, items, errors, voice }),
+    deckSymbol: primaryItem?.symbol ?? watchList[0]?.symbol,
+    deckStyle: String(
+      primaryItem?.tradingStyle ?? watchList[0]?.tradingStyle ?? defaultStyle,
+    ),
   };
 }

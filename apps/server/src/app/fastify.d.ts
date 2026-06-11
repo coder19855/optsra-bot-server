@@ -294,6 +294,8 @@ declare module 'fastify' {
       };
       computeRangeCompression: (candles: FyersAPI.Candle[]) => number;
       getConfluentTradeSignal: (params: {
+        skipEntryVeto?: boolean;
+        entryVetoMode?: import('./types/veto-mode').VetoMode;
         tradingStyle: TradingStyle;
         scores: { score5m: number; score15m: number; score1h: number };
         structures: { ms5m: number; ms15m: number; ms1h: number };
@@ -373,6 +375,7 @@ declare module 'fastify' {
         priceData: PriceActionResponse,
         optionData: OptionMetricsResponse,
         style: TradingStyle,
+        options?: import('./plugins/decision-engine').DecisionEngineOptions,
       ) => TradeDecisionResult;
     };
     telegramNotifications: {
@@ -387,6 +390,12 @@ declare module 'fastify' {
       setVoice: (
         voice: import('./types/telegram-voice').TelegramVoice,
       ) => Promise<import('./types/telegram-voice').TelegramVoice>;
+      getVetoMode: () => import('./types/veto-mode').VetoMode;
+      isVetoOff: () => boolean;
+      setVetoMode: (
+        vetoMode: import('./types/veto-mode').VetoMode,
+      ) => Promise<import('./types/veto-mode').VetoMode>;
+      setVetoOff: (vetoOff: boolean) => Promise<boolean>;
       resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;

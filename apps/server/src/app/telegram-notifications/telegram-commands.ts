@@ -37,6 +37,7 @@ import {
 import { buildBestStrikeTelegramMessage } from './best-strike-command';
 import { buildLearningTelegramMessage } from './session-learning';
 import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
+import { mergeDeckKeyboard } from './deck-keyboard';
 import { parseClearCommandLimit } from './telegram-message-journal';
 import { formatTelegramStatusMessage } from './status-formatter';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
@@ -47,6 +48,10 @@ import {
   parseVoiceCommandArgs,
 } from './voice-command';
 import { voiceDisplayName } from './voice-copy';
+import {
+  formatVetoStatusMessage,
+  parseVetoCommandArgs,
+} from './veto-command';
 
 interface TelegramUpdate {
   update_id: number;
@@ -224,6 +229,8 @@ export class TelegramCommandPoller {
         await this.handleNow(text, replyChatId);
       } else if (command === '/voice') {
         await this.handleVoice(text, replyChatId);
+      } else if (command === '/veto') {
+        await this.handleVeto(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -434,7 +441,15 @@ export class TelegramCommandPoller {
       return;
     }
 
-    await this.deps.sendMessage(result.message, this.replyOptions(replyChatId));
+    const deckOpts =
+      result.deckSymbol && result.deckStyle
+        ? mergeDeckKeyboard(this.replyOptions(replyChatId), {
+            symbol: result.deckSymbol,
+            tradingStyle: result.deckStyle,
+            includeReplay: true,
+          })
+        : this.replyOptions(replyChatId);
+    await this.deps.sendMessage(result.message, deckOpts);
   }
 
   private async handleWhy(text: string, replyChatId?: number): Promise<void> {
@@ -589,7 +604,22 @@ export class TelegramCommandPoller {
         return;
       }
 
-      await this.deps.sendMessage(message, reply);
+      const coachSymbol =
+        this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
+      const coachStyle = String(
+        styleFilter ??
+          this.deps.watchedStyles[0] ??
+          TradingStyle.Intraday,
+      );
+      await this.deps.sendMessage(
+        message,
+        mergeDeckKeyboard(reply, {
+          symbol: coachSymbol,
+          tradingStyle: coachStyle,
+          sessionDate,
+          includeReplay: true,
+        }),
+      );
       await this.deps.onCoachCommandComplete?.(sessionDate);
     } finally {
       this.coachInFlight = false;
@@ -655,6 +685,33 @@ export class TelegramCommandPoller {
     );
   }
 
+  private async handleVeto(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseVetoCommandArgs(text);
+
+    if (parsed.action !== 'status') {
+      await this.fastify.telegramNotifications.setVetoMode(parsed.action);
+      const labels: Record<string, string> = {
+        strict: '✅ <b>Veto mode STRICT</b>\nFull chart vetoes and option gates are active.',
+        relaxed:
+          '🟡 <b>Veto mode RELAXED</b>\nHard decay still blocks; soft decay and option conflict are eased.',
+        off: '⚠️ <b>Veto mode OFF</b>\nChart vetoes bypassed for /now, alerts, and deck.',
+      };
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          labels[parsed.action] ?? formatVetoStatusMessage(parsed.action),
+          '<i>Use <code>/veto status</code> for details.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatVetoStatusMessage(this.fastify.telegramNotifications.getVetoMode()),
+      this.replyOptions(replyChatId),
+    );
+  }
+
   private async handleVoice(text: string, replyChatId?: number): Promise<void> {
     const parsed = parseVoiceCommandArgs(text);
 
@@ -674,7 +731,7 @@ export class TelegramCommandPoller {
         joinTelegramSections(
           '✅ <b>Voice updated</b>',
           `Alerts will now sound like: <b>${voiceDisplayName(voice)}</b>`,
-          '<i>Signals, TP, /now, /why, /status, /learning, and session briefs use this voice.</i>',
+          '<i>Signals, TP, /now, /why, /status, /learning, /coach, and session briefs use this voice.</i>',
         ),
         this.replyOptions(replyChatId),
       );

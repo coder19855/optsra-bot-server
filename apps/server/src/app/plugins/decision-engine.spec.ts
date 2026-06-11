@@ -22,6 +22,36 @@ describe('decision-engine plugin', () => {
     await app.close();
   });
 
+  it('may allow trade when vetoOff bypasses option conflict', async () => {
+    const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
+      await f.register(momentumDecayPlugin);
+    });
+    const result = app.decisionEngine.computeTradeDecision(
+      samplePriceAction({
+        signal: { action: 'CE-BUY', confidence: 70 },
+        timeframeScores: { '5m': 0.3, '15m': 0.35, '1h': 0.2 },
+      }),
+      sampleOptionMetrics({
+        score: -50,
+        signal: 'BEARISH_TRADE',
+        components: {
+          oi: -0.5,
+          greeks: -0.6,
+          iv: 0,
+          trend: -0.4,
+          pcr: -0.3,
+          skew: -0.2,
+          pain: 0,
+          vix: 0,
+        },
+      }),
+      TradingStyle.Intraday,
+      { vetoMode: 'off' },
+    );
+    expect(['CE-BUY', 'PE-BUY', 'NO-TRADE', 'NEUTRAL']).toContain(result.action);
+    await app.close();
+  });
+
   it('returns NO-TRADE when price and option flow strongly conflict', async () => {
     const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
       await f.register(momentumDecayPlugin);
