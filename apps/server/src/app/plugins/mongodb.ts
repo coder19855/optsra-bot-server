@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { MongoClient, ObjectId } from 'mongodb';
+import { startOptionChainSnapshotScheduler } from '../telegram-notifications/option-chain-snapshot-store';
 
 function parseDatabaseName(url: string): string | undefined {
   const match = url.match(/mongodb(?:\+srv)?:\/\/[^/]+\/([^?]+)/);
@@ -39,6 +40,8 @@ export default fp(
       fastify.addHook('onClose', async () => {
         await client.close(true);
       });
+      startOptionChainSnapshotScheduler(fastify);
+
       fastify.log.info(
         { database: db.databaseName },
         'MongoDB connected',

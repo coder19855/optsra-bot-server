@@ -6,6 +6,7 @@ import { buildExactStrikeRecommendation } from '../option-flow/exact-strike-reco
 import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { OptionMetricsResponse, PriceActionResponse } from '../types';
+import { recordOptionChainSnapshot } from '../telegram-notifications/option-chain-snapshot-store';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
 import { isVetoOff } from '../types/veto-mode';
 
@@ -411,6 +412,22 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
           coreDecision.conviction < scoringConfig.convictionThreshold.enter,
         );
       }
+
+      recordOptionChainSnapshot(fastify, {
+        symbol: String(optionData.spotSymbol || priceData.symbol || symbol),
+        tradingStyle: activeStyle,
+        spotLtp: Number(optionData.spotLtp ?? priceData.lastPrice ?? 0),
+        overallScore: Number(optionData.score ?? 0),
+        bias: String(optionData.bias ?? 'Neutral'),
+        optionConviction: coreDecision.optionConviction,
+        components: optionFlowComponents.map((comp) => ({
+          id: comp.id,
+          name: comp.name,
+          score: comp.score,
+          interpretation: comp.interpretation,
+          weightage: comp.weightage,
+        })),
+      });
 
       reply.send({
         symbol: optionData.spotSymbol || priceData.symbol,

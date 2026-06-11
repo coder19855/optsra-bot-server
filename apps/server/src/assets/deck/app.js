@@ -911,7 +911,11 @@
     } else if (point.vetoed && display.action !== point.action) {
       els.status.textContent = `What-if replay (${vetoMode})`;
     }
-    renderComponentList(els.optionComponents, replayOptionComponents, 'option');
+    renderComponentList(
+      els.optionComponents,
+      point.optionComponents?.length ? point.optionComponents : replayOptionComponents,
+      'option',
+    );
     renderComponentList(els.paComponents, point.paComponents || [], 'pa');
     renderVetoStrip(index);
     pendingSpotScrubPoint = point;

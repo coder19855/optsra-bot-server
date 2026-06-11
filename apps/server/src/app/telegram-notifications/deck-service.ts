@@ -9,6 +9,10 @@ import {
   DeckComponentGauge,
 } from './deck-components';
 import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
+import {
+  loadOptionChainSnapshotsForSession,
+  nearestOptionChainSnapshot,
+} from './option-chain-snapshot-store';
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
 import { loadVetoPreference, VetoMode } from './veto-preference';
 import { isVetoOff } from '../types/veto-mode';
@@ -68,6 +72,7 @@ export interface DeckReplayPoint {
   whatIfAction: string;
   whatIfConviction: number;
   paComponents: DeckComponentGauge[];
+  optionComponents?: DeckComponentGauge[];
 }
 
 export interface DeckVetoPoint {
@@ -360,16 +365,40 @@ function timelineToVetoSeries(points: TimelinePoint[]): DeckVetoPoint[] {
   }));
 }
 
+function optionNeedleFromSnapshot(
+  overallScore: number | undefined,
+  fallback: number,
+): number {
+  if (
+    overallScore != null &&
+    Number.isFinite(overallScore) &&
+    Math.abs(overallScore) >= 2
+  ) {
+    return Math.max(-1, Math.min(1, overallScore / 100));
+  }
+  return fallback;
+}
+
 function timelineToConvictionSeries(
   points: TimelinePoint[],
   style: TradingStyle,
+  optionSnapshots: Awaited<
+    ReturnType<typeof loadOptionChainSnapshotsForSession>
+  > = [],
 ): DeckReplayPayload['replayPoints'] {
   const primaryTf = primaryTimeframeForStyle(style);
   return points.map((p) => {
     const primaryScore = p.timeframeScores[primaryTf] ?? p.mtfScore ?? 0;
     const action = p.signal.action;
-    const optionNeedle = computeReplayOptionNeedle(p, primaryTf);
+    const nearestSnapshot = nearestOptionChainSnapshot(optionSnapshots, p.asOf);
+    const optionNeedle = optionNeedleFromSnapshot(
+      nearestSnapshot?.overallScore,
+      computeReplayOptionNeedle(p, primaryTf),
+    );
     const whatIf = computeWhatIfSignal(p, primaryTf);
+    const optionComponents = nearestSnapshot
+      ? buildOptionComponentGauges(nearestSnapshot.components)
+      : undefined;
     return {
       t: p.asOf,
       spot: p.spot,
@@ -387,6 +416,7 @@ function timelineToConvictionSeries(
         p.mtfScore,
         p.aligned,
       ),
+      optionComponents,
     };
   });
 }
@@ -586,7 +616,18 @@ export async function buildDeckReplayPayload(
     to: `${date}T15:30:00+05:30`,
   });
   const points = timeline?.points ?? [];
-  const replayPoints = timelineToConvictionSeries(points, style);
+  const optionSnapshots = await loadOptionChainSnapshotsForSession(
+    fastify,
+    params.symbol,
+    style,
+    date,
+  );
+  const replayPoints = timelineToConvictionSeries(
+    points,
+    style,
+    optionSnapshots,
+  );
+  const hasHistoricalOptions = optionSnapshots.length > 0;
 
   const trades: DeckTradeMarker[] = [];
   try {
@@ -653,9 +694,13 @@ export async function buildDeckReplayPayload(
       timelineToVetoSeries(points),
       trades,
     ),
-    optionComponents: extractComponentGauges(decision).optionComponents,
-    optionComponentsNote:
-      'Option chain breakdown is a live read · scrub updates price-action components per minute',
+    optionComponents: hasHistoricalOptions
+      ? replayPoints[replayPoints.length - 1]?.optionComponents ??
+        extractComponentGauges(decision).optionComponents
+      : extractComponentGauges(decision).optionComponents,
+    optionComponentsNote: hasHistoricalOptions
+      ? 'Option chain breakdown from stored 5–15m snapshots · scrub updates both lanes'
+      : 'Option chain breakdown is a live read until snapshots accumulate · scrub updates price-action components per minute',
     vetoTimeline: timelineToVetoSeries(points),
     vetoMode: vetoState.vetoMode,
     pnlNote:
