@@ -12,7 +12,7 @@ import {
 import {
   formatGreeksStrikeSection,
 } from './message-formatter';
-import { scenarioRule } from './message-layout';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   scenarioForAction,
@@ -169,28 +169,24 @@ export async function buildBestStrikeTelegramMessage(
 
   const activeSide = resolveActiveSide(payload.action, side);
   const actionScenario = scenarioForAction(payload.action);
-  const lines: string[] = [
+  const header = joinTelegramLines(
     formatScenarioBanner(actionScenario, `Strike scout · ${escapeHtml(label)} · ${escapeHtml(style)}`),
-    scenarioRule(actionScenario),
     tintLine(
       actionScenario,
       `${payload.action} · <b>${payload.conviction}%</b> conviction · spot ${formatInr(payload.lastPrice)}`,
     ),
-  ];
-
-  if (rawOption?.ivRegime) {
-    lines.push(tintLine('info', `🌡 IV: ${escapeHtml(rawOption.ivRegime)}`));
-  }
+    rawOption?.ivRegime
+      ? tintLine('info', `🌡 IV: ${escapeHtml(rawOption.ivRegime)}`)
+      : null,
+  );
 
   if (!activeSide) {
-    lines.push(
-      ...formatNeutralStrikeOverview({
-        greeksInsights: greeksPair,
-        exactStrikes,
-        spot: payload.lastPrice,
-      }),
-    );
-    return { message: lines.join('\n') };
+    const neutralOverview = formatNeutralStrikeOverview({
+      greeksInsights: greeksPair,
+      exactStrikes,
+      spot: payload.lastPrice,
+    }).join('\n');
+    return { message: joinTelegramSections(header, neutralOverview) };
   }
 
   const insight =
@@ -209,13 +205,12 @@ export async function buildBestStrikeTelegramMessage(
       ? null
       : formatGreeksStrikeSection(insight ?? undefined);
 
-  if (blast) lines.push('', blast);
-  if (enginePick) lines.push('', enginePick);
-  if (greeks) lines.push('', greeks);
+  const fallback =
+    !blast && !enginePick && !greeks
+      ? '⚠️ No chain data — retry in market hours.'
+      : null;
 
-  if (!blast && !enginePick && !greeks) {
-    lines.push('', '⚠️ No chain data — retry in market hours.');
-  }
-
-  return { message: lines.join('\n') };
+  return {
+    message: joinTelegramSections(header, blast, enginePick, greeks, fallback),
+  };
 }

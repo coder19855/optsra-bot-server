@@ -4,6 +4,7 @@ import {
   FyersUsageHealth,
   FyersUsageResponse,
 } from '../types/fyers-usage';
+import { joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   formatSectionHeader,
@@ -152,25 +153,29 @@ function formatLastPollDetail(poll: FyersPollUsageSnapshot | null): string | nul
 export function formatFyersUsageTelegramMessage(
   stats: FyersUsageResponse,
 ): string {
-  const sections = [
-    formatScenarioBanner('api', 'API meter'),
-    `📅 ${stats.istSessionDate}`,
-    healthCallout(stats.health),
+  const header = `${formatScenarioBanner('api', 'API meter')}\n📅 ${stats.istSessionDate}`;
+
+  const limitsBlock = [
     formatSectionHeader('api', 'Limits', '📊'),
     `<pre>${escapePre(formatLimitsTable(stats))}</pre>`,
-  ];
+  ].join('\n');
 
   const sessionMethods = formatMethodTable(
     stats.totals.byMethodSession,
     'Today',
     6,
   );
-  if (sessionMethods) sections.push('', sessionMethods);
 
   const lastPoll = formatLastPollDetail(stats.lastTelegramPoll);
-  if (lastPoll) sections.push('', lastPoll);
 
-  const body = sections.join('\n');
+  const body = joinTelegramSections(
+    header,
+    healthCallout(stats.health),
+    limitsBlock,
+    sessionMethods,
+    lastPoll,
+  );
+
   if (body.length <= 3900) return body;
   return `${body.slice(0, 3850)}\n\n… trimmed for Telegram`;
 }

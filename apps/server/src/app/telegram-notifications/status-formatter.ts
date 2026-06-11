@@ -1,4 +1,5 @@
 import { TelegramNotificationStatus } from '../types/telegram-notifications';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { formatSectionHeader } from './telegram-palette';
 
 function formatIstTime(iso: string | null): string {
@@ -49,23 +50,28 @@ export function formatTelegramStatusMessage(
     })
     .join('\n');
 
-  const lines = [
+  const statusBlock = joinTelegramLines(
     formatSectionHeader('info', 'Bot status', '📡'),
     alertState,
     fyersState,
     marketState,
-    '',
+  );
+
+  const activityBlock = joinTelegramLines(
     pollState,
     status.lastPollError ? `⚠️ ${status.lastPollError}` : null,
     tpLine,
     status.alertsPaused && status.alertsPausedAt
-      ? `\nPaused since ${formatIstTime(status.alertsPausedAt)} — <code>/start</code> or <code>/login</code> to resume`
+      ? `Paused since ${formatIstTime(status.alertsPausedAt)} — <code>/start</code> or <code>/login</code> to resume`
       : null,
     status.alertsPaused
-      ? '\n<i>TP/hold nudges and commands still work while paused.</i>'
+      ? '<i>TP/hold nudges and commands still work while paused.</i>'
       : null,
-    watchLabels ? `\n<b>On watch</b>\n${watchLabels}` : null,
-  ].filter(Boolean);
+  );
 
-  return lines.join('\n');
+  const watchBlock = watchLabels
+    ? joinTelegramLines('<b>On watch</b>', watchLabels)
+    : null;
+
+  return joinTelegramSections(statusBlock, activityBlock, watchBlock);
 }

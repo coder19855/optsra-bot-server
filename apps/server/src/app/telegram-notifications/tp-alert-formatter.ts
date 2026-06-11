@@ -2,6 +2,7 @@ import {
   PositionTpEvaluation,
   TpAlertKind,
 } from '../types/telegram-notifications';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   scenarioForHoldAdvice,
@@ -63,17 +64,22 @@ export function formatTelegramTpAlertMessage(params: {
     .map((line) => escapeHtml(line))
     .join('\n');
 
-  return [
+  const header = joinTelegramLines(
     formatScenarioBanner(tpScenario, kindHeadline(kinds)),
     `<b>${escapeHtml(position.optionLabel)}</b> · ${escapeHtml(position.indexLabel)} · ${evaluation.tradingStyle}`,
+  );
+
+  const positionBlock = joinTelegramLines(
     `${pnlScenario === 'success' ? '✅' : pnlScenario === 'danger' ? '🚨' : '⚠️'} P&L ${pnlSign}₹${Math.abs(position.unrealizedPnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · ${position.netQty} qty @ ₹${position.buyAvg.toFixed(1)}`,
     `Engine: ${evaluation.signalAction} ${evaluation.conviction}% · ${escapeHtml(evaluation.bias)}`,
-    formatRrSummary(evaluation),
-    wrapScenarioCallout(holdScenario, '<b>🧭 Coach</b>', [
-      escapeHtml(evaluation.holdHeadline),
-      reasons || null,
-    ].filter((line): line is string => line != null)),
-  ]
-    .filter((line) => line != null)
-    .join('\n');
+  );
+
+  const rrBlock = formatRrSummary(evaluation);
+
+  const coachBlock = wrapScenarioCallout(holdScenario, '<b>🧭 Coach</b>', [
+    escapeHtml(evaluation.holdHeadline),
+    reasons || null,
+  ].filter((line): line is string => line != null));
+
+  return joinTelegramSections(header, positionBlock, rrBlock, coachBlock);
 }

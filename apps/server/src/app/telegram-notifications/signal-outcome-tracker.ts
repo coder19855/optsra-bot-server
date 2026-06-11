@@ -3,7 +3,7 @@ import { TELEGRAM_NOTIFICATION_DEFAULTS } from '../constants/telegram-notificati
 import { SignalOutcomeRecord } from '../types/alert-intelligence';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
-import { scenarioRule } from './message-layout';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { formatScenarioBanner, tintLine } from './telegram-palette';
 import { getIstSessionClock } from './signal-tracker';
 
@@ -201,10 +201,8 @@ export function formatSignalOutcomesSummary(
     return '📭 No paper scores yet — they kick in after directional alerts with a strike pick.';
   }
 
-  const lines = [
-    formatScenarioBanner('info', '📊 Paper scoreboard'),
-    scenarioRule('info'),
-  ];
+  const header = formatScenarioBanner('info', '📊 Paper scoreboard');
+  const rowLines: string[] = [];
 
   for (const r of records.slice(0, 8)) {
     const icon =
@@ -215,7 +213,7 @@ export function formatSignalOutcomesSummary(
       hour: '2-digit',
       minute: '2-digit',
     });
-    lines.push(
+    rowLines.push(
       tintLine(
         'info',
         `${icon} ${r.action} ${r.strike} @ ${when} · 🎯 conv ${r.conviction}% · ${pct} ${r.status === 'open' ? '(live)' : ''}`,
@@ -224,13 +222,17 @@ export function formatSignalOutcomesSummary(
   }
 
   const closed = records.filter((r) => r.status !== 'open');
-  if (closed.length) {
-    const wins = closed.filter((r) => r.status === 'win').length;
-    lines.push(
-      '',
-      `🏆 Closed alerts: ${wins}/${closed.length} winners (${Math.round((wins / closed.length) * 100)}%)`,
-    );
-  }
+  const summaryBlock =
+    closed.length > 0
+      ? (() => {
+          const wins = closed.filter((r) => r.status === 'win').length;
+          return `🏆 Closed alerts: ${wins}/${closed.length} winners (${Math.round((wins / closed.length) * 100)}%)`;
+        })()
+      : null;
 
-  return lines.join('\n');
+  return joinTelegramSections(
+    header,
+    joinTelegramLines(...rowLines),
+    summaryBlock,
+  );
 }

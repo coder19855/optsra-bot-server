@@ -1,4 +1,5 @@
 import { TelegramSendOptions } from '../types/telegram-notifications';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 
 export const FYERS_LOGIN_REMINDER_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
@@ -46,21 +47,21 @@ export function getFyersLoginReminderContent(): {
   const inlineKeyboard = buildFyersLoginInlineKeyboard();
 
   const text = loginUrl
-    ? [
+    ? joinTelegramSections(
         '🔐 <b>Time to log into Fyers</b>',
-        '',
-        'Your ~24h token expired (or never landed).',
-        'Alerts, /coach, and live reads need a fresh session.',
-        '',
+        joinTelegramLines(
+          'Your ~24h token expired (or never landed).',
+          'Alerts, /coach, and live reads need a fresh session.',
+        ),
         'Hit the button — opens your <b>browser</b>, through Fyers, then back when you’re done.',
-      ].join('\n')
-    : [
+      )
+    : joinTelegramSections(
         '🔐 <b>Time to log into Fyers</b>',
-        '',
-        'Session’s missing. Set <code>PUBLIC_APP_URL</code> (or <code>FYERS_REDIRECT_URL</code>) so Telegram can link to <code>/api/login</code>.',
-        '',
-        'Then open <code>/api/login?forceRedirect=true</code> in your browser.',
-      ].join('\n');
+        joinTelegramLines(
+          'Session’s missing. Set <code>PUBLIC_APP_URL</code> (or <code>FYERS_REDIRECT_URL</code>) so Telegram can link to <code>/api/login</code>.',
+          'Then open <code>/api/login?forceRedirect=true</code> in your browser.',
+        ),
+      );
 
   return {
     text,

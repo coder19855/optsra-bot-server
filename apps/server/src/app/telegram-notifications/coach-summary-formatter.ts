@@ -5,7 +5,7 @@ import {
 } from '../types/trading-coach';
 import { SignalSnapshot } from '../types/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   formatSectionHeader,
@@ -97,12 +97,16 @@ function formatStyleSection(
       coach.rawFillCount > 0
         ? `📭 ${coach.rawFillCount} fill(s) — nothing closed yet`
         : '📭 No fills today';
-    return [
-      formatSectionHeader('coach', String(style), '📊'),
-      emptyTradeHint,
-      formatSectionHeader('info', 'Signals', '📡'),
-      formatSignalRecap(styleSnapshots),
-    ].join('\n');
+    return joinTelegramSections(
+      joinTelegramLines(
+        formatSectionHeader('coach', String(style), '📊'),
+        emptyTradeHint,
+      ),
+      joinTelegramLines(
+        formatSectionHeader('info', 'Signals', '📡'),
+        formatSignalRecap(styleSnapshots),
+      ),
+    );
   }
 
   const pnl = summary.totalPnlInr;
@@ -119,17 +123,21 @@ function formatStyleSection(
 
   const takeaway = buildSessionTakeaway(coach);
 
-  return [
-    formatSectionHeader('coach', String(style), '📊'),
-    `💰 ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`,
-    '',
-    formatSectionHeader('coach', 'Trades', '🎬'),
-    tradeLines + more,
+  return joinTelegramSections(
+    joinTelegramLines(
+      formatSectionHeader('coach', String(style), '📊'),
+      `💰 ${pnlSign}₹${Math.abs(pnl).toLocaleString('en-IN', { maximumFractionDigits: 0 })} · 🏁 ${summary.winCount}W/${summary.lossCount}L · ✅${summary.verdicts.good} ⚠️${summary.verdicts.bad} 🚨${summary.verdicts.ugly}`,
+    ),
+    joinTelegramLines(
+      formatSectionHeader('coach', 'Trades', '🎬'),
+      tradeLines + more,
+    ),
     `💬 ${escapeHtml(takeaway)}`,
-    '',
-    formatSectionHeader('info', 'Signals', '📡'),
-    formatSignalRecap(styleSnapshots),
-  ].join('\n');
+    joinTelegramLines(
+      formatSectionHeader('info', 'Signals', '📡'),
+      formatSignalRecap(styleSnapshots),
+    ),
+  );
 }
 
 function buildSessionTakeaway(coach: TradingCoachResponse): string {
@@ -208,13 +216,14 @@ export function formatTelegramCoachOnDemandMessage(params: {
         ? '📭 Fills logged — nothing closed yet'
         : '📭 No closed trades today';
 
-  const body = [
-    formatScenarioBanner('coach', 'Coach'),
-    `📅 ${dateLabel}`,
-    headerPnl,
-    TELEGRAM_MSG_RULE,
+  const body = joinTelegramSections(
+    joinTelegramLines(
+      formatScenarioBanner('coach', 'Coach'),
+      `📅 ${dateLabel}`,
+      headerPnl,
+    ),
     ...sections,
-  ].join('\n\n');
+  );
 
   if (body.length <= 3900) return body;
   return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
@@ -241,13 +250,14 @@ export function formatTelegramCoachSummaryMessage(params: {
         ].join('\n')
       : '📭 No closed trades across your watched styles.';
 
-  const body = [
-    formatScenarioBanner('coach', 'Day wrap'),
-    `📅 ${dateLabel}`,
-    headerPnl,
-    TELEGRAM_MSG_RULE,
+  const body = joinTelegramSections(
+    joinTelegramLines(
+      formatScenarioBanner('coach', 'Day wrap'),
+      `📅 ${dateLabel}`,
+      headerPnl,
+    ),
     ...sections,
-  ].join('\n\n');
+  );
 
   if (body.length <= 3900) return body;
   return `${body.slice(0, 3850)}\n\n… trimmed — Telegram has a size limit`;
@@ -272,12 +282,10 @@ export function formatTelegramCoachOnDemandErrorMessage(params: {
   error: string;
 }): string {
   const dateLabel = formatIstDateLabel(params.sessionDate);
-  return [
-    '📚 <b>Coach mode</b>',
-    `📅 ${dateLabel}`,
-    TELEGRAM_MSG_RULE,
+  return joinTelegramSections(
+    joinTelegramLines('📚 <b>Coach mode</b>', `📅 ${dateLabel}`),
     `😬 Couldn’t pull your tradebook: ${escapeHtml(params.error)}`,
-  ].join('\n');
+  );
 }
 
 export function formatTelegramCoachErrorMessage(params: {
@@ -286,15 +294,14 @@ export function formatTelegramCoachErrorMessage(params: {
   snapshots: SignalSnapshot[];
 }): string {
   const dateLabel = formatIstDateLabel(params.sessionDate);
-  return [
-    '🏁 <b>Day’s wrap</b>',
-    `📅 ${dateLabel}`,
-    TELEGRAM_MSG_RULE,
+  return joinTelegramSections(
+    joinTelegramLines('🏁 <b>Day’s wrap</b>', `📅 ${dateLabel}`),
     `😬 Trade review hit a wall: ${escapeHtml(params.error)}`,
-    '',
-    '📡 <b>End-of-day signal snapshot</b>',
-    formatSignalRecap(params.snapshots),
-  ].join('\n');
+    joinTelegramLines(
+      '📡 <b>End-of-day signal snapshot</b>',
+      formatSignalRecap(params.snapshots),
+    ),
+  );
 }
 
 export function watchedStylesForCoach(styles: TradingStyle[]): TradingStyle[] {

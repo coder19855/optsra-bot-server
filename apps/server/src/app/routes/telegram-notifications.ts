@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { TELEGRAM_MSG_RULE } from '../telegram-notifications/message-layout';
+import { joinTelegramLines, joinTelegramSections } from '../telegram-notifications/message-layout';
 
 export default async function telegramNotificationsRoute(
   fastify: FastifyInstance,
@@ -26,13 +26,14 @@ export default async function telegramNotificationsRoute(
 
     const text =
       message?.trim() ||
-      [
+      joinTelegramSections(
         '🟢 <b>Opstra alerts live</b>',
-        TELEGRAM_MSG_RULE,
-        '✅ Telegram connected',
-        '🔔 Signal-flip alerts enabled',
-        '🕘 Polls every 1 min during market hours',
-      ].join('\n');
+        joinTelegramLines(
+          '✅ Telegram connected',
+          '🔔 Signal-flip alerts enabled',
+          '🕘 Polls every 1 min during market hours',
+        ),
+      );
 
     await fastify.telegramNotifications.sendMessage(text, { channel: 'test' });
     return {

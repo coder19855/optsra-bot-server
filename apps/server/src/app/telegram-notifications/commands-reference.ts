@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { TELEGRAM_API_BASE } from '../constants/telegram-notifications';
 import { TradingStyle } from '../types/trading-style';
-import { TELEGRAM_MSG_RULE } from './message-layout';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 
 export interface CommandsReferenceContext {
   watchedSymbols: string[];
@@ -18,6 +18,13 @@ function exampleStyle(styles: TradingStyle[]): string {
   return styles[0] ?? TradingStyle.Intraday;
 }
 
+function commandBlock(
+  title: string,
+  lines: Array<string | null | undefined>,
+): string {
+  return joinTelegramLines(title, ...lines);
+}
+
 export function formatCommandsReferenceMessage(
   ctx: CommandsReferenceContext,
 ): string {
@@ -27,70 +34,99 @@ export function formatCommandsReferenceMessage(
     timeZone: 'Asia/Kolkata',
   });
 
-  return [
+  const intro = joinTelegramLines(
     '📌 <b>Your trading sidekick</b>',
     '<i>Lost? Type <code>/help</code> anytime.</i>',
-    TELEGRAM_MSG_RULE,
-    '',
-    '🔍 <b>“Why did it ping me?”</b>',
+  );
+
+  const whyBlock = commandBlock('🔍 <b>“Why did it ping me?”</b>', [
     '<code>/why</code> — full breakdown of the latest read',
     `<i>Try:</i> <code>/why</code> · <code>/why live</code> · <code>/why ${sym} ${style}</code>`,
-    '',
-    '📚 <b>Grade today’s trades</b>',
+  ]);
+
+  const coachBlock = commandBlock('📚 <b>Grade today’s trades</b>', [
     '<code>/coach</code> — tradebook replay + entry/exit coaching',
     `<i>Try:</i> <code>/coach</code> · <code>/coach ${style}</code> · <code>/coach ${today}</code>`,
-    '',
-    '🧠 <b>Don’t repeat mistakes</b>',
+  ]);
+
+  const learningBlock = commandBlock('🧠 <b>Don’t repeat mistakes</b>', [
     '<code>/learning</code> — your leaks &amp; good habits from recent trades',
     '<i>Try:</i> <code>/learning</code> · <code>/learning 14</code> · <code>/learning news</code>',
-    '',
-    '📊 <b>Paper scoreboard</b>',
+  ]);
+
+  const outcomesBlock = commandBlock('📊 <b>Paper scoreboard</b>', [
     '<code>/outcomes</code> — how past alerts would’ve done',
     '<i>Try:</i> <code>/outcomes</code>',
-    '',
-    '📈 <b>Your personal enter bar</b>',
+  ]);
+
+  const convictionBlock = commandBlock('📈 <b>Your personal enter bar</b>', [
     '<code>/conviction</code> — win-rate by conviction bucket',
     `<i>Try:</i> <code>/conviction</code> · <code>/conviction PE ${sym} ${style}</code>`,
-    '',
-    '📐 <b>Plan the trade</b>',
+  ]);
+
+  const planBlock = commandBlock('📐 <b>Plan the trade</b>', [
     '<code>/rr</code> — entry, stop, 1:1 / 1:2 / 1:3 targets',
     `<i>Try:</i> <code>/rr ${sym} ${style}</code>`,
     '<code>/size</code> — lots from balance + stop risk',
     `<i>Try:</i> <code>/size</code> · <code>/size ${sym} ${style}</code>`,
     '<code>/beststrike</code> — 🤯 gamma blast + 🎯 engine pick &amp; Greeks',
     `<i>Try:</i> <code>/beststrike ${sym} ${style}</code> · <code>/beststrike CE</code>`,
-    '',
-    '⏯ <b>Alert cool-off</b>',
+  ]);
+
+  const alertsBlock = commandBlock('⏯ <b>Alert cool-off</b>', [
     '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
     '<code>/start</code> — resume alerts (needs live Fyers session)',
     '<code>/status</code> — paused vs active, market, TP watch',
-    '',
-    '🔐 <b>Fyers session</b>',
+  ]);
+
+  const fyersBlock = commandBlock('🔐 <b>Fyers session</b>', [
     '<code>/login</code> — login link (opens browser; auto-resumes alerts)',
-    '',
-    '🌡 <b>API budget</b>',
+  ]);
+
+  const apiBlock = commandBlock('🌡 <b>API budget</b>', [
     '<code>/apiusage</code> — Fyers rate limits &amp; what we’ve consumed',
     '<i>Try:</i> <code>/apiusage</code>',
-    '',
-    '🧹 <b>Clean the chat</b>',
+  ]);
+
+  const clearBlock = commandBlock('🧹 <b>Clean the chat</b>', [
     '<code>/clear</code> — delete bot messages above this command',
     '<i>Try:</i> <code>/clear 30</code>',
-    '',
-    '🆘 <b>Cheat sheet</b>',
+  ]);
+
+  const helpBlock = commandBlock('🆘 <b>Cheat sheet</b>', [
     '<code>/help</code> or <code>/commands</code>',
-    '',
-    TELEGRAM_MSG_RULE,
+  ]);
+
+  const autoPings = joinTelegramLines(
     '💡 <b>Auto pings</b> (no command needed)',
     '• 09:00–09:20 IST → pre-session learning brief',
     '• Signal flips → signal chat',
     '• TP / hold nudges → TP chat',
     '• After 15:30 IST → end-of-day coach',
-    '',
+  );
+
+  const footer = joinTelegramLines(
     `👀 <b>On watch:</b> ${ctx.watchedSymbols.map((s) => s.split(':')[1]?.replace('-INDEX', '') ?? s).join(', ')} · ${ctx.watchedStyles.join(', ')}`,
-    '',
     '🎨 <b>Icon key</b>',
     '📈 bullish · 📉 bearish · ✅ wins · ⚠️ caution · 🤯 gamma blast · 🎯 engine pick · 📚 coach · 🧠 learning',
-  ].join('\n');
+  );
+
+  return joinTelegramSections(
+    intro,
+    whyBlock,
+    coachBlock,
+    learningBlock,
+    outcomesBlock,
+    convictionBlock,
+    planBlock,
+    alertsBlock,
+    fyersBlock,
+    apiBlock,
+    clearBlock,
+    helpBlock,
+    autoPings,
+    footer,
+  );
 }
 
 export const TELEGRAM_BOT_COMMANDS = [

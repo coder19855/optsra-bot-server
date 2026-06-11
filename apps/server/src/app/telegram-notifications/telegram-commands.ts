@@ -39,6 +39,7 @@ import { buildLearningTelegramMessage } from './session-learning';
 import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { parseClearCommandLimit } from './telegram-message-journal';
 import { formatTelegramStatusMessage } from './status-formatter';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 
 interface TelegramUpdate {
   update_id: number;
@@ -315,11 +316,14 @@ export class TelegramCommandPoller {
   private async handleStop(replyChatId?: number): Promise<void> {
     if (this.fastify.telegramNotifications.isAlertsPaused()) {
       await this.deps.sendMessage(
-        [
-          '⏸ Already paused — no signal or pre-session pings.',
-          'TP/hold nudges and commands still work.',
-          'Resume with <code>/start</code> or <code>/login</code>.',
-        ].join('\n'),
+        joinTelegramSections(
+          '⏸ Already paused',
+          joinTelegramLines(
+            'No signal or pre-session pings.',
+            'TP/hold nudges and commands still work.',
+            'Resume with <code>/start</code> or <code>/login</code>.',
+          ),
+        ),
         this.replyOptions(replyChatId),
       );
       return;
@@ -327,13 +331,14 @@ export class TelegramCommandPoller {
 
     await this.fastify.telegramNotifications.setAlertsPaused(true);
     await this.deps.sendMessage(
-      [
+      joinTelegramSections(
         '⏸ <b>Signal alerts paused</b>',
-        'No signal flips or pre-session briefs until you resume.',
-        'TP/hold nudges and commands still work.',
-        '',
+        joinTelegramLines(
+          'No signal flips or pre-session briefs until you resume.',
+          'TP/hold nudges and commands still work.',
+        ),
         'Resume: <code>/start</code> or <code>/login</code>',
-      ].join('\n'),
+      ),
       this.replyOptions(replyChatId),
     );
   }
@@ -352,10 +357,10 @@ export class TelegramCommandPoller {
     });
     if (!sessionReady) {
       await this.deps.sendMessage(
-        [
+        joinTelegramSections(
           '⚠️ Can’t resume yet — Fyers session isn’t live.',
           'Log in first, then alerts turn back on automatically.',
-        ].join('\n'),
+        ),
         this.fyersAuthReplyOptions(replyChatId),
       );
       return;
@@ -363,10 +368,10 @@ export class TelegramCommandPoller {
 
     await this.fastify.telegramNotifications.setAlertsPaused(false);
     await this.deps.sendMessage(
-      [
+      joinTelegramSections(
         '▶️ <b>Signal alerts resumed</b>',
         'You’re back on the watch for flips and pre-session briefs.',
-      ].join('\n'),
+      ),
       this.replyOptions(replyChatId),
     );
   }
@@ -558,19 +563,20 @@ export class TelegramCommandPoller {
       .join('\n');
 
     await this.deps.sendMessage(
-      [
+      joinTelegramSections(
         '📈 <b>Your enter bar (from past alerts)</b>',
         insight.summary,
-        '',
-        `📏 Factory default: ${insight.defaultEnterThreshold}%`,
-        `🎯 <b>Your sweet spot:</b> ${insight.recommendedEnterThreshold}%`,
-        insight.overallWinRate != null
-          ? `🏆 Win rate: ${insight.overallWinRate}% across ${insight.sampleSize} closed alerts`
-          : `📊 Samples so far: ${insight.sampleSize}`,
-        bucketLines ? `\n📊 <b>By conviction bucket</b>\n${bucketLines}` : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
+        joinTelegramLines(
+          `📏 Factory default: ${insight.defaultEnterThreshold}%`,
+          `🎯 <b>Your sweet spot:</b> ${insight.recommendedEnterThreshold}%`,
+          insight.overallWinRate != null
+            ? `🏆 Win rate: ${insight.overallWinRate}% across ${insight.sampleSize} closed alerts`
+            : `📊 Samples so far: ${insight.sampleSize}`,
+        ),
+        bucketLines
+          ? joinTelegramLines('📊 <b>By conviction bucket</b>', bucketLines)
+          : null,
+      ),
       this.replyOptions(replyChatId),
     );
   }

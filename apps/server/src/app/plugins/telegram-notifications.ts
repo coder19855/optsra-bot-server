@@ -11,6 +11,7 @@ import {
   TELEGRAM_SOUND_ROUTING_NOTE,
 } from '../telegram-notifications/alert-channels';
 import { formatTelegramAlertMessage } from '../telegram-notifications/message-formatter';
+import { joinTelegramSections } from '../telegram-notifications/message-layout';
 import {
   loadSessionCoachState,
   saveSessionCoachState,
@@ -797,10 +798,10 @@ export default fp(
       await setAlertsPaused(false);
       try {
         await sendTelegramMessage(
-          [
+          joinTelegramSections(
             '✅ <b>Fyers connected</b>',
             '▶️ Signal alerts resumed — you’re back on the watch.',
-          ].join('\n'),
+          ),
           { channel: 'default' },
         );
       } catch (err) {

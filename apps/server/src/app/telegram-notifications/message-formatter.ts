@@ -9,7 +9,8 @@ import {
   TelegramPositionSizing,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
-import { DecisionAction } from '../types/trade-decision';
+import { DecisionAction, TradeBias } from '../types/trade-decision';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatEnginePickCallout,
   formatGreeksSectionHeader,
@@ -78,10 +79,22 @@ function tradeActionLabel(action: DecisionAction): string {
   }
 }
 
-function chartRead(paAction: string): string {
-  if (paAction === 'CE-BUY') return '📊 Chart says UP';
-  if (paAction === 'PE-BUY') return '📊 Chart says DOWN';
-  return '📊 Chart flat';
+function biasEmoji(bias: TradeBias): string {
+  if (bias === 'Strong Bullish') return '📈';
+  if (bias === 'Moderate Bullish') return '📈';
+  if (bias === 'Strong Bearish') return '📉';
+  if (bias === 'Moderate Bearish') return '📉';
+  return '⏸';
+}
+
+function priceActionLine(paAction: string, confidence: number): string {
+  if (paAction === 'CE-BUY') {
+    return `📊 Price action: CE-BUY (bullish) · ${confidence}%`;
+  }
+  if (paAction === 'PE-BUY') {
+    return `📊 Price action: PE-BUY (bearish) · ${confidence}%`;
+  }
+  return `📊 Price action: ${paAction} · ${confidence}%`;
 }
 
 function optionRead(
@@ -269,6 +282,19 @@ function formatStrategies(strategies: RecommendedStrategyAlert[]): string | null
     .join('\n');
 }
 
+function formatPlaybookSection(
+  strategies: RecommendedStrategyAlert[],
+): string | null {
+  const list = formatStrategies(strategies);
+  if (!list) return null;
+
+  return [
+    formatSectionHeader('info', 'Playbook', '🎲'),
+    '<i>Other option structures (spreads, condors, etc.) — not the single strike above.</i>',
+    list,
+  ].join('\n');
+}
+
 export function formatTelegramAlertMessage(params: {
   payload: TradeDecisionAlertPayload;
   previous: SignalSnapshot | null;
@@ -298,11 +324,7 @@ export function formatTelegramAlertMessage(params: {
     readyScenario === 'success'
       ? 'OK to enter'
       : 'Wait or size down';
-  const contextLines = [
-    chartRead(pa.action),
-    optionRead(payload.optionFlow?.bias, payload.action),
-    iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
-  ].filter(Boolean);
+  const biasIcon = biasEmoji(payload.bias);
 
   const showGreeks = !exactStrike;
   const compactGreeks = showGreeks
@@ -311,24 +333,33 @@ export function formatTelegramAlertMessage(params: {
       })
     : null;
 
-  const strategies = formatStrategies(payload.recommendedStrategies);
+  const playbook = formatPlaybookSection(payload.recommendedStrategies);
 
-  return [
-    headline,
+  const identityBlock = joinTelegramLines(
     `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${tradeActionLabel(payload.action)}`,
-    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${payload.conviction}% conviction`,
-    ...contextLines,
+    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)} · ${payload.conviction}% conviction`,
+  );
+
+  const readsBlock = joinTelegramLines(
+    priceActionLine(pa.action, pa.confidence),
+    optionRead(payload.optionFlow?.bias, payload.action),
+    iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
+  );
+
+  const enterBlock = joinTelegramLines(
     adaptiveLine,
     `${readyIcon} ${readyText}${payload.tradeGuidance.sizeRecommendation ? ` · ${escapeHtml(payload.tradeGuidance.sizeRecommendation)}` : ''}`,
+  );
+
+  return joinTelegramSections(
+    headline,
+    identityBlock,
+    readsBlock,
+    enterBlock,
     formatPositionSizingTelegramSection(payload.positionSizing),
     exactStrike,
     compactGreeks,
-    payload.action === 'NEUTRAL' && strategies
-      ? formatSectionHeader('info', 'Neutral ideas', '🎲')
-      : null,
-    payload.action === 'NEUTRAL' ? strategies : null,
+    playbook,
     change,
-  ]
-    .filter((line) => line !== null && line !== '')
-    .join('\n');
+  );
 }

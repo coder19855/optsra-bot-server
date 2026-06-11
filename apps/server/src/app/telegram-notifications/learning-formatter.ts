@@ -1,5 +1,6 @@
 import { MarketNewsHeadline } from './market-news';
 import { LearningInsightProfile } from './learning-insights';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   paletteToken,
@@ -63,54 +64,54 @@ export function formatLearningTelegramMessage(params: {
       ? `${profile.lookbackDays}d · ${profile.totalTrades} trades · ✅${profile.verdicts.good} ⚠️${profile.verdicts.bad} 🚨${profile.verdicts.ugly}`
       : `${profile.lookbackDays}d · no closed trades yet`;
 
-  const sections = [
+  const header = joinTelegramLines(
     preamble
       ? formatScenarioBanner('learning', '🌅 Pre-session brief')
       : formatScenarioBanner('learning', 'Your trade lessons'),
     `📅 ${dateLabel} · ${tradeSummary}`,
-    '',
-    wrapScenarioCallout('warning', '<b>🕳️ Leaks</b>', [
-      formatPatterns(
-        profile.leaks,
-        'No repeat leaks tagged.',
-        'warning',
-      ),
-    ]),
-    '',
-    wrapScenarioCallout('success', '<b>💪 Strengths</b>', [
-      formatPatterns(
-        profile.strengths,
-        'Keep taking engine-approved entries.',
-        'success',
-      ),
-    ]),
-    '',
-    wrapScenarioCallout('pick', '<b>🎯 Today</b>', [
-      escapeHtml(profile.intention),
-    ]),
-  ];
+  );
 
-  if (profile.recentMistakeNotes.length) {
-    sections.push(
-      '',
-      wrapScenarioCallout('danger', '<b>📝 Reminders</b>', [
-        ...profile.recentMistakeNotes
-          .slice(0, 2)
-          .map((note) => escapeHtml(note)),
-      ]),
-    );
-  }
+  const leaksBlock = wrapScenarioCallout('warning', '<b>🕳️ Leaks</b>', [
+    formatPatterns(profile.leaks, 'No repeat leaks tagged.', 'warning'),
+  ]);
 
-  if (params.includeNews) {
-    const newsBlock = formatMarketNewsSection(params.newsHeadlines ?? []);
-    if (newsBlock) sections.push('', newsBlock);
-  }
+  const strengthsBlock = wrapScenarioCallout('success', '<b>💪 Strengths</b>', [
+    formatPatterns(
+      profile.strengths,
+      'Keep taking engine-approved entries.',
+      'success',
+    ),
+  ]);
 
-  if (preamble) {
-    sections.push('', 'Full detail: <code>/learning</code>');
-  }
+  const todayBlock = wrapScenarioCallout('pick', '<b>🎯 Today</b>', [
+    escapeHtml(profile.intention),
+  ]);
 
-  const body = sections.join('\n');
+  const remindersBlock =
+    profile.recentMistakeNotes.length > 0
+      ? wrapScenarioCallout('danger', '<b>📝 Reminders</b>', [
+          ...profile.recentMistakeNotes
+            .slice(0, 2)
+            .map((note) => escapeHtml(note)),
+        ])
+      : null;
+
+  const newsBlock = params.includeNews
+    ? formatMarketNewsSection(params.newsHeadlines ?? [])
+    : null;
+
+  const footerBlock = preamble ? 'Full detail: <code>/learning</code>' : null;
+
+  const body = joinTelegramSections(
+    header,
+    leaksBlock,
+    strengthsBlock,
+    todayBlock,
+    remindersBlock,
+    newsBlock,
+    footerBlock,
+  );
+
   if (body.length <= 3900) return body;
   return `${body.slice(0, 3850)}\n\n… trimmed`;
 }

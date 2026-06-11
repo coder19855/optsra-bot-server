@@ -7,6 +7,7 @@ import {
   shortIndexLabel,
 } from './command-args';
 import { formatPositionSizingTelegramSection } from './message-formatter';
+import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import {
   formatScenarioBanner,
   scenarioForAction,
@@ -51,11 +52,13 @@ export function formatRiskRewardTelegramMessage(params: {
   const actionScenario = scenarioForAction(mapSignalToDecisionAction(signal.action));
 
   if (!setup || setup.risk <= 0 || !setup.takeProfits?.length) {
-    return [
+    return joinTelegramSections(
       formatScenarioBanner(actionScenario, `RR · ${escapeHtml(label)} · ${params.tradingStyle}`),
-      `${signal.action} ${signal.confidence}%${signal.vetoReason ? ` — ${escapeHtml(signal.vetoReason)}` : ''}`,
-      '💤 No entry/stop setup yet.',
-    ].join('\n');
+      joinTelegramLines(
+        `${signal.action} ${signal.confidence}%${signal.vetoReason ? ` — ${escapeHtml(signal.vetoReason)}` : ''}`,
+        '💤 No entry/stop setup yet.',
+      ),
+    );
   }
 
   const tpLines = setup.takeProfits.map((tp) => {
@@ -63,18 +66,19 @@ export function formatRiskRewardTelegramMessage(params: {
     return `<b>${tp.rr}</b> @ ${tp.price.toLocaleString('en-IN')} (+${dist.toFixed(0)}pts)`;
   });
 
-  const lines = [
-    formatScenarioBanner(actionScenario, `RR · ${escapeHtml(label)} · ${params.tradingStyle}`),
-    `${signal.action} ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`,
+  const setupBlock = joinTelegramLines(
     `🎯 Entry ${setup.entry.toLocaleString('en-IN')} · 🛑 SL ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`,
     `🏁 ${tpLines.join(' · ')}`,
-  ];
+    setup.stopAdjusted && setup.stopAdjustReason
+      ? `ℹ️ ${escapeHtml(setup.stopAdjustReason)}`
+      : null,
+  );
 
-  if (setup.stopAdjusted && setup.stopAdjustReason) {
-    lines.push(`ℹ️ ${escapeHtml(setup.stopAdjustReason)}`);
-  }
-
-  return lines.join('\n');
+  return joinTelegramSections(
+    formatScenarioBanner(actionScenario, `RR · ${escapeHtml(label)} · ${params.tradingStyle}`),
+    `${signal.action} ${signal.confidence}% · spot ${params.priceData.lastPrice.toLocaleString('en-IN')}`,
+    setupBlock,
+  );
 }
 
 export async function buildRiskRewardTelegramMessage(
@@ -161,17 +165,17 @@ export async function buildPositionSizingTelegramMessage(
   const setup = priceData.tradeSetup;
 
   const actionScenario = scenarioForAction(action);
-  const lines = [
-    formatScenarioBanner(actionScenario, `Size · ${escapeHtml(label)} · ${style}`),
-    `${priceData.signal.action} ${priceData.signal.confidence}%`,
-  ];
+  const setupLine =
+    setup && setup.risk > 0
+      ? `🎯 ${setup.entry.toLocaleString('en-IN')} · 🛑 ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`
+      : null;
 
-  if (setup && setup.risk > 0) {
-    lines.push(
-      `🎯 ${setup.entry.toLocaleString('en-IN')} · 🛑 ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`,
-    );
-  }
-
-  lines.push(sizingBlock ?? '⚠️ Sizing unavailable.');
-  return { message: lines.join('\n') };
+  return {
+    message: joinTelegramSections(
+      formatScenarioBanner(actionScenario, `Size · ${escapeHtml(label)} · ${style}`),
+      `${priceData.signal.action} ${priceData.signal.confidence}%`,
+      setupLine,
+      sizingBlock ?? '⚠️ Sizing unavailable.',
+    ),
+  };
 }
