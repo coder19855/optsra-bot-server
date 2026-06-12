@@ -8,6 +8,11 @@ import {
   buildReplayPaComponents,
   DeckComponentGauge,
 } from './deck-components';
+import {
+  buildDeckVetoBreakup,
+  buildReplayVetoBreakup,
+  DeckVetoBreakupItem,
+} from './deck-veto-breakup';
 import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
 import {
   loadOptionChainSnapshotsForSession,
@@ -73,6 +78,7 @@ export interface DeckReplayPoint {
   whatIfConviction: number;
   paComponents: DeckComponentGauge[];
   optionComponents?: DeckComponentGauge[];
+  vetoBreakup?: DeckVetoBreakupItem[];
 }
 
 export interface DeckVetoPoint {
@@ -134,6 +140,7 @@ export interface DeckLivePayload {
   vetoTimeline: DeckVetoPoint[];
   vetoReason?: string;
   structuralAction?: string;
+  vetoBreakup: DeckVetoBreakupItem[];
 }
 
 export interface DeckReplayPayload {
@@ -154,6 +161,7 @@ export interface DeckReplayPayload {
   optionComponentsNote: string;
   vetoTimeline: DeckVetoPoint[];
   vetoMode: VetoMode;
+  vetoBreakup: DeckVetoBreakupItem[];
   pnlNote?: string;
 }
 
@@ -181,7 +189,8 @@ async function fetchTradeDecision(
     priceConviction?: number;
     priceConvictionBeforeDecay?: number;
     optionConviction?: number;
-    momentumDecay?: { decayPercent: number };
+    momentumDecay?: { decayPercent: number; reasons?: string[] };
+    convictionThresholds?: { enter: number };
     priceAction: {
       components: Record<string, { score: number }>;
       overallSignal: {
@@ -189,6 +198,7 @@ async function fetchTradeDecision(
         action: string;
         vetoReason?: string;
         structuralAction?: string;
+        confidenceBeforeDecay?: number;
       };
     };
     optionFlow: {
@@ -201,39 +211,93 @@ async function fetchTradeDecision(
         weightage?: number;
       }>;
     };
-    confluenceAndDecision: Array<{ field: string; value: number }>;
-    _debug?: unknown;
+    confluenceAndDecision: Array<{ field: string; value: number | string }>;
+    _debug?: {
+      rawPrice?: {
+        momentumDecay?: {
+          decayPercent: number;
+          reasons: string[];
+          vetoedByDecay?: boolean;
+          minConfidenceRequired?: number;
+        };
+        signal?: { vetoedByDecay?: boolean };
+      };
+    };
   };
+}
+
+function extractVetoBreakup(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  vetoMode: VetoMode,
+): DeckVetoBreakupItem[] {
+  const rawDecay = decision._debug?.rawPrice?.momentumDecay;
+  const alignmentField = decision.confluenceAndDecision.find(
+    (row) => row.field === 'alignment',
+  );
+  const conflictField = decision.confluenceAndDecision.find(
+    (row) => row.field === 'conflictLevel',
+  );
+
+  const momentumDecay = decision.momentumDecay ?? rawDecay;
+
+  return buildDeckVetoBreakup({
+    vetoMode,
+    action: decision.action,
+    conviction: decision.conviction,
+    priceConviction: decision.priceConviction ?? 0,
+    priceConvictionBeforeDecay: decision.priceConvictionBeforeDecay,
+    optionConviction: decision.optionConviction ?? 0,
+    enterThreshold: decision.convictionThresholds?.enter ?? 60,
+    conflictLevel: String(conflictField?.value ?? 'NONE'),
+    alignment: Number(alignmentField?.value ?? 0),
+    paSignal: decision.priceAction.overallSignal,
+    momentumDecay: momentumDecay
+      ? {
+          decayPercent: momentumDecay.decayPercent,
+          reasons: momentumDecay.reasons ?? [],
+        }
+      : undefined,
+    vetoedByDecay:
+      rawDecay?.vetoedByDecay ?? decision._debug?.rawPrice?.signal?.vetoedByDecay,
+    minConfidenceAfterDecay: rawDecay?.minConfidenceRequired,
+  });
 }
 
 function extractComponentGauges(decision: Awaited<ReturnType<typeof fetchTradeDecision>>): {
   optionComponents: DeckComponentGauge[];
   priceActionComponents: DeckComponentGauge[];
 } {
+  const primaryTf = primaryTimeframeForStyle(
+    decision.tradingStyle as TradingStyle,
+  );
+  const pa = decision.priceAction.components;
   return {
     optionComponents: buildOptionComponentGauges(
       decision.optionFlow?.components ?? [],
     ),
-    priceActionComponents: buildPriceActionComponentGauges(
-      decision.priceAction.components,
-    ),
+    priceActionComponents: buildPriceActionComponentGauges(pa, {
+      primaryTimeframe: primaryTf,
+      timeframeScores: {
+        '5m': pa['5m']?.score ?? 0,
+        '15m': pa['15m']?.score ?? 0,
+        '1h': pa['1h']?.score ?? 0,
+      },
+    }),
   };
 }
 
 function extractConvictions(decision: {
   priceConviction?: number;
   optionConviction?: number;
-  confluenceAndDecision: Array<{ field: string; value: number }>;
+  confluenceAndDecision: Array<{ field: string; value: number | string }>;
 }): { price: number; option: number } {
   const confluence = decision.confluenceAndDecision;
   const price =
     decision.priceConviction ??
-    confluence.find((c) => c.field === 'priceActionConviction')?.value ??
-    0;
+    Number(confluence.find((c) => c.field === 'priceActionConviction')?.value ?? 0);
   const option =
     decision.optionConviction ??
-    confluence.find((c) => c.field === 'optionFlowConviction')?.value ??
-    0;
+    Number(confluence.find((c) => c.field === 'optionFlowConviction')?.value ?? 0);
   return { price, option };
 }
 
@@ -385,6 +449,7 @@ function timelineToConvictionSeries(
   optionSnapshots: Awaited<
     ReturnType<typeof loadOptionChainSnapshotsForSession>
   > = [],
+  vetoMode: VetoMode = 'strict',
 ): DeckReplayPayload['replayPoints'] {
   const primaryTf = primaryTimeframeForStyle(style);
   return points.map((p) => {
@@ -415,8 +480,17 @@ function timelineToConvictionSeries(
         p.timeframeScores,
         p.mtfScore,
         p.aligned,
+        primaryTf,
       ),
       optionComponents,
+      vetoBreakup: buildReplayVetoBreakup({
+        vetoMode,
+        action: p.signal.action,
+        conviction: p.signal.confidence,
+        vetoed: Boolean(p.signal.vetoReason),
+        vetoReason: p.signal.vetoReason,
+        structuralAction: p.signal.structuralAction,
+      }),
     };
   });
 }
@@ -573,6 +647,7 @@ export async function buildDeckLivePayload(
     vetoTimeline: timelineToVetoSeries(recent),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
+    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     ...extractComponentGauges(decision),
   };
 }
@@ -626,6 +701,7 @@ export async function buildDeckReplayPayload(
     points,
     style,
     optionSnapshots,
+    vetoState.vetoMode,
   );
   const hasHistoricalOptions = optionSnapshots.length > 0;
 
@@ -703,6 +779,7 @@ export async function buildDeckReplayPayload(
       : 'Option chain breakdown is a live read until snapshots accumulate · scrub updates price-action components per minute',
     vetoTimeline: timelineToVetoSeries(points),
     vetoMode: vetoState.vetoMode,
+    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     pnlNote:
       trades.length === 0
         ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'

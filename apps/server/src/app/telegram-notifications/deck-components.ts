@@ -1,9 +1,18 @@
+import {
+  alignmentToGaugeValue,
+  higherTfToGaugeValue,
+  isHigherTfSupportive,
+  TimeframeScores,
+} from '../technical-analysis/timeframe-alignment';
+import { Timeframe } from '../types/technical-analysis';
+
 export interface DeckComponentGauge {
   id: string;
   label: string;
   value: number;
   weight?: number;
   interpretation?: string;
+  readout?: string;
   group: 'option' | 'priceAction';
 }
 
@@ -58,6 +67,11 @@ function resolveOptionKey(name: string, id?: string): string {
   return OPTION_KEY_ALIASES[normalized] ?? normalized;
 }
 
+export interface PaGaugeContext {
+  primaryTimeframe?: Timeframe;
+  timeframeScores?: TimeframeScores;
+}
+
 export function buildOptionComponentGauges(
   components: Array<{
     name: string;
@@ -65,6 +79,7 @@ export function buildOptionComponentGauges(
     score: number;
     interpretation?: string;
     weightage?: number;
+    humanExplanation?: string;
   }>,
 ): DeckComponentGauge[] {
   const byKey = new Map<string, DeckComponentGauge>();
@@ -76,7 +91,7 @@ export function buildOptionComponentGauges(
       label: OPTION_LABELS[key] ?? comp.name,
       value: clampNeedle(comp.score),
       weight: comp.weightage,
-      interpretation: comp.interpretation,
+      interpretation: comp.humanExplanation ?? comp.interpretation,
       group: 'option',
     });
   }
@@ -97,14 +112,22 @@ export function buildPriceActionComponentGauges(
     string,
     { score: number; weightage?: number; explanation?: string }
   >,
+  context?: PaGaugeContext,
 ): DeckComponentGauge[] {
   const labels: Record<string, string> = {
     '5m': '5m structure',
     '15m': '15m structure',
     '1h': '1h structure',
     mtfScore: 'MTF score',
-    alignment: 'TF alignment',
-    higherTFConfirmation: '1h confirm',
+    alignment: 'Align w/ primary',
+    higherTFConfirmation: '1h vs primary',
+  };
+
+  const primaryTf = context?.primaryTimeframe ?? '15m';
+  const tfScores: TimeframeScores = context?.timeframeScores ?? {
+    '5m': components['5m']?.score ?? 0,
+    '15m': components['15m']?.score ?? 0,
+    '1h': components['1h']?.score ?? 0,
   };
 
   const gauges: DeckComponentGauge[] = [];
@@ -112,8 +135,18 @@ export function buildPriceActionComponentGauges(
     const comp = components[key];
     if (!comp) continue;
     let value = comp.score;
-    if (key === 'alignment') value = (value - 1.5) / 1.5;
-    if (key === 'higherTFConfirmation') value = value === 1 ? 0.6 : -0.2;
+    let readout: string | undefined;
+
+    if (key === 'alignment') {
+      const aligned = Math.round(comp.score);
+      value = alignmentToGaugeValue(aligned);
+      readout = `${aligned}/3`;
+    }
+    if (key === 'higherTFConfirmation') {
+      const supported = comp.score === 1;
+      value = higherTfToGaugeValue(supported, tfScores, primaryTf);
+      readout = supported ? 'supports' : value > 0.1 ? 'lean +' : value < -0.1 ? 'lean −' : 'neutral';
+    }
 
     gauges.push({
       id: key,
@@ -121,6 +154,7 @@ export function buildPriceActionComponentGauges(
       value: clampNeedle(value),
       weight: comp.weightage,
       interpretation: comp.explanation,
+      readout,
       group: 'priceAction',
     });
   }
@@ -131,14 +165,25 @@ export function buildReplayPaComponents(
   timeframeScores: Record<string, number>,
   mtfScore: number,
   aligned: number,
+  primaryTimeframe: Timeframe = '15m',
 ): DeckComponentGauge[] {
-  const scores: Record<string, { score: number }> = {
-    '5m': { score: timeframeScores['5m'] ?? 0 },
-    '15m': { score: timeframeScores['15m'] ?? 0 },
-    '1h': { score: timeframeScores['1h'] ?? 0 },
+  const scores: TimeframeScores = {
+    '5m': timeframeScores['5m'] ?? 0,
+    '15m': timeframeScores['15m'] ?? 0,
+    '1h': timeframeScores['1h'] ?? 0,
+  };
+  const scoresRecord: Record<string, { score: number }> = {
+    '5m': { score: scores['5m'] },
+    '15m': { score: scores['15m'] },
+    '1h': { score: scores['1h'] },
     mtfScore: { score: mtfScore },
     alignment: { score: aligned },
-    higherTFConfirmation: { score: aligned >= 2 ? 1 : 0 },
+    higherTFConfirmation: {
+      score: isHigherTfSupportive(scores, primaryTimeframe) ? 1 : 0,
+    },
   };
-  return buildPriceActionComponentGauges(scores);
+  return buildPriceActionComponentGauges(scoresRecord, {
+    primaryTimeframe,
+    timeframeScores: scores,
+  });
 }

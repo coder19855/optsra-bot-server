@@ -179,14 +179,14 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         },
         alignment: {
           score: priceData.confluence.aligned,
-          explanation: `${priceData.confluence.aligned} out of 3 timeframes are aligned in the same direction. 0 alignment is a strong warning sign for any style.`,
+          explanation: `${priceData.confluence.aligned}/3 timeframes share the same direction as primary ${primaryTF} (score ${primaryScore.toFixed(2)}). Counts mild positives too — not the same as a trade signal.`,
           weightage: 0.25, // influence in the decision engine's blended conviction
         },
         higherTFConfirmation: {
           score: priceData.confluence.higherTimeframeConfirmation ? 1 : 0,
           explanation: priceData.confluence.higherTimeframeConfirmation
-            ? 'Higher timeframe (1h) structure supports the move (adds bonus to conviction).'
-            : 'Higher timeframe does not confirm the lower timeframes (reduces conviction).',
+            ? `1h structure supports primary ${primaryTF} direction (adds conviction bonus).`
+            : `1h does not confirm primary ${primaryTF}. This is separate from 1h structure score — check both rows.`,
           weightage: 0.15, // influence in the decision engine's blended conviction
         },
       };
@@ -209,7 +209,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
             'Composite view of how dealers are positioned (delta, gamma, vega, theta). Strong negative here means dealers are leaning bearish.';
         if (key === 'trend')
           humanExplanation =
-            'Combines recent price move with OI change to confirm if the move has real participation.';
+            'Spot % change + net OI change: price↑+OI↑ = +1 (long buildup); price↑+OI↓ = +0.5 (short covering, weaker); price↓+OI↑ = −1. Green spot days often show positive trend even without a trade signal.';
         if (key === 'pcr')
           humanExplanation =
             'Overall market sentiment from total put vs call open interest. Not very directional right now.';

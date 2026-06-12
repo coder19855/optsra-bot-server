@@ -12,6 +12,10 @@ import { detectCandlestickPattern } from '../technical-analysis/candlestick-patt
 import { analyzeSessionBias } from '../technical-analysis/session-bias';
 import { analyzeTrendQuality } from '../technical-analysis/trend-quality';
 import { analyzeVolatilityRegime } from '../technical-analysis/volatility-regime';
+import {
+  countAlignedTimeframes,
+  isHigherTfSupportive,
+} from '../technical-analysis/timeframe-alignment';
 import { ResponseStatus } from '../types';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
 import { TradingStyle } from '../trading-style';
@@ -485,26 +489,20 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
         MTF_SCORE_WEIGHTS['15m'] * score15m +
         MTF_SCORE_WEIGHTS['1h'] * score1h;
 
-      // Agreement count for the response (derived from primary direction)
-      const primarySign = Math.sign(
-        confluentSignal.action === 'CE-BUY'
-          ? 1
-          : confluentSignal.action === 'PE-BUY'
-            ? -1
-            : 0,
+      const timeframeScores = {
+        '5m': score5m,
+        '15m': score15m,
+        '1h': score1h,
+      };
+      const alignedCount = countAlignedTimeframes(
+        timeframeScores,
+        primaryTimeframe,
       );
-      let alignedCount = 0;
-      if (primarySign !== 0) {
-        if (Math.sign(score5m) === primarySign) alignedCount++;
-        if (Math.sign(score15m) === primarySign) alignedCount++;
-        if (Math.sign(score1h) === primarySign) alignedCount++;
-      }
-
-      const higherTFConfirmation =
-        (confluentSignal.action === 'CE-BUY' &&
-          (ms1h === 1 || score1h > 0.1)) ||
-        (confluentSignal.action === 'PE-BUY' &&
-          (ms1h === -1 || score1h < -0.1));
+      const higherTFConfirmation = isHigherTfSupportive(
+        timeframeScores,
+        primaryTimeframe,
+        ms1h,
+      );
 
       reply.send({
         symbol,
@@ -535,8 +533,8 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
           higherTimeframeConfirmation: higherTFConfirmation,
           summary:
             confluentSignal.action === 'NO-TRADE'
-              ? 'No clear confluence. Wait for better alignment across timeframes.'
-              : `${alignedCount}/3 timeframes aligned. ${higherTFConfirmation ? 'Higher TF supportive.' : 'Higher TF mixed/neutral.'}`,
+              ? `${alignedCount}/3 timeframes share the primary (${primaryTimeframe}) direction. ${higherTFConfirmation ? '1h supports primary.' : '1h does not confirm primary.'}`
+              : `${alignedCount}/3 timeframes aligned with primary (${primaryTimeframe}). ${higherTFConfirmation ? '1h supports primary.' : '1h mixed/neutral vs primary.'}`,
         },
         levels: {
           support: +(primarySR.support || 0).toFixed(2),

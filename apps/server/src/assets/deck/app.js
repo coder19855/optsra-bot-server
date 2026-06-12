@@ -47,6 +47,9 @@
     optionComponents: document.getElementById('option-components'),
     paComponents: document.getElementById('pa-components'),
     optionComponentsNote: document.getElementById('option-components-note'),
+    vetoBreakup: document.getElementById('veto-breakup'),
+    vetoBreakupComponents: document.getElementById('veto-breakup-components'),
+    vetoBreakupNote: document.getElementById('veto-breakup-note'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -452,6 +455,71 @@
     return `${sign}${v.toFixed(2)}`;
   }
 
+  function vetoBadgeLabel(state) {
+    if (state === 'block') return 'BLOCK';
+    if (state === 'warn') return 'WARN';
+    if (state === 'skipped') return 'EASED';
+    return 'OK';
+  }
+
+  function renderVetoBreakup(containers, items, noteText) {
+    const targets = (Array.isArray(containers) ? containers : [containers]).filter(
+      Boolean,
+    );
+    for (const container of targets) {
+      container.innerHTML = '';
+      if (!items?.length) {
+        container.innerHTML =
+          '<div class="muted" style="font-size:0.72rem">No veto data</div>';
+        continue;
+      }
+
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.className = `veto-row ${item.state || 'ok'}`;
+
+        const head = document.createElement('div');
+        head.className = 'veto-row-head';
+
+        const label = document.createElement('span');
+        label.textContent = item.label;
+
+        const badge = document.createElement('span');
+        badge.className = `veto-badge ${item.state || 'ok'}`;
+        badge.textContent = vetoBadgeLabel(item.state);
+
+        head.append(label, badge);
+
+        const detail = document.createElement('div');
+        detail.className = 'veto-row-detail';
+        detail.textContent = item.detail || '';
+
+        row.append(head, detail);
+
+        if (item.meter != null && Number.isFinite(item.meter) && item.meter > 0) {
+          const meter = document.createElement('div');
+          meter.className = 'veto-meter';
+          const fill = document.createElement('div');
+          fill.style.width = `${Math.max(0, Math.min(100, item.meter))}%`;
+          meter.appendChild(fill);
+          row.appendChild(meter);
+        }
+
+        container.appendChild(row);
+      }
+    }
+
+    if (els.vetoBreakupNote) {
+      if (noteText) {
+        els.vetoBreakupNote.textContent = noteText;
+        els.vetoBreakupNote.classList.remove('hidden');
+      } else {
+        els.vetoBreakupNote.textContent = '';
+        els.vetoBreakupNote.classList.add('hidden');
+      }
+    }
+  }
+
   function renderComponentList(container, components, variant) {
     if (!container) return;
     container.innerHTML = '';
@@ -487,7 +555,7 @@
 
       const readout = document.createElement('span');
       readout.className = 'bipolar-value';
-      readout.textContent = formatComponentValue(value);
+      readout.textContent = comp.readout || formatComponentValue(value);
 
       row.append(label, track, readout);
       container.appendChild(row);
@@ -815,6 +883,11 @@
     applyGauges(data.gauges, data.lanes);
     renderComponentList(els.optionComponents, data.optionComponents, 'option');
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
+    renderVetoBreakup(
+      [els.vetoBreakup, els.vetoBreakupComponents],
+      data.vetoBreakup,
+      data.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
+    );
     if (els.optionComponentsNote) {
       els.optionComponentsNote.classList.add('hidden');
       els.optionComponentsNote.textContent = '';
@@ -917,6 +990,11 @@
       'option',
     );
     renderComponentList(els.paComponents, point.paComponents || [], 'pa');
+    renderVetoBreakup(
+      [els.vetoBreakup, els.vetoBreakupComponents],
+      point.vetoBreakup || [],
+      display.statusSuffix ? display.statusSuffix.replace(/^ · /, '') : '',
+    );
     renderVetoStrip(index);
     pendingSpotScrubPoint = point;
     pendingSpotScrubAction = chartAction;
@@ -947,6 +1025,11 @@
     replayPoints = data.replayPoints || [];
     replayOptionComponents = data.optionComponents || [];
     vetoTimeline = data.vetoTimeline || [];
+    renderVetoBreakup(
+      [els.vetoBreakup, els.vetoBreakupComponents],
+      data.vetoBreakup || [],
+      '',
+    );
     if (els.optionComponentsNote && data.optionComponentsNote) {
       els.optionComponentsNote.textContent = data.optionComponentsNote;
       els.optionComponentsNote.classList.remove('hidden');
