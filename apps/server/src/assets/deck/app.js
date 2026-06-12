@@ -623,36 +623,16 @@
     return impact;
   }
 
-  function ensureVetoScoreTag(zoneEl, label) {
-    if (!zoneEl) return;
-    let tag = zoneEl.querySelector('.veto-score-tag');
-    if (!tag) {
-      tag = document.createElement('span');
-      tag.className = 'veto-score-tag';
-      zoneEl.appendChild(tag);
-    }
-    tag.textContent = label;
-  }
-
-  function setVetoZoneMuted(zoneEl, muted, tagLabel = 'Vetoed') {
-    if (!zoneEl) return;
-    zoneEl.classList.toggle('veto-score-muted', muted);
-    if (muted) ensureVetoScoreTag(zoneEl, tagLabel);
-  }
-
-  function applyVetoScoreFilter(items) {
+  function applyVetoScoreNotice(items) {
     const impact = analyzeVetoScoreImpact(items);
     const anyImpact = impact.pa || impact.combined || impact.option;
     const noticeText = impact.notes.length
       ? `<strong>Veto eating score</strong> — ${impact.notes.join(' · ')}`
       : '';
 
-    const signalNotice = anyImpact ? noticeText : '';
-    const componentsNotice = anyImpact ? noticeText : '';
-
     if (els.signalVetoNotice) {
-      if (signalNotice) {
-        els.signalVetoNotice.innerHTML = signalNotice;
+      if (anyImpact && noticeText) {
+        els.signalVetoNotice.innerHTML = noticeText;
         els.signalVetoNotice.classList.remove('hidden');
       } else {
         els.signalVetoNotice.textContent = '';
@@ -660,36 +640,13 @@
       }
     }
     if (els.componentsVetoNotice) {
-      if (componentsNotice) {
-        els.componentsVetoNotice.innerHTML = componentsNotice;
+      if (anyImpact && noticeText) {
+        els.componentsVetoNotice.innerHTML = noticeText;
         els.componentsVetoNotice.classList.remove('hidden');
       } else {
         els.componentsVetoNotice.textContent = '';
         els.componentsVetoNotice.classList.add('hidden');
       }
-    }
-
-    const optionMuted = impact.option || impact.combined;
-    const optionTag = impact.notes.includes('Option vs PA conflict')
-      ? 'Conflict'
-      : 'Capped';
-
-    setVetoZoneMuted(document.getElementById('signal-option-gauge'), optionMuted, optionTag);
-    setVetoZoneMuted(document.getElementById('signal-option-lane'), optionMuted, optionTag);
-    setVetoZoneMuted(document.getElementById('components-option-panel'), optionMuted, optionTag);
-    setVetoZoneMuted(document.getElementById('signal-pa-gauge'), impact.pa, 'Vetoed');
-    setVetoZoneMuted(document.getElementById('signal-pa-lane'), impact.pa, 'Vetoed');
-    setVetoZoneMuted(
-      document.getElementById('signal-combined-lane'),
-      impact.combined,
-      'Vetoed',
-    );
-    setVetoZoneMuted(document.getElementById('components-pa-panel'), impact.pa, 'Vetoed');
-
-    if (!anyImpact) {
-      document
-        .querySelectorAll('.veto-score-zone')
-        .forEach((zone) => zone.classList.remove('veto-score-muted'));
     }
   }
 
@@ -751,7 +708,7 @@
       }
     }
 
-    applyVetoScoreFilter(sorted);
+    applyVetoScoreNotice(sorted);
   }
 
   function appendStrategyDetail(parent, label, value) {
