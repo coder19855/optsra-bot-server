@@ -1314,6 +1314,64 @@
     });
   }
 
+  const DEFAULT_CANDLE_MS = 5 * 60 * 1000;
+
+  function candleIntervalMs(candles) {
+    if (!candles?.length || candles.length < 2) return DEFAULT_CANDLE_MS;
+    const step = candles[candles.length - 1].t - candles[candles.length - 2].t;
+    return step > 0 && step <= 60 * 60 * 1000 ? step : DEFAULT_CANDLE_MS;
+  }
+
+  function bucketStartMs(t, intervalMs, anchorMs) {
+    const elapsed = t - anchorMs;
+    if (elapsed < 0) return anchorMs;
+    return anchorMs + Math.floor(elapsed / intervalMs) * intervalMs;
+  }
+
+  function pointToRawCandle(point) {
+    const c = point.c ?? point.v;
+    if (point.t == null || c == null) return null;
+    return {
+      t: point.t,
+      o: point.o ?? c,
+      h: point.h ?? c,
+      l: point.l ?? c,
+      c,
+    };
+  }
+
+  function normalizeSpotCandles(candles) {
+    if (!candles?.length) return [];
+    const sorted = candles
+      .map((p) => pointToRawCandle(p))
+      .filter(Boolean)
+      .sort((a, b) => a.t - b.t);
+    if (!sorted.length) return [];
+
+    const intervalMs = candleIntervalMs(sorted);
+    const anchorMs = sorted[0].t;
+    const buckets = new Map();
+
+    for (const point of sorted) {
+      const bucketT = bucketStartMs(point.t, intervalMs, anchorMs);
+      const existing = buckets.get(bucketT);
+      if (!existing) {
+        buckets.set(bucketT, {
+          t: bucketT,
+          o: point.o,
+          h: point.h,
+          l: point.l,
+          c: point.c,
+        });
+      } else {
+        existing.h = Math.max(existing.h, point.h);
+        existing.l = Math.min(existing.l, point.l);
+        existing.c = point.c;
+      }
+    }
+    return [...buckets.values()].sort((a, b) => a.t - b.t);
+  }
+
   function toChartData(series) {
     return (series || [])
       .filter((p) => p.t && p.v != null)
@@ -1526,7 +1584,10 @@
       { session: chartSession },
       candles,
     );
-    const sessionCandles = filterCandlesToSession(candles, session);
+    const sessionCandles = filterCandlesToSession(
+      normalizeSpotCandles(candles),
+      session,
+    );
     const data = toCandleChartData(sessionCandles);
     spotDataCache = data;
     if (!data.length) {
@@ -1601,10 +1662,17 @@
   }
 
   function mergeSpotSeriesTail(candles, tail) {
-    if (!tail?.length) return candles;
-    const cutoff = tail[0].t;
-    const base = (candles || []).filter((p) => p.t < cutoff);
-    return [...base, ...spotSeriesToCandles(tail)];
+    if (!tail?.length) return candles || [];
+    const base = candles || [];
+    const intervalMs = candleIntervalMs(base);
+    const anchorMs = base[0]?.t ?? tail[0].t;
+    const firstBucket = bucketStartMs(tail[0].t, intervalMs, anchorMs);
+    const preserved = base.filter((p) => p.t < firstBucket);
+    const overlap = base.filter((p) => p.t >= firstBucket);
+    const tickCandles = tail
+      .filter((p) => p.t && p.v != null)
+      .map((p) => ({ t: p.t, o: p.v, h: p.v, l: p.v, c: p.v }));
+    return normalizeSpotCandles([...preserved, ...overlap, ...tickCandles]);
   }
 
   function applyDeckTick(tick) {
