@@ -11,12 +11,29 @@ export interface DeckPatternMarker {
   tone: 'bull' | 'bear' | 'neutral';
 }
 
+export interface DeckChartOverlay {
+  kind: 'support' | 'resistance' | 'neckline';
+  price: number;
+  label: string;
+  tone: 'bull' | 'bear' | 'neutral';
+  dashed?: boolean;
+}
+
+export interface DeckChartSession {
+  fromMs: number;
+  toMs: number;
+  closeMs: number;
+  label: string;
+}
+
 export interface DeckPatternContext {
   candlestick?: CandlestickPatternId;
   chart?: ChartPatternId;
   chartStatus?: PatternStatus;
   label: string;
   markers: DeckPatternMarker[];
+  overlays: DeckChartOverlay[];
+  session: DeckChartSession;
 }
 
 function humanizeToken(token: string): string {
@@ -65,17 +82,75 @@ function chartDirection(
   return 'neutral';
 }
 
+export function buildIstChartSession(anchorMs: number): DeckChartSession {
+  const sessionDate = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(anchorMs));
+
+  const fromMs = new Date(`${sessionDate}T09:15:00+05:30`).getTime();
+  const closeMs = new Date(`${sessionDate}T15:30:00+05:30`).getTime();
+  const toMs = Math.min(Math.max(anchorMs, fromMs), closeMs);
+
+  return {
+    fromMs,
+    toMs,
+    closeMs,
+    label: '09:15–15:30 IST',
+  };
+}
+
+function buildOverlays(price: PriceActionResponse): DeckChartOverlay[] {
+  const overlays: DeckChartOverlay[] = [];
+  const support = price.levels?.support;
+  const resistance = price.levels?.resistance;
+
+  if (support != null && support > 0) {
+    overlays.push({
+      kind: 'support',
+      price: support,
+      label: 'Support',
+      tone: 'bull',
+    });
+  }
+  if (resistance != null && resistance > 0) {
+    overlays.push({
+      kind: 'resistance',
+      price: resistance,
+      label: 'Resistance',
+      tone: 'bear',
+    });
+  }
+
+  const chart = price.confluenceContext?.chartPattern;
+  const chartStatus = price.confluenceContext?.chartPatternStatus;
+  const neckline = price.confluenceContext?.chartPatternNeckline;
+  if (chart && chart !== 'none' && neckline != null && neckline > 0) {
+    const direction = chartDirection(chart);
+    overlays.push({
+      kind: 'neckline',
+      price: neckline,
+      label: chartStatus === 'forming' ? 'Neckline ~' : 'Neckline',
+      tone: toneForDirection(direction),
+      dashed: chartStatus === 'forming',
+    });
+  }
+
+  return overlays;
+}
+
 export function buildDeckPatternContext(
   price: PriceActionResponse,
   spotSeriesTail: Array<{ t: number }>,
-): DeckPatternContext | undefined {
+  anchorMs = Date.now(),
+): DeckPatternContext {
   const candlestick = price.candlestick?.primary;
   const chart = price.confluenceContext?.chartPattern;
   const chartStatus = price.confluenceContext?.chartPatternStatus;
   const hasCandle = candlestick && candlestick !== 'none';
   const hasChart = chart && chart !== 'none';
-
-  if (!hasCandle && !hasChart) return undefined;
 
   const parts: string[] = [];
   if (hasCandle) {
@@ -86,8 +161,8 @@ export function buildDeckPatternContext(
     parts.push(`${prefix}${humanizeToken(chart)}`);
   }
 
+  const anchorT = spotSeriesTail.at(-1)?.t ?? anchorMs;
   const markers: DeckPatternMarker[] = [];
-  const anchorT = spotSeriesTail.at(-1)?.t;
   if (anchorT) {
     if (hasCandle) {
       markers.push({
@@ -114,5 +189,7 @@ export function buildDeckPatternContext(
     chartStatus,
     label: parts.join(' · '),
     markers,
+    overlays: buildOverlays(price),
+    session: buildIstChartSession(anchorT),
   };
 }

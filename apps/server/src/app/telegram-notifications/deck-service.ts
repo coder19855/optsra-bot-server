@@ -26,6 +26,7 @@ import {
 } from './deck-pa-drilldown';
 import {
   buildDeckPatternContext,
+  buildIstChartSession,
   DeckPatternContext,
 } from './deck-pattern-context';
 import {
@@ -347,10 +348,49 @@ async function fetchTradeDecision(
 function extractPatternContext(
   decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
   spotSeries: DeckSpotPoint[],
+  anchorMs = Date.now(),
 ): DeckPatternContext | undefined {
   const rawPrice = decision._debug?.rawPrice as PriceActionResponse | undefined;
   if (!rawPrice) return undefined;
-  return buildDeckPatternContext(rawPrice, spotSeries);
+  return buildDeckPatternContext(rawPrice, spotSeries, anchorMs);
+}
+
+function prependPatternFormingEvent(
+  events: DeckEvent[],
+  patternContext?: DeckPatternContext,
+): DeckEvent[] {
+  if (
+    !patternContext?.chart ||
+    patternContext.chartStatus !== 'forming' ||
+    !patternContext.label
+  ) {
+    return events;
+  }
+
+  const t = patternContext.markers.at(-1)?.t ?? Date.now();
+  if (events.some((e) => e.type === 'signal' && e.label === 'Pattern forming')) {
+    return events;
+  }
+
+  return [
+    {
+      t,
+      type: 'signal',
+      label: 'Pattern forming',
+      detail: patternContext.label,
+    },
+    ...events,
+  ];
+}
+
+function filterCandlesToIstSession(
+  candles: DeckCandlePoint[],
+  session: { fromMs: number; closeMs: number },
+): DeckCandlePoint[] {
+  const filtered = candles.filter(
+    (c) => c.t >= session.fromMs && c.t <= session.closeMs + 5 * 60 * 1000,
+  );
+  return filtered.length ? filtered : candles;
 }
 
 function extractPaDrilldown(
@@ -515,7 +555,11 @@ async function fetchSpotCandles(
 ): Promise<DeckCandlePoint[]> {
   try {
     const resolution = candleResolutionForStyle(tradingStyle);
-    const fromMs = toMs - 24 * 60 * 60 * 1000;
+    const session = buildIstChartSession(toMs);
+    const fromMs =
+      tradingStyle === TradingStyle.Intraday || tradingStyle === TradingStyle.Scalper
+        ? session.fromMs - 15 * 60 * 1000
+        : toMs - 24 * 60 * 60 * 1000;
     const res = await fastify.fyers.getHistory({
       symbol,
       resolution,
@@ -546,7 +590,16 @@ async function resolveSpotCandles(
   toMs: number,
 ): Promise<DeckCandlePoint[]> {
   const candles = await fetchSpotCandles(fastify, symbol, tradingStyle, toMs);
-  return candles.length ? candles : spotSeriesToSyntheticCandles(spotSeries);
+  const resolved = candles.length
+    ? candles
+    : spotSeriesToSyntheticCandles(spotSeries);
+  if (
+    tradingStyle === TradingStyle.Intraday ||
+    tradingStyle === TradingStyle.Scalper
+  ) {
+    return filterCandlesToIstSession(resolved, buildIstChartSession(toMs));
+  }
+  return resolved;
 }
 
 function computeWhatIfSignal(
@@ -815,9 +868,12 @@ export async function buildDeckLivePayload(
       combined: p.signal.confidence,
     })),
     markers: timelineMarkers(recent),
-    events: buildDeckEvents(
-      timelineMarkers(recent),
-      timelineToVetoSeries(recent),
+    events: prependPatternFormingEvent(
+      buildDeckEvents(
+        timelineMarkers(recent),
+        timelineToVetoSeries(recent),
+      ),
+      extractPatternContext(decision, spotSeries),
     ),
     vetoTimeline: timelineToVetoSeries(recent),
     vetoReason: decision.priceAction.overallSignal.vetoReason,

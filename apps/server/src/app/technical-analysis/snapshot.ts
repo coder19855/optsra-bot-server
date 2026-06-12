@@ -475,6 +475,7 @@ export function buildPriceActionSnapshot(
           chartPattern: chartPatternPrimary.pattern,
           chartPatternStatus: chartPatternPrimary.status,
           chartPatternDirection: chartPatternPrimary.direction,
+          chartPatternNeckline: chartPatternPrimary.neckline,
           candlestickPrimary: candlestickPrimary.pattern,
           volatility: volatilityRegime,
           session: sessionBias,

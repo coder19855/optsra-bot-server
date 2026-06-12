@@ -26,6 +26,7 @@ describe('detectChartPattern', () => {
     expect(result.pattern).toBe('double_top');
     expect(result.status).toBe('forming');
     expect(result.direction).toBe('bearish');
+    expect(result.neckline).toBeGreaterThan(0);
   });
 
   it('detects range breakout when price clears resistance', () => {

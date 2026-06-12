@@ -89,6 +89,7 @@ function detectHeadAndShoulders(
       direction: 'bearish',
       scoreBoost: -0.12,
       status: 'confirmed',
+      neckline,
     };
   }
 
@@ -97,6 +98,7 @@ function detectHeadAndShoulders(
     direction: 'bearish',
     scoreBoost: -0.05,
     status: 'forming',
+    neckline,
   };
 }
 
@@ -132,6 +134,7 @@ function detectInverseHeadAndShoulders(
       direction: 'bullish',
       scoreBoost: 0.12,
       status: 'confirmed',
+      neckline,
     };
   }
 
@@ -140,6 +143,7 @@ function detectInverseHeadAndShoulders(
     direction: 'bullish',
     scoreBoost: 0.05,
     status: 'forming',
+    neckline,
   };
 }
 
@@ -171,6 +175,7 @@ function detectDoubleTop(
       direction: 'bearish',
       scoreBoost: -0.1,
       status: 'confirmed',
+      neckline,
     };
   }
 
@@ -179,6 +184,7 @@ function detectDoubleTop(
     direction: 'bearish',
     scoreBoost: -0.04,
     status: 'forming',
+    neckline,
   };
 }
 
@@ -210,6 +216,7 @@ function detectDoubleBottom(
       direction: 'bullish',
       scoreBoost: 0.1,
       status: 'confirmed',
+      neckline,
     };
   }
 
@@ -218,6 +225,7 @@ function detectDoubleBottom(
     direction: 'bullish',
     scoreBoost: 0.04,
     status: 'forming',
+    neckline,
   };
 }
 

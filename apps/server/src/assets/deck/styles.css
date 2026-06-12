@@ -780,6 +780,16 @@ body.replay-mode {
   color: var(--muted);
 }
 
+.spot-session-label {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.12);
+  color: #93c5fd;
+  font-size: 0.56rem;
+  font-weight: 600;
+}
+
 .pattern-context {
   flex-shrink: 1;
   max-width: 58%;

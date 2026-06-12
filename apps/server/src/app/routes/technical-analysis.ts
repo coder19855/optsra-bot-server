@@ -589,6 +589,7 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
               chartPattern: chartPatternPrimary.pattern,
               chartPatternStatus: chartPatternPrimary.status,
               chartPatternDirection: chartPatternPrimary.direction,
+              chartPatternNeckline: chartPatternPrimary.neckline,
               candlestickPrimary: candlestickPrimary.pattern,
               volatility: volatilityRegime,
               session: sessionBias,

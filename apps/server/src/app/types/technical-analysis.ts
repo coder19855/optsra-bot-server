@@ -47,6 +47,8 @@ export interface ChartPatternResult {
   direction: ChartPatternDirection;
   scoreBoost: number;
   status?: PatternStatus;
+  /** Neckline / trigger level for reversal patterns */
+  neckline?: number;
 }
 
 export type AtrTrend = 'rising' | 'falling' | 'flat';
@@ -90,6 +92,7 @@ export interface ConfluenceContext {
   chartPattern: ChartPatternId;
   chartPatternStatus?: PatternStatus;
   chartPatternDirection?: ChartPatternDirection;
+  chartPatternNeckline?: number;
   candlestickPrimary?: CandlestickPatternId;
   volatility: VolatilityRegime;
   session: SessionBias;

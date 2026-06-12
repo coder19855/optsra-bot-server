@@ -1,10 +1,23 @@
-import { buildDeckPatternContext } from './deck-pattern-context';
+import {
+  buildDeckPatternContext,
+  buildIstChartSession,
+} from './deck-pattern-context';
 import { samplePriceAction } from '../testing/fixtures';
 
-describe('buildDeckPatternContext', () => {
-  it('builds label and markers from candlestick and chart pattern', () => {
+describe('deck-pattern-context', () => {
+  it('builds IST session bounds for intraday chart zoom', () => {
+    const anchor = new Date('2026-06-12T11:30:00+05:30').getTime();
+    const session = buildIstChartSession(anchor);
+    expect(session.label).toBe('09:15–15:30 IST');
+    expect(session.toMs).toBe(anchor);
+    expect(session.fromMs).toBeLessThan(session.toMs);
+    expect(session.closeMs).toBeGreaterThan(session.toMs);
+  });
+
+  it('builds label, markers, overlays, and session', () => {
     const ctx = buildDeckPatternContext(
       samplePriceAction({
+        levels: { support: 24920, resistance: 25110 },
         candlestick: {
           primary: 'bullish_engulfing',
           '5m': 'none',
@@ -15,6 +28,7 @@ describe('buildDeckPatternContext', () => {
           chartPattern: 'double_bottom',
           chartPatternStatus: 'forming',
           chartPatternDirection: 'bullish',
+          chartPatternNeckline: 25040,
           candlestickPrimary: 'bullish_engulfing',
           volatility: {
             atrTrend: 'flat',
@@ -37,10 +51,15 @@ describe('buildDeckPatternContext', () => {
         },
       }),
       [{ t: 1_700_000_000_000, v: 25000 }],
+      1_700_000_000_000,
     );
 
-    expect(ctx?.label).toContain('bullish engulfing');
-    expect(ctx?.label).toContain('forming double bottom');
-    expect(ctx?.markers).toHaveLength(2);
+    expect(ctx.label).toContain('bullish engulfing');
+    expect(ctx.label).toContain('forming double bottom');
+    expect(ctx.markers).toHaveLength(2);
+    expect(ctx.overlays.some((o) => o.kind === 'support')).toBe(true);
+    expect(ctx.overlays.some((o) => o.kind === 'resistance')).toBe(true);
+    expect(ctx.overlays.some((o) => o.kind === 'neckline')).toBe(true);
+    expect(ctx.session.label).toBe('09:15–15:30 IST');
   });
 });

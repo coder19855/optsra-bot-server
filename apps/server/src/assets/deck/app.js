@@ -65,6 +65,7 @@
     vetoModeOptions: document.getElementById('veto-mode-options'),
     vetoModeNote: document.getElementById('veto-mode-note'),
     spotScrubLabel: document.getElementById('spot-scrub-label'),
+    spotSessionLabel: document.getElementById('spot-session-label'),
     patternContext: document.getElementById('pattern-context'),
     spotChartEmpty: document.getElementById('spot-chart-empty'),
     spotChartError: document.getElementById('spot-chart-error'),
@@ -94,6 +95,9 @@
   let pendingSpotScrubAction = null;
   let hasDisplayedDeck = false;
   let patternMarkers = [];
+  let chartOverlays = [];
+  let chartSession = null;
+  let spotOverlayLines = [];
   const SPOT_CHART_HEIGHT = 200;
 
   function deckHasRenderableContent(data) {
@@ -134,6 +138,42 @@
 
   function formatIstTime(ms) {
     return new Date(ms).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+
+  function buildIstSessionBounds(anchorMs = Date.now()) {
+    const sessionDate = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(anchorMs));
+    const fromMs = new Date(`${sessionDate}T09:15:00+05:30`).getTime();
+    const closeMs = new Date(`${sessionDate}T15:30:00+05:30`).getTime();
+    const toMs = Math.min(Math.max(anchorMs, fromMs), closeMs);
+    return { fromMs, toMs, closeMs, label: '09:15–15:30 IST' };
+  }
+
+  function resolveChartSession(ctx, candles) {
+    if (ctx?.session) return ctx.session;
+    const anchorMs = candles?.at(-1)?.t ?? Date.now();
+    return buildIstSessionBounds(anchorMs);
+  }
+
+  function filterCandlesToSession(candles, session) {
+    if (!session || !candles?.length) return candles || [];
+    const filtered = candles.filter(
+      (c) => c.t >= session.fromMs && c.t <= session.closeMs + 5 * 60 * 1000,
+    );
+    return filtered.length ? filtered : candles;
+  }
+
+  function formatChartAxisTime(sec) {
+    return new Date(sec * 1000).toLocaleString('en-IN', {
       timeZone: 'Asia/Kolkata',
       hour: '2-digit',
       minute: '2-digit',
@@ -361,12 +401,14 @@
       spotChartApi.applyOptions({
         height: chartHeight(els.spotChart, SPOT_CHART_HEIGHT),
       });
-      if (fitSpot) {
+      if (fitSpot && currentMode !== 'live') {
         try {
           spotChartApi.timeScale().fitContent();
         } catch {
           // Chart may not have data yet.
         }
+      } else if (fitSpot && chartSession && spotDataCache.length) {
+        focusIntradaySession(chartSession, spotDataCache);
       }
     }
     if (pnlChartApi && els.pnlChart) {
@@ -395,11 +437,71 @@
   }
 
   function destroySpotChart() {
+    clearSpotOverlays();
     if (spotChartApi) {
       spotChartApi.remove();
       spotChartApi = null;
       spotSeries = null;
       spotScrubPriceLine = null;
+    }
+  }
+
+  function clearSpotOverlays() {
+    if (!spotSeries) {
+      spotOverlayLines = [];
+      return;
+    }
+    for (const line of spotOverlayLines) {
+      try {
+        spotSeries.removePriceLine(line);
+      } catch {
+        // Line may already be removed.
+      }
+    }
+    spotOverlayLines = [];
+  }
+
+  function overlayLineColor(tone) {
+    if (tone === 'bull') return '#22c55e';
+    if (tone === 'bear') return '#ef4444';
+    return '#60a5fa';
+  }
+
+  function applyChartOverlays(overlays) {
+    clearSpotOverlays();
+    chartOverlays = overlays || [];
+    if (!spotSeries || !chartOverlays.length) return;
+    for (const overlay of chartOverlays) {
+      const line = spotSeries.createPriceLine({
+        price: overlay.price,
+        color: overlayLineColor(overlay.tone),
+        lineWidth: overlay.kind === 'neckline' ? 2 : 1,
+        lineStyle: overlay.dashed
+          ? LightweightCharts.LineStyle.Dashed
+          : LightweightCharts.LineStyle.Solid,
+        axisLabelVisible: true,
+        title: overlay.label,
+      });
+      spotOverlayLines.push(line);
+    }
+  }
+
+  function focusIntradaySession(session, data) {
+    if (!spotChartApi || !session) return;
+    const lastSec = data?.length ? data[data.length - 1].time : Math.floor(session.toMs / 1000);
+    const fromSec = Math.floor(session.fromMs / 1000);
+    const toSec = Math.max(
+      lastSec + 300,
+      Math.floor(session.closeMs / 1000),
+    );
+    try {
+      spotChartApi.timeScale().setVisibleRange({ from: fromSec, to: toSec });
+    } catch {
+      try {
+        spotChartApi.timeScale().fitContent();
+      } catch {
+        // Chart may not be ready yet.
+      }
     }
   }
 
@@ -433,7 +535,18 @@
         layout: { background: { color: '#161a20' }, textColor: '#8b95a8' },
         grid: { vertLines: { color: '#252b36' }, horzLines: { color: '#252b36' } },
         rightPriceScale: { borderColor: '#252b36' },
-        timeScale: { borderColor: '#252b36', timeVisible: true, secondsVisible: false },
+        localization: {
+          timeFormatter: (time) => formatChartAxisTime(time),
+        },
+        timeScale: {
+          borderColor: '#252b36',
+          timeVisible: true,
+          secondsVisible: false,
+          fixLeftEdge: true,
+          fixRightEdge: false,
+          barSpacing: 7,
+          minBarSpacing: 4,
+        },
         crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
         height: chartHeight(els.spotChart, SPOT_CHART_HEIGHT),
       });
@@ -469,7 +582,7 @@
       pendingSpotScrubPoint,
       pendingSpotScrubAction,
     );
-    resizeCharts(true);
+    resizeCharts(false);
   }
 
   function setError(message) {
@@ -1278,23 +1391,30 @@
   }
 
   function renderPatternContext(ctx) {
+    chartSession = ctx?.session ?? chartSession ?? buildIstSessionBounds();
+    chartOverlays = ctx?.overlays ?? chartOverlays ?? [];
+    if (els.spotSessionLabel && chartSession?.label) {
+      els.spotSessionLabel.textContent = chartSession.label;
+    }
+
     if (!els.patternContext) return;
     if (!ctx?.label) {
       els.patternContext.classList.add('hidden');
       els.patternContext.textContent = '';
       els.patternContext.classList.remove('bull', 'bear');
-      patternMarkers = [];
-      return;
+      patternMarkers = ctx?.markers || [];
+    } else {
+      els.patternContext.textContent = ctx.label;
+      els.patternContext.classList.remove('hidden', 'bull', 'bear');
+      const tone =
+        ctx.markers?.find((m) => m.tone === 'bull' || m.tone === 'bear')?.tone ??
+        'neutral';
+      if (tone === 'bull' || tone === 'bear') {
+        els.patternContext.classList.add(tone);
+      }
+      patternMarkers = ctx.markers || [];
     }
-    els.patternContext.textContent = ctx.label;
-    els.patternContext.classList.remove('hidden', 'bull', 'bear');
-    const tone =
-      ctx.markers?.find((m) => m.tone === 'bull' || m.tone === 'bear')?.tone ??
-      'neutral';
-    if (tone === 'bull' || tone === 'bear') {
-      els.patternContext.classList.add(tone);
-    }
-    patternMarkers = ctx.markers || [];
+
     if (activeTab === 'charts' && spotCandlesPayload.length) {
       flushSpotChart();
     }
@@ -1347,7 +1467,12 @@
 
   function applySpotChartData(candles, scrubPoint, scrubAction) {
     if (!spotSeries) return;
-    const data = toCandleChartData(candles);
+    const session = resolveChartSession(
+      { session: chartSession },
+      candles,
+    );
+    const sessionCandles = filterCandlesToSession(candles, session);
+    const data = toCandleChartData(sessionCandles);
     spotDataCache = data;
     if (!data.length) {
       setSpotChartMessage({ empty: true, error: null });
@@ -1357,6 +1482,7 @@
     setSpotChartMessage({ empty: false, error: null });
     try {
       spotSeries.setData(data);
+      applyChartOverlays(chartOverlays);
       const eventMarkers = chartMarkersForEvents(data);
       if (scrubPoint) {
         updateSpotScrub(scrubPoint, scrubAction, data, eventMarkers);
@@ -1367,6 +1493,9 @@
           spotScrubPriceLine = null;
         }
         if (els.spotScrubLabel) els.spotScrubLabel.textContent = '';
+      }
+      if (currentMode === 'live') {
+        focusIntradaySession(session, data);
       }
     } catch (err) {
       setSpotChartMessage({
@@ -1455,7 +1584,14 @@
       spotCandlesPayload = mergeSpotSeriesTail(spotCandlesPayload, tick.spotSeries);
       updateSpotSeries(spotCandlesPayload, null, tick.action);
     }
-    renderPatternContext(tick.patternContext);
+    renderPatternContext(
+      tick.patternContext ?? {
+        label: '',
+        markers: [],
+        overlays: chartOverlays,
+        session: chartSession ?? buildIstSessionBounds(),
+      },
+    );
   }
 
   function applyLive(data) {
@@ -1512,7 +1648,14 @@
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
     updateSpotSeries(spotCandlesPayload, null, data.action);
-    renderPatternContext(data.patternContext);
+    renderPatternContext(
+      data.patternContext ?? {
+        label: '',
+        markers: [],
+        overlays: [],
+        session: buildIstSessionBounds(),
+      },
+    );
     setError('');
   }
 
