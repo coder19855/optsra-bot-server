@@ -40,16 +40,19 @@ export function decorateFyers(
 
 export function decorateMongo(fastify: FastifyInstance) {
   const insertOne = jest.fn().mockResolvedValue({});
+  const updateOne = jest.fn().mockResolvedValue({});
   const deleteMany = jest.fn().mockResolvedValue({});
   const findOne = jest.fn().mockResolvedValue(null);
   fastify.decorate('mongo', {
     client: {},
     ObjectId: class MockObjectId {},
     db: {
-      collection: jest.fn().mockReturnValue({ insertOne, deleteMany, findOne }),
+      collection: jest
+        .fn()
+        .mockReturnValue({ insertOne, updateOne, deleteMany, findOne }),
     },
   });
-  return { insertOne, deleteMany, findOne };
+  return { insertOne, updateOne, deleteMany, findOne };
 }
 
 /** Register a named fyers plugin stub (satisfies fastify plugin dependencies). */

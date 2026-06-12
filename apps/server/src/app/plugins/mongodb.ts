@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { MongoClient, ObjectId } from 'mongodb';
+import { ensureMongoStorageIndexes } from '../telegram-notifications/mongo-storage';
 import { startOptionChainSnapshotScheduler } from '../telegram-notifications/option-chain-snapshot-store';
 
 function parseDatabaseName(url: string): string | undefined {
@@ -39,6 +40,9 @@ export default fp(
       fastify.decorate('mongo', { client, ObjectId, db });
       fastify.addHook('onClose', async () => {
         await client.close(true);
+      });
+      void ensureMongoStorageIndexes(fastify).catch((err) => {
+        fastify.log.warn({ err }, 'Mongo storage index setup failed');
       });
       startOptionChainSnapshotScheduler(fastify);
 

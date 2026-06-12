@@ -28,6 +28,7 @@ import {
 import { TradingStyle } from './types/trading-style';
 import { FyersTrackedMethod } from './constants/fyers-usage';
 import { FyersUsageResponse } from './types/fyers-usage';
+import { MarketDataCacheStats } from './market-data/market-data-store';
 import {
   TelegramNotificationStatus,
   TelegramSendOptions,
@@ -71,6 +72,9 @@ declare module 'fastify' {
       beginScope: (scope: string) => void;
       endScope: (scope: string) => void;
       getStats: () => FyersUsageResponse;
+    };
+    marketDataCache: {
+      getStats: () => MarketDataCacheStats;
     };
     mongo?: {
       client: MongoClient;

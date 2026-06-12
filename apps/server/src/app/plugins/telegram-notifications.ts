@@ -38,6 +38,7 @@ import {
   snapshotKey,
 } from '../telegram-notifications/signal-tracker';
 import { saveAlertWhyContext } from '../telegram-notifications/alert-context-store';
+import { createPollMarketDataContext } from '../market-data/poll-market-data-context';
 import { evaluateOpenPositionTpAlerts } from '../telegram-notifications/position-monitor';
 import {
   closeSessionSignalOutcomes,
@@ -292,13 +293,16 @@ export default fp(
     async function evaluateAndNotify(
       symbol: string,
       tradingStyle: TradingStyle,
-      options?: { force?: boolean },
+      options?: { force?: boolean; pollContext?: ReturnType<typeof createPollMarketDataContext> },
     ): Promise<{ notified: boolean; snapshot: SignalSnapshot }> {
       const payload = await fetchTradeDecisionAlert(
         fastify,
         symbol,
         tradingStyle,
-        { vetoMode: vetoPreferenceState.vetoMode },
+        {
+          vetoMode: vetoPreferenceState.vetoMode,
+          pollContext: options?.pollContext,
+        },
       );
       if (!payload) {
         throw new Error(`No trade decision payload for ${symbol}`);
@@ -730,13 +734,18 @@ export default fp(
       }
 
       if (!options?.coachOnly && (marketOpen || options?.force)) {
+        const pollContext = createPollMarketDataContext();
+
         if (!alertsPaused) {
           const spotBySymbol: Record<string, number> = {};
 
           for (const symbol of watchedSymbols) {
             for (const style of activeWatchedStyles) {
               try {
-                const result = await evaluateAndNotify(symbol, style, options);
+                const result = await evaluateAndNotify(symbol, style, {
+                  ...options,
+                  pollContext,
+                });
                 spotBySymbol[symbol] = result.snapshot.lastPrice;
               } catch (err) {
                 const msg = err instanceof Error ? err.message : String(err);
@@ -773,6 +782,7 @@ export default fp(
             sendMessage: (text) =>
               sendTelegramMessage(text, { channel: 'tp' }),
             force: options?.force,
+            pollContext,
           });
           openPositionsMonitored = tpResult.monitored;
           openPositionsTracked = tpResult.tracked;

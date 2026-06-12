@@ -36,6 +36,8 @@ export const TELEGRAM_NOTIFICATION_DEFAULTS = {
   ENTRY_INTENT_COLLECTION: 'trade-entry-intents',
   ALERT_WHY_CONTEXT_COLLECTION: 'alert-why-context',
   SIGNAL_OUTCOMES_COLLECTION: 'signal-outcomes',
+  /** Closed paper-trade outcomes purged after this many days (Mongo TTL). */
+  SIGNAL_OUTCOME_RETENTION_DAYS: 90,
   /** Poll Telegram getUpdates for /why, /outcomes, etc. */
   COMMAND_POLL_INTERVAL_MS: 5 * 1000,
   /** How long after a CE/PE entry alert we still treat a new open leg as intentional. */

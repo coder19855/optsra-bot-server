@@ -20,9 +20,14 @@ export default fp(
     fyers.getAccessToken = async function () {
       if (!fastify.mongo || !fastify.mongo.db) return '';
 
-      const data = await fastify.mongo.db
-        .collection('access-tokens')
-        .findOne({}, { sort: { timestamp: -1 } });
+      const col = fastify.mongo.db.collection<{
+        _id?: string;
+        token: string;
+        timestamp: number;
+      }>('access-tokens');
+      const data =
+        (await col.findOne({ _id: 'latest' })) ??
+        (await col.findOne({}, { sort: { timestamp: -1 } }));
 
       return data?.token || '';
     };

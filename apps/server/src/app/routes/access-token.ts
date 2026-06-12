@@ -1,6 +1,7 @@
 import { HttpStatusCode } from 'axios';
 import { FastifyInstance } from 'fastify';
 import { ResponseStatus } from '../types';
+import { upsertLatestAccessToken } from '../telegram-notifications/mongo-storage';
 
 function resolveAuthCode(query: Record<string, unknown>): string | undefined {
   const authCode = query.auth_code ?? query.authCode;
@@ -33,10 +34,7 @@ export default async function accessTokenRoutes(fastify: FastifyInstance) {
 
       if (authResponse.s === ResponseStatus.ok) {
         fastify.fyers.setAccessToken(authResponse.access_token);
-        await fastify.mongo?.db?.collection('access-tokens').insertOne({
-          token: authResponse.access_token,
-          timestamp: Date.now(),
-        });
+        await upsertLatestAccessToken(fastify, authResponse.access_token);
 
         if (fastify.telegramNotifications?.isConfigured()) {
           try {

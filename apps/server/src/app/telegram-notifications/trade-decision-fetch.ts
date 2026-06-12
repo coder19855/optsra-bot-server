@@ -13,6 +13,11 @@ import {
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
+import {
+  PollMarketDataContext,
+  pollPriceActionCacheKey,
+  pollTradeDecisionCacheKey,
+} from '../market-data/poll-market-data-context';
 
 function buildStructureContext(
   body: Record<string, unknown>,
@@ -61,10 +66,17 @@ export async function fetchTradeDecisionAlert(
     vetoMode?: import('../types/veto-mode').VetoMode;
     /** @deprecated use vetoMode */
     vetoOff?: boolean;
+    pollContext?: PollMarketDataContext;
   },
 ): Promise<TradeDecisionAlertPayload | null> {
   const vetoMode =
     options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
+  const cacheKey = pollTradeDecisionCacheKey(symbol, tradingStyle, vetoMode);
+  const cached = options?.pollContext?.tradeDecisionCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
   const res = await fastify.inject({
     method: 'GET',
@@ -159,7 +171,7 @@ export async function fetchTradeDecisionAlert(
 
   const structureContext = buildStructureContext(body, tradingStyle);
 
-  return {
+  const payload: TradeDecisionAlertPayload = {
     symbol: String(body.symbol || symbol),
     tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
     lastPrice: Number(body.lastPrice ?? 0),
@@ -210,4 +222,13 @@ export async function fetchTradeDecisionAlert(
     tradeSetup,
     momentumDecayPercent: rawPrice?.momentumDecay?.decayPercent ?? null,
   };
+
+  options?.pollContext?.tradeDecisionCache.set(cacheKey, payload);
+  if (rawPrice && options?.pollContext) {
+    options.pollContext.priceActionCache.set(
+      pollPriceActionCacheKey(symbol, tradingStyle),
+      rawPrice,
+    );
+  }
+  return payload;
 }

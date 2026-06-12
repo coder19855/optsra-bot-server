@@ -23,6 +23,10 @@ import {
 import { TradingStyle } from '../types/trading-style';
 import { TelegramVoice } from '../types/telegram-voice';
 import { fetchTradeDecisionAlert } from './trade-decision-fetch';
+import {
+  PollMarketDataContext,
+  pollPriceActionCacheKey,
+} from '../market-data/poll-market-data-context';
 import { formatTelegramTpAlertMessage } from './tp-alert-formatter';
 import { hasRecentTradeEntryIntent, pruneExpiredEntryIntents } from './trade-entry-intent';
 import {
@@ -296,7 +300,7 @@ async function fetchPriceAction(
   tradingStyle: TradingStyle,
   cache: Map<string, PriceActionResponse>,
 ): Promise<PriceActionResponse | null> {
-  const cacheKey = `${indexSymbol}:${tradingStyle}`;
+  const cacheKey = pollPriceActionCacheKey(indexSymbol, tradingStyle);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -444,6 +448,7 @@ export async function evaluateOpenPositionTpAlerts(
     sendMessage: (text: string) => Promise<void>;
     voice?: TelegramVoice;
     force?: boolean;
+    pollContext?: PollMarketDataContext;
   },
 ): Promise<{ monitored: number; tracked: number; notified: number }> {
   await pruneExpiredEntryIntents(fastify);
@@ -470,8 +475,12 @@ export async function evaluateOpenPositionTpAlerts(
     }
   }
 
-  const decisionCache = new Map<string, TradeDecisionAlertPayload>();
-  const priceActionCache = new Map<string, PriceActionResponse>();
+  const decisionCache =
+    params.pollContext?.tradeDecisionCache ??
+    new Map<string, TradeDecisionAlertPayload>();
+  const priceActionCache =
+    params.pollContext?.priceActionCache ??
+    new Map<string, PriceActionResponse>();
   let notified = 0;
   let tracked = 0;
 
@@ -484,7 +493,10 @@ export async function evaluateOpenPositionTpAlerts(
           fastify,
           position.indexSymbol,
           params.tradingStyle,
-          { vetoMode: fastify.telegramNotifications.getVetoMode() },
+          {
+            vetoMode: fastify.telegramNotifications.getVetoMode(),
+            pollContext: params.pollContext,
+          },
         );
         if (!fetched) continue;
         decision = fetched;
