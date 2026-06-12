@@ -178,6 +178,17 @@ export async function fetchTradeDecisionAlert(
   }
 
   const structureContext = buildStructureContext(body, tradingStyle);
+  const confluence = rawPrice?.confluenceContext;
+  const chartPattern =
+    confluence?.chartPattern && confluence.chartPattern !== 'none'
+      ? {
+          pattern: confluence.chartPattern,
+          status: confluence.chartPatternStatus,
+          direction: confluence.chartPatternDirection,
+          neckline: confluence.chartPatternNeckline,
+          timeframe: structureContext?.primaryTimeframe,
+        }
+      : undefined;
 
   const payload: TradeDecisionAlertPayload = {
     symbol: String(body.symbol || symbol),
@@ -229,6 +240,7 @@ export async function fetchTradeDecisionAlert(
     positionSizing,
     tradeSetup,
     momentumDecayPercent: rawPrice?.momentumDecay?.decayPercent ?? null,
+    chartPattern,
   };
 
   options?.pollContext?.tradeDecisionCache.set(cacheKey, payload);

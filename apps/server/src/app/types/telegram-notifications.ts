@@ -2,7 +2,14 @@ import { AdaptiveConvictionInsight } from './adaptive-conviction';
 import { AlertWhyContext } from './alert-intelligence';
 import { ExactStrikeRecommendation } from './exact-strike-recommendation';
 import { GreeksStrikeInsight } from './greeks-strike-insight';
-import { RrLabel, TradeSetup } from './technical-analysis';
+import {
+  ChartPatternDirection,
+  ChartPatternId,
+  PatternStatus,
+  RrLabel,
+  Timeframe,
+  TradeSetup,
+} from './technical-analysis';
 import { DecisionAction, TradeBias } from './trade-decision';
 import { TradingStyle } from './trading-style';
 
@@ -71,6 +78,11 @@ export interface SignalSnapshot {
   lastEdgeFadeFingerprint?: string | null;
   /** Direction held while engaged — set only when a live Fyers open leg exists. */
   engagedDirection?: 'CE-BUY' | 'PE-BUY';
+  chartPattern?: ChartPatternId;
+  chartPatternStatus?: PatternStatus;
+  chartPatternTimeframe?: Timeframe;
+  /** Dedupes repeated chart-pattern breakout Telegram alerts. */
+  lastNotifiedPatternBreakoutKey?: string | null;
 }
 
 export interface TelegramPositionSizingTier {
@@ -153,6 +165,13 @@ export interface TradeDecisionAlertPayload {
   adaptiveConviction?: AdaptiveConvictionInsight;
   tradeSetup?: TradeSetup | null;
   momentumDecayPercent?: number | null;
+  chartPattern?: {
+    pattern: ChartPatternId;
+    status?: PatternStatus;
+    direction?: ChartPatternDirection;
+    neckline?: number;
+    timeframe?: Timeframe;
+  };
 }
 
 export type TpAlertKind =

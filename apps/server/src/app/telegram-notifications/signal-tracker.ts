@@ -162,6 +162,9 @@ export function buildSignalSnapshot(
     humanSummary: payload.humanSummary,
     fingerprint,
     updatedAt: new Date(),
+    chartPattern: payload.chartPattern?.pattern,
+    chartPatternStatus: payload.chartPattern?.status,
+    chartPatternTimeframe: payload.chartPattern?.timeframe,
   };
 }
 

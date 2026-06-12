@@ -11,6 +11,8 @@ import {
   TELEGRAM_SOUND_ROUTING_NOTE,
 } from '../telegram-notifications/alert-channels';
 import { formatTelegramAlertMessage } from '../telegram-notifications/message-formatter';
+import { formatPatternBreakoutTelegramMessage } from '../telegram-notifications/pattern-breakout-formatter';
+import { detectChartPatternBreakout } from '../telegram-notifications/pattern-breakout-tracker';
 import { joinTelegramSections } from '../telegram-notifications/message-layout';
 import {
   loadSessionCoachState,
@@ -373,6 +375,11 @@ export default fp(
           (current.noTradeStreak ?? 0) < minExitPolls;
       }
 
+      if (previous?.lastNotifiedPatternBreakoutKey) {
+        current.lastNotifiedPatternBreakoutKey =
+          previous.lastNotifiedPatternBreakoutKey;
+      }
+
       const change = detectSignalChange(previous, current, {
         minConvictionForInitial:
           TELEGRAM_NOTIFICATION_DEFAULTS.MIN_CONVICTION_FOR_INITIAL_ALERT,
@@ -382,6 +389,8 @@ export default fp(
         engagement,
         telemetry,
       });
+
+      const patternBreakout = detectChartPatternBreakout(previous, current);
 
       if (engagement.engaged && heldDirection && change.engagedFlags) {
         current.awaitingHardExitConfirmation =
@@ -488,6 +497,23 @@ export default fp(
           } catch (err) {
             fastify.log.warn({ err }, 'Failed to record trade entry intent');
           }
+        }
+      }
+
+      if (patternBreakout.shouldNotify && patternBreakout.breakoutKey) {
+        const patternMessage = formatPatternBreakoutTelegramMessage({
+          payload,
+          alertFormat: alertFormatPreferenceState.alertFormat,
+        });
+        if (patternMessage) {
+          await sendTelegramMessage(
+            patternMessage,
+            mergeDeckKeyboard({ channel: 'signal' }, {
+              symbol,
+              tradingStyle: String(tradingStyle),
+            }),
+          );
+          current.lastNotifiedPatternBreakoutKey = patternBreakout.breakoutKey;
         }
       }
 

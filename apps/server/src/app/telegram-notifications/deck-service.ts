@@ -423,6 +423,45 @@ function prependPatternFormingEvent(
   ];
 }
 
+function prependPatternBreakoutEvent(
+  events: DeckEvent[],
+  patternContext?: DeckPatternContext,
+): DeckEvent[] {
+  if (
+    !patternContext?.chart ||
+    patternContext.chartStatus !== 'confirmed' ||
+    !patternContext.label
+  ) {
+    return events;
+  }
+
+  const t = patternContext.markers.at(-1)?.t ?? Date.now();
+  const detail = patternContext.label.replace(/^forming /, '');
+  if (events.some((e) => e.type === 'signal' && e.label === 'Pattern breakout')) {
+    return events;
+  }
+
+  return [
+    {
+      t,
+      type: 'signal',
+      label: 'Pattern breakout',
+      detail,
+    },
+    ...events,
+  ];
+}
+
+function prependPatternEvents(
+  events: DeckEvent[],
+  patternContext?: DeckPatternContext,
+): DeckEvent[] {
+  if (patternContext?.chartStatus === 'confirmed') {
+    return prependPatternBreakoutEvent(events, patternContext);
+  }
+  return prependPatternFormingEvent(events, patternContext);
+}
+
 function filterCandlesToIstSession(
   candles: DeckCandlePoint[],
   session: { fromMs: number; closeMs: number },
@@ -1044,7 +1083,7 @@ export async function buildDeckLivePayload(
       combined: p.signal.confidence,
     })),
     markers: timelineMarkers(recent),
-    events: prependPatternFormingEvent(
+    events: prependPatternEvents(
       buildDeckEvents(
         timelineMarkers(recent),
         timelineToVetoSeries(recent),
