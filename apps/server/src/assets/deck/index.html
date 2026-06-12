@@ -61,7 +61,7 @@
 
       <div id="tab-signal" class="tab-panel active">
         <p id="signal-veto-notice" class="veto-score-notice hidden" role="status"></p>
-        <section class="gauge-block">
+        <section class="gauge-block veto-score-zone" id="signal-option-gauge" data-veto-zone="option">
           <div class="gauge-head">
             <span>Option flow</span>
             <span id="option-value" class="gauge-readout">0.00 CE</span>
@@ -90,7 +90,7 @@
         </section>
 
         <section class="lane-block">
-          <div class="lane-row">
+          <div class="lane-row veto-score-zone" id="signal-option-lane" data-veto-zone="option">
             <span>Option</span>
             <div class="lane-bar"><div id="lane-option" class="lane-fill option"></div></div>
             <span id="lane-option-pct">0%</span>
@@ -111,7 +111,7 @@
 
       <div id="tab-components" class="tab-panel">
         <p id="components-veto-notice" class="veto-score-notice hidden" role="status"></p>
-        <section class="component-panel">
+        <section class="component-panel veto-score-zone" id="components-option-panel" data-veto-zone="option">
           <div class="panel-head">
             <span>Option components</span>
             <span id="option-components-note" class="panel-note hidden"></span>

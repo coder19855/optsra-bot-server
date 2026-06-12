@@ -582,6 +582,7 @@
       if (id === 'chart' && state !== 'ok') {
         impact.pa = true;
         impact.combined = true;
+        impact.option = true;
         impact.notes.push('Chart gate');
       }
 
@@ -598,6 +599,8 @@
 
       if (id === 'enter-threshold' && state !== 'ok') {
         impact.combined = true;
+        impact.option = true;
+        impact.pa = true;
         impact.notes.push('Below enter bar');
       }
 
@@ -606,24 +609,33 @@
         impact.combined = true;
         impact.notes.push('Option vs PA conflict');
       }
+
+      if (id === 'outcome' && state !== 'ok') {
+        impact.combined = true;
+        impact.option = true;
+        impact.pa = true;
+      }
     }
 
     impact.notes = [...new Set(impact.notes)];
     return impact;
   }
 
-  function ensureVetoScoreTag(zoneEl) {
-    if (!zoneEl || zoneEl.querySelector('.veto-score-tag')) return;
-    const tag = document.createElement('span');
-    tag.className = 'veto-score-tag';
-    tag.textContent = 'Vetoed';
-    zoneEl.appendChild(tag);
+  function ensureVetoScoreTag(zoneEl, label) {
+    if (!zoneEl) return;
+    let tag = zoneEl.querySelector('.veto-score-tag');
+    if (!tag) {
+      tag = document.createElement('span');
+      tag.className = 'veto-score-tag';
+      zoneEl.appendChild(tag);
+    }
+    tag.textContent = label;
   }
 
-  function setVetoZoneMuted(zoneEl, muted) {
+  function setVetoZoneMuted(zoneEl, muted, tagLabel = 'Vetoed') {
     if (!zoneEl) return;
     zoneEl.classList.toggle('veto-score-muted', muted);
-    if (muted) ensureVetoScoreTag(zoneEl);
+    if (muted) ensureVetoScoreTag(zoneEl, tagLabel);
   }
 
   function applyVetoScoreFilter(items) {
@@ -633,8 +645,8 @@
       ? `<strong>Veto eating score</strong> — ${impact.notes.join(' · ')}`
       : '';
 
-    const signalNotice = impact.pa || impact.combined ? noticeText : '';
-    const componentsNotice = impact.pa ? noticeText : '';
+    const signalNotice = anyImpact ? noticeText : '';
+    const componentsNotice = anyImpact ? noticeText : '';
 
     if (els.signalVetoNotice) {
       if (signalNotice) {
@@ -655,13 +667,22 @@
       }
     }
 
-    setVetoZoneMuted(document.getElementById('signal-pa-gauge'), impact.pa);
-    setVetoZoneMuted(document.getElementById('signal-pa-lane'), impact.pa);
+    const optionMuted = impact.option || impact.combined;
+    const optionTag = impact.notes.includes('Option vs PA conflict')
+      ? 'Conflict'
+      : 'Capped';
+
+    setVetoZoneMuted(document.getElementById('signal-option-gauge'), optionMuted, optionTag);
+    setVetoZoneMuted(document.getElementById('signal-option-lane'), optionMuted, optionTag);
+    setVetoZoneMuted(document.getElementById('components-option-panel'), optionMuted, optionTag);
+    setVetoZoneMuted(document.getElementById('signal-pa-gauge'), impact.pa, 'Vetoed');
+    setVetoZoneMuted(document.getElementById('signal-pa-lane'), impact.pa, 'Vetoed');
     setVetoZoneMuted(
       document.getElementById('signal-combined-lane'),
       impact.combined,
+      'Vetoed',
     );
-    setVetoZoneMuted(document.getElementById('components-pa-panel'), impact.pa);
+    setVetoZoneMuted(document.getElementById('components-pa-panel'), impact.pa, 'Vetoed');
 
     if (!anyImpact) {
       document
