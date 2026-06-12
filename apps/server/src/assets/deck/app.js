@@ -58,6 +58,8 @@
     vetoTabBadge: document.getElementById('veto-tab-badge'),
     signalVetoNotice: document.getElementById('signal-veto-notice'),
     componentsVetoNotice: document.getElementById('components-veto-notice'),
+    strategyContent: document.getElementById('strategy-content'),
+    strategyReplayNote: document.getElementById('strategy-replay-note'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -277,7 +279,7 @@
       panel.classList.toggle('active', panel.id === `tab-${tabId}`);
     });
     if (els.vetoDock) {
-      els.vetoDock.classList.toggle('hidden', tabId === 'veto');
+      els.vetoDock.classList.toggle('hidden', tabId === 'veto' || tabId === 'strategy');
     }
     if (tabId === 'charts') {
       requestAnimationFrame(() => {
@@ -752,6 +754,238 @@
     applyVetoScoreFilter(sorted);
   }
 
+  function appendStrategyDetail(parent, label, value) {
+    if (value == null || value === '') return;
+    const row = document.createElement('div');
+    row.className = 'strategy-detail-row';
+    const lbl = document.createElement('span');
+    lbl.className = 'strategy-detail-label';
+    lbl.textContent = label;
+    const val = document.createElement('span');
+    val.className = 'strategy-detail-value';
+    val.textContent = String(value);
+    row.append(lbl, val);
+    parent.appendChild(row);
+  }
+
+  function createStrategyCard(title, highlight) {
+    const card = document.createElement('section');
+    card.className = `strategy-card${highlight ? ' highlight' : ''}`;
+    const head = document.createElement('div');
+    head.className = 'strategy-card-head';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'strategy-card-title';
+    titleEl.textContent = title;
+    head.appendChild(titleEl);
+    card.appendChild(head);
+    const body = document.createElement('div');
+    body.className = 'strategy-detail-grid';
+    card.appendChild(body);
+    return { card, body };
+  }
+
+  function strategyActionPillClass(action) {
+    if (action === 'CE-BUY') return 'action-ce';
+    if (action === 'PE-BUY') return 'action-pe';
+    return '';
+  }
+
+  function riskClass(risk) {
+    return String(risk || '').toLowerCase() === 'low' ? 'low' : '';
+  }
+
+  function renderStrategyRecommendation(payload) {
+    if (!els.strategyContent) return;
+    els.strategyContent.innerHTML = '';
+
+    if (els.strategyReplayNote) {
+      if (payload?.replayNote) {
+        els.strategyReplayNote.textContent = payload.replayNote;
+        els.strategyReplayNote.classList.remove('hidden');
+      } else {
+        els.strategyReplayNote.textContent = '';
+        els.strategyReplayNote.classList.add('hidden');
+      }
+    }
+
+    if (!payload) {
+      els.strategyContent.innerHTML =
+        '<div class="muted" style="font-size:0.72rem">No strategy data</div>';
+      return;
+    }
+
+    const summary = createStrategyCard('Decision summary', true);
+    const pillRow = document.createElement('div');
+    pillRow.className = 'strategy-pill-row';
+    const actionPill = document.createElement('span');
+    actionPill.className = `strategy-pill ${strategyActionPillClass(payload.action)}`;
+    actionPill.textContent = payload.action;
+    pillRow.appendChild(actionPill);
+    const biasPill = document.createElement('span');
+    biasPill.className = 'strategy-pill';
+    biasPill.textContent = payload.bias;
+    pillRow.appendChild(biasPill);
+    const convPill = document.createElement('span');
+    convPill.className = `strategy-pill ${payload.conviction >= 60 ? 'good' : 'warn'}`;
+    convPill.textContent = `${payload.conviction}% conviction`;
+    pillRow.appendChild(convPill);
+    if (payload.ivRegime) {
+      const ivPill = document.createElement('span');
+      ivPill.className = 'strategy-pill';
+      ivPill.textContent = payload.ivRegime;
+      pillRow.appendChild(ivPill);
+    }
+    summary.card.insertBefore(pillRow, summary.card.querySelector('.strategy-detail-grid'));
+    appendStrategyDetail(summary.body, 'Recommendation', payload.recommendation);
+    appendStrategyDetail(summary.body, 'Summary', payload.humanSummary);
+    if (payload.optionBias) {
+      appendStrategyDetail(summary.body, 'Option bias', payload.optionBias);
+    }
+    els.strategyContent.appendChild(summary.card);
+
+    const guidance = createStrategyCard('Trade guidance', false);
+    const consider = payload.tradeGuidance?.shouldConsiderTrade ? 'Yes' : 'No';
+    appendStrategyDetail(guidance.body, 'Consider trade', consider);
+    appendStrategyDetail(
+      guidance.body,
+      'Size',
+      payload.tradeGuidance?.sizeRecommendation,
+    );
+    appendStrategyDetail(guidance.body, 'Notes', payload.tradeGuidance?.notes);
+    if (payload.tradeGuidance?.thresholds) {
+      const t = payload.tradeGuidance.thresholds;
+      appendStrategyDetail(
+        guidance.body,
+        'Thresholds',
+        `enter ${t.enter}% · strong ${t.strong}% · caution <${t.cautionBelow}%`,
+      );
+    }
+    if (payload.tradeGuidance?.scoringWeights) {
+      const w = payload.tradeGuidance.scoringWeights;
+      appendStrategyDetail(
+        guidance.body,
+        'Weights',
+        `PA ${Math.round(w.priceAction * 100)}% · option ${Math.round(w.optionFlow * 100)}%`,
+      );
+    }
+    if (payload.suggestedRiskPercent != null) {
+      appendStrategyDetail(
+        guidance.body,
+        'Risk %',
+        `${payload.suggestedRiskPercent}% of capital`,
+      );
+    }
+    for (const note of payload.riskNotes || []) {
+      appendStrategyDetail(guidance.body, 'Risk note', note);
+    }
+    els.strategyContent.appendChild(guidance.card);
+
+    if (payload.exactStrike) {
+      const strike = createStrategyCard('Exact strike', true);
+      const s = payload.exactStrike;
+      appendStrategyDetail(strike.body, 'Symbol', s.fyersSymbol);
+      appendStrategyDetail(strike.body, 'Strike', `${s.strike} (${s.moneyness})`);
+      appendStrategyDetail(strike.body, 'Premium', `₹${s.premium}`);
+      if (s.delta != null) appendStrategyDetail(strike.body, 'Delta', s.delta.toFixed(3));
+      appendStrategyDetail(strike.body, 'Lot size', String(s.lotSize));
+      if (s.expectedPremiumMove50Pts != null) {
+        appendStrategyDetail(
+          strike.body,
+          'Δ50 pts',
+          `≈ ₹${s.expectedPremiumMove50Pts.toFixed(2)} / unit`,
+        );
+      }
+      appendStrategyDetail(strike.body, 'Rationale', s.rationale);
+      els.strategyContent.appendChild(strike.card);
+    }
+
+    if (payload.greeksStrikeInsight) {
+      const greeks = createStrategyCard('Greeks & strike fit', false);
+      const insight = payload.greeksStrikeInsight;
+      appendStrategyDetail(greeks.body, 'Side', insight.optionSide);
+      appendStrategyDetail(greeks.body, 'Best fit', insight.bestFit);
+      if (insight.ivNote) appendStrategyDetail(greeks.body, 'IV note', insight.ivNote);
+      if (insight.profiles?.length) {
+        const label = document.createElement('div');
+        label.className = 'strategy-section-label';
+        label.textContent = 'Strike profiles';
+        greeks.body.appendChild(label);
+        for (const profile of insight.profiles) {
+          const row = document.createElement('div');
+          row.className = 'greeks-profile-row';
+          const bits = [
+            profile.moneyness,
+            profile.strike,
+            profile.premium != null ? `₹${profile.premium}` : null,
+            profile.gammaLevel ? `${profile.gammaLevel} gamma` : null,
+          ].filter(Boolean);
+          row.textContent = `${bits.join(' · ')} — ${profile.consequence}`;
+          greeks.body.appendChild(row);
+        }
+      }
+      els.strategyContent.appendChild(greeks.card);
+    }
+
+    const listCard = createStrategyCard(
+      `Recommended strategies (${payload.strategies?.length || 0})`,
+      false,
+    );
+    if (!payload.strategies?.length) {
+      appendStrategyDetail(
+        listCard.body,
+        'Status',
+        'No strategies ranked for the current regime.',
+      );
+    } else {
+      for (const [index, strat] of payload.strategies.entries()) {
+        const item = document.createElement('div');
+        item.className = 'strategy-item';
+        const head = document.createElement('div');
+        head.className = 'strategy-item-head';
+        const name = document.createElement('span');
+        name.className = 'strategy-item-name';
+        name.textContent = `${index + 1}. ${strat.strategy}`;
+        const score = document.createElement('span');
+        score.className = 'strategy-score';
+        score.textContent = `${strat.confidenceScore}%`;
+        head.append(name, score);
+        item.appendChild(head);
+        if (strat.risk) {
+          const risk = document.createElement('div');
+          risk.className = `strategy-risk ${riskClass(strat.risk)}`;
+          risk.textContent = `${strat.risk} risk`;
+          item.appendChild(risk);
+        }
+        const reason = document.createElement('div');
+        reason.className = 'strategy-body';
+        reason.textContent = strat.reason;
+        item.appendChild(reason);
+        if (strat.executionHint) {
+          const hint = document.createElement('div');
+          hint.className = 'strategy-body';
+          hint.textContent = `Execution: ${strat.executionHint}`;
+          item.appendChild(hint);
+        }
+        if (strat.riskManagement) {
+          const rm = strat.riskManagement;
+          const rmLabel = document.createElement('div');
+          rmLabel.className = 'strategy-section-label';
+          rmLabel.textContent = 'Risk management';
+          item.appendChild(rmLabel);
+          const rmGrid = document.createElement('div');
+          rmGrid.className = 'strategy-detail-grid';
+          appendStrategyDetail(rmGrid, 'Size', rm.positionSizing);
+          appendStrategyDetail(rmGrid, 'Stop', rm.stopLoss);
+          appendStrategyDetail(rmGrid, 'Target', rm.takeProfit);
+          appendStrategyDetail(rmGrid, 'Exit', rm.exitStrategy);
+          item.appendChild(rmGrid);
+        }
+        listCard.body.appendChild(item);
+      }
+    }
+    els.strategyContent.appendChild(listCard.card);
+  }
+
   let paDrilldownOpen = true;
   const paDrilldownSectionState = new Map();
 
@@ -1188,6 +1422,7 @@
       data.vetoBreakup,
       data.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
     );
+    renderStrategyRecommendation(data.strategyRecommendation);
     if (els.optionComponentsNote) {
       els.optionComponentsNote.classList.add('hidden');
       els.optionComponentsNote.textContent = '';
@@ -1331,6 +1566,7 @@
       data.vetoBreakup || [],
       '',
     );
+    renderStrategyRecommendation(data.strategyRecommendation);
     if (els.optionComponentsNote && data.optionComponentsNote) {
       els.optionComponentsNote.textContent = data.optionComponentsNote;
       els.optionComponentsNote.classList.remove('hidden');

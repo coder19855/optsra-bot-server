@@ -24,6 +24,10 @@ import {
   buildPaDrilldownFromTimelinePoint,
   PaDrilldown,
 } from './deck-pa-drilldown';
+import {
+  DeckStrategyPayload,
+  extractDeckStrategyPayload,
+} from './deck-strategy';
 import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
 import {
   loadOptionChainSnapshotsForSession,
@@ -154,6 +158,7 @@ export interface DeckLivePayload {
   vetoReason?: string;
   structuralAction?: string;
   vetoBreakup: DeckVetoBreakupItem[];
+  strategyRecommendation: DeckStrategyPayload;
 }
 
 export interface DeckReplayPayload {
@@ -175,6 +180,7 @@ export interface DeckReplayPayload {
   vetoTimeline: DeckVetoPoint[];
   vetoMode: VetoMode;
   vetoBreakup: DeckVetoBreakupItem[];
+  strategyRecommendation: DeckStrategyPayload;
   pnlNote?: string;
 }
 
@@ -223,9 +229,45 @@ async function fetchTradeDecision(
         confidenceBeforeDecay?: number;
       };
     };
+    recommendation?: string;
+    humanSummary?: string;
+    tradeGuidance?: {
+      shouldConsiderTrade?: boolean;
+      sizeRecommendation?: string;
+      notes?: string;
+      thresholdsForThisStyle?: {
+        enter: number;
+        strong: number;
+        cautionBelow: number;
+      };
+      scoringWeights?: {
+        priceAction: number;
+        optionFlow: number;
+      };
+    };
+    risk?: {
+      suggestedRiskPercent?: number;
+      notes?: string[];
+    };
+    recommendedStrategies?: Array<{
+      strategy?: string;
+      risk?: string;
+      confidenceScore?: number;
+      reason?: string;
+      executionHint?: string;
+      riskManagement?: {
+        positionSizing?: string;
+        stopLoss?: string;
+        takeProfit?: string;
+        exitStrategy?: string;
+      };
+    }>;
     optionFlow: {
       bias: string;
       overallScore?: number;
+      ivRegime?: string;
+      greeksStrikeInsight?: DeckStrategyPayload['greeksStrikeInsight'];
+      exactStrikeRecommendation?: DeckStrategyPayload['exactStrike'];
       components: Array<{
         name: string;
         score: number;
@@ -713,6 +755,7 @@ export async function buildDeckLivePayload(
     vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
+    strategyRecommendation: extractDeckStrategyPayload(decision),
   };
 }
 
@@ -844,6 +887,10 @@ export async function buildDeckReplayPayload(
     vetoTimeline: timelineToVetoSeries(points),
     vetoMode: vetoState.vetoMode,
     vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
+    strategyRecommendation: extractDeckStrategyPayload(decision, {
+      replayNote:
+        'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',
+    }),
     pnlNote:
       trades.length === 0
         ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'
