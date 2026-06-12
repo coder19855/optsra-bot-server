@@ -6,6 +6,8 @@ import {
   isDeckAuthSkipped,
   validateTelegramWebAppInitData,
 } from '../telegram-notifications/deck-auth';
+import { resolveDeckSseEnabled } from '../constants/deck-stream';
+import { handleDeckStream } from '../telegram-notifications/deck-stream-handler';
 import {
   buildDeckLivePayload,
   buildDeckReplayPayload,
@@ -69,6 +71,27 @@ export default async function deckRoutes(fastify: FastifyInstance) {
 
   fastify.get('/deck', async (_request, reply) => {
     return reply.redirect('/deck/');
+  });
+
+  fastify.get('/api/deck/stream', async (request, reply) => {
+    if (!(await assertDeckAccess(request, reply))) return;
+
+    if (!resolveDeckSseEnabled()) {
+      return reply.code(404).send({ error: 'Deck SSE disabled' });
+    }
+
+    const { symbol, style } = request.query as {
+      symbol?: string;
+      style?: string;
+    };
+    if (!symbol?.trim()) {
+      return reply.code(400).send({ error: 'symbol is required' });
+    }
+
+    handleDeckStream(fastify, request, reply, {
+      symbol: symbol.trim(),
+      tradingStyle: style,
+    });
   });
 
   fastify.get('/api/deck/live', async (request, reply) => {

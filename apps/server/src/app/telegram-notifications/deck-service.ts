@@ -140,6 +140,30 @@ export interface DeckEvent {
   action?: string;
 }
 
+export interface DeckLiveStreamTick {
+  type: 'tick';
+  asOf: string;
+  marketOpen: boolean;
+  action: string;
+  bias: string;
+  conviction: number;
+  lastPrice: number;
+  chartVetoed: boolean;
+  gauges: ReturnType<typeof buildDeckGauges>;
+  lanes: {
+    optionPercent: number;
+    priceActionPercent: number;
+    combinedPercent: number;
+  };
+  spotSeries: DeckSpotPoint[];
+  optionComponents: DeckComponentGauge[];
+  priceActionComponents: DeckComponentGauge[];
+  paDrilldown: PaDrilldown;
+  vetoBreakup: DeckVetoBreakupItem[];
+  vetoReason?: string;
+  structuralAction?: string;
+}
+
 export interface DeckLivePayload {
   mode: 'live';
   symbol: string;
@@ -787,6 +811,74 @@ export async function buildDeckLivePayload(
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
     strategyRecommendation: extractDeckStrategyPayload(decision),
+  };
+}
+
+export async function buildDeckLiveStreamTick(
+  fastify: FastifyInstance,
+  params: { symbol: string; tradingStyle?: string },
+): Promise<DeckLiveStreamTick> {
+  const style = parseTradingStyle(params.tradingStyle);
+  const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
+  const decision = await fetchTradeDecision(
+    fastify,
+    params.symbol,
+    style,
+    vetoState.vetoMode,
+  );
+  const { price, option } = extractConvictions(decision);
+  const primaryTf = primaryTimeframeForStyle(style);
+  const primaryScore =
+    decision.priceAction.components[primaryTf]?.score ?? 0;
+
+  const gauges = buildDeckGauges({
+    action: decision.action as 'CE-BUY' | 'PE-BUY' | 'NO-TRADE' | 'NEUTRAL',
+    optionConviction: option,
+    optionBias: decision.optionFlow.bias,
+    optionOverallScore: decision.optionFlow.overallScore,
+    priceConviction: price,
+    priceConvictionBeforeDecay: decision.priceConvictionBeforeDecay,
+    primaryScore,
+    hasMomentumDecay: Boolean(decision.momentumDecay?.decayPercent),
+  });
+
+  const marketOpen = isIndianMarketOpen(Date.now());
+  const indexSymbol = decision.symbol || params.symbol;
+  const liveLastPrice = resolveLiveIndexPrice(
+    fastify,
+    indexSymbol,
+    decision.lastPrice,
+  );
+  const spotSeries =
+    fastify.fyersMarketStream?.getSpotSeries(indexSymbol) ?? [];
+
+  const chartVetoed =
+    !isVetoOff(vetoState.vetoMode) &&
+    (decision.priceAction.overallSignal.confidence === 0 ||
+      (decision.action === 'NO-TRADE' &&
+        decision.priceAction.overallSignal.action !== 'NO-TRADE'));
+
+  return {
+    type: 'tick',
+    asOf: new Date().toISOString(),
+    marketOpen,
+    action: decision.action,
+    bias: decision.bias,
+    conviction: decision.conviction,
+    lastPrice: liveLastPrice,
+    chartVetoed,
+    gauges,
+    lanes: {
+      optionPercent: option,
+      priceActionPercent: price,
+      combinedPercent: decision.conviction,
+    },
+    spotSeries,
+    ...extractComponentGauges(decision),
+    paDrilldown: extractPaDrilldown(decision),
+    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
+    vetoReason: decision.priceAction.overallSignal.vetoReason,
+    structuralAction: decision.priceAction.overallSignal.structuralAction,
   };
 }
 

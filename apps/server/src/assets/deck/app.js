@@ -83,6 +83,8 @@
   let activeTab = 'signal';
   let activeEventTime = null;
   let pollTimer = null;
+  let deckEventSource = null;
+  const FALLBACK_POLL_MS = 45_000;
   let vetoMode = 'strict';
   let serverVetoMode = 'strict';
   let currentMode = mode;
@@ -1365,6 +1367,47 @@
     pnlSeries.setData(toChartData(series));
   }
 
+  function mergeSpotSeriesTail(candles, tail) {
+    if (!tail?.length) return candles;
+    const cutoff = tail[0].t;
+    const base = (candles || []).filter((p) => p.t < cutoff);
+    return [...base, ...spotSeriesToCandles(tail)];
+  }
+
+  function applyDeckTick(tick) {
+    els.clock.textContent = `${formatClock(tick.asOf)} IST`;
+    els.action.textContent = tick.action;
+    els.conviction.textContent = `${tick.conviction}%`;
+
+    if (tick.marketOpen) els.live.classList.remove('hidden');
+    else els.live.classList.add('hidden');
+
+    els.status.textContent = tick.chartVetoed
+      ? vetoModeStatusText(serverVetoMode)
+      : serverVetoMode !== 'strict'
+        ? vetoModeStatusText(serverVetoMode)
+        : tick.gauges.aligned
+          ? 'Option & PA aligned'
+          : tick.gauges.conflict
+            ? 'Option vs PA conflict'
+            : tick.bias;
+
+    applyGauges(tick.gauges, tick.lanes);
+    renderComponentList(els.optionComponents, tick.optionComponents, 'option');
+    renderComponentList(els.paComponents, tick.priceActionComponents, 'pa');
+    renderPaDrilldown(tick.paDrilldown);
+    renderVetoBreakup(
+      [els.vetoBreakup, els.vetoBreakupTab],
+      tick.vetoBreakup,
+      tick.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
+    );
+
+    if (tick.spotSeries?.length) {
+      spotCandlesPayload = mergeSpotSeriesTail(spotCandlesPayload, tick.spotSeries);
+      updateSpotSeries(spotCandlesPayload, null, tick.action);
+    }
+  }
+
   function applyLive(data) {
     els.symbol.textContent = data.symbolLabel || data.symbol;
     els.style.textContent = data.tradingStyle;
@@ -1582,8 +1625,8 @@
     return res.json();
   }
 
-  async function refresh() {
-    const showLoader = shouldShowLoadingOverlay();
+  async function refresh(options = {}) {
+    const { showLoader = shouldShowLoadingOverlay() } = options;
     if (showLoader) setLoading(true);
     try {
       const data = await fetchDeck();
@@ -1603,6 +1646,67 @@
     } finally {
       if (showLoader) setLoading(false);
     }
+  }
+
+  function stopDeckStream() {
+    if (deckEventSource) {
+      deckEventSource.close();
+      deckEventSource = null;
+    }
+  }
+
+  function startFallbackPoll() {
+    if (pollTimer) return;
+    pollTimer = setInterval(() => refresh({ showLoader: false }), FALLBACK_POLL_MS);
+  }
+
+  function stopFallbackPoll() {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  function connectDeckStream() {
+    stopDeckStream();
+    stopFallbackPoll();
+
+    const qs = new URLSearchParams({
+      symbol,
+      style,
+    });
+    if (initData) qs.set('initData', initData);
+
+    const source = new EventSource(`/api/deck/stream?${qs.toString()}`);
+    deckEventSource = source;
+
+    source.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === 'error') {
+          setError(payload.message || 'Stream update failed');
+          return;
+        }
+        if (payload.type === 'full') {
+          applyLive(payload);
+          if (deckHasRenderableContent(payload)) {
+            hasDisplayedDeck = true;
+          }
+          setError('');
+          return;
+        }
+        if (payload.type === 'tick') {
+          applyDeckTick(payload);
+          setError('');
+        }
+      } catch (err) {
+        setError(err.message || 'Invalid stream payload');
+      }
+    };
+
+    source.onerror = () => {
+      stopDeckStream();
+      startFallbackPoll();
+    };
   }
 
   if (els.tabBar) {
@@ -1635,12 +1739,12 @@
     }
   });
 
-  refresh();
-  if (mode === 'live') {
-    pollTimer = setInterval(refresh, 45_000);
-  }
+  refresh().then(() => {
+    if (mode === 'live') connectDeckStream();
+  });
 
   window.addEventListener('beforeunload', () => {
-    if (pollTimer) clearInterval(pollTimer);
+    stopDeckStream();
+    stopFallbackPoll();
   });
 })();
