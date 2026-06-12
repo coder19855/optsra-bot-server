@@ -211,7 +211,15 @@ export function buildDeckVetoBreakup(input: DeckVetoBreakupInput): DeckVetoBreak
     });
   }
 
-  return items;
+  const stateOrder: Record<DeckVetoBreakupState, number> = {
+    block: 0,
+    warn: 1,
+    skipped: 2,
+    ok: 3,
+  };
+  return items.sort(
+    (a, b) => (stateOrder[a.state] ?? 9) - (stateOrder[b.state] ?? 9),
+  );
 }
 
 export function buildReplayVetoBreakup(input: {

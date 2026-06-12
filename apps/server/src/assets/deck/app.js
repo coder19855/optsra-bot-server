@@ -50,8 +50,12 @@
     paDrilldownToggle: document.getElementById('pa-drilldown-toggle'),
     optionComponentsNote: document.getElementById('option-components-note'),
     vetoBreakup: document.getElementById('veto-breakup'),
-    vetoBreakupComponents: document.getElementById('veto-breakup-components'),
+    vetoBreakupTab: document.getElementById('veto-breakup-tab'),
     vetoBreakupNote: document.getElementById('veto-breakup-note'),
+    vetoDock: document.getElementById('veto-dock'),
+    vetoDockToggle: document.getElementById('veto-dock-toggle'),
+    vetoDockSummary: document.getElementById('veto-dock-summary'),
+    vetoTabBadge: document.getElementById('veto-tab-badge'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -270,6 +274,9 @@
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.classList.toggle('active', panel.id === `tab-${tabId}`);
     });
+    if (els.vetoDock) {
+      els.vetoDock.classList.toggle('hidden', tabId === 'veto');
+    }
     if (tabId === 'charts') {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -464,19 +471,101 @@
     return 'OK';
   }
 
+  const VETO_STATE_ORDER = { block: 0, warn: 1, skipped: 2, ok: 3 };
+
+  function sortVetoBreakupItems(items) {
+    return [...(items || [])].sort((a, b) => {
+      const left = VETO_STATE_ORDER[a.state] ?? 9;
+      const right = VETO_STATE_ORDER[b.state] ?? 9;
+      if (left !== right) return left - right;
+      return 0;
+    });
+  }
+
+  function summarizeVetoBreakup(items) {
+    const counts = { block: 0, warn: 0, skipped: 0, ok: 0 };
+    for (const item of items || []) {
+      const key = item.state === 'skipped' ? 'skipped' : item.state || 'ok';
+      if (counts[key] != null) counts[key] += 1;
+    }
+    return counts;
+  }
+
+  function formatVetoDockSummary(items) {
+    const counts = summarizeVetoBreakup(items);
+    const parts = [];
+    if (counts.block) parts.push(`<span class="count-block">${counts.block} BLOCK</span>`);
+    if (counts.warn) parts.push(`<span class="count-warn">${counts.warn} WARN</span>`);
+    if (counts.skipped) parts.push(`<span class="count-eased">${counts.skipped} EASED</span>`);
+    if (counts.ok) parts.push(`<span class="count-ok">${counts.ok} OK</span>`);
+    if (!parts.length) return 'Veto breakup';
+    return parts.join(' · ');
+  }
+
+  let vetoDockOpen = false;
+  let vetoDockTouched = false;
+
+  function setVetoDockOpen(open) {
+    vetoDockOpen = open;
+    if (els.vetoDock) {
+      els.vetoDock.classList.toggle('collapsed', !open);
+    }
+    if (els.vetoDockToggle) {
+      els.vetoDockToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+
+  function updateVetoChrome(items) {
+    const sorted = sortVetoBreakupItems(items);
+    const counts = summarizeVetoBreakup(sorted);
+
+    if (els.vetoDockSummary) {
+      els.vetoDockSummary.innerHTML = formatVetoDockSummary(sorted);
+    }
+    if (els.vetoDock) {
+      els.vetoDock.classList.toggle('has-block', counts.block > 0);
+    }
+    if (els.vetoTabBadge) {
+      if (counts.block > 0) {
+        els.vetoTabBadge.textContent = String(counts.block);
+        els.vetoTabBadge.classList.remove('hidden', 'warn-only');
+      } else if (counts.warn > 0) {
+        els.vetoTabBadge.textContent = String(counts.warn);
+        els.vetoTabBadge.classList.remove('hidden');
+        els.vetoTabBadge.classList.add('warn-only');
+      } else {
+        els.vetoTabBadge.textContent = '';
+        els.vetoTabBadge.classList.add('hidden');
+        els.vetoTabBadge.classList.remove('warn-only');
+      }
+    }
+    if (!vetoDockTouched && counts.block > 0) {
+      setVetoDockOpen(true);
+    }
+    return sorted;
+  }
+
+  if (els.vetoDockToggle) {
+    els.vetoDockToggle.addEventListener('click', () => {
+      vetoDockTouched = true;
+      setVetoDockOpen(!vetoDockOpen);
+    });
+  }
+
   function renderVetoBreakup(containers, items, noteText) {
+    const sorted = updateVetoChrome(items);
     const targets = (Array.isArray(containers) ? containers : [containers]).filter(
       Boolean,
     );
     for (const container of targets) {
       container.innerHTML = '';
-      if (!items?.length) {
+      if (!sorted.length) {
         container.innerHTML =
           '<div class="muted" style="font-size:0.72rem">No veto data</div>';
         continue;
       }
 
-      for (const item of items) {
+      for (const item of sorted) {
         const row = document.createElement('div');
         row.className = `veto-row ${item.state || 'ok'}`;
 
@@ -954,7 +1043,7 @@
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
     renderPaDrilldown(data.paDrilldown);
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupComponents],
+      [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup,
       data.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
     );
@@ -1062,7 +1151,7 @@
     renderComponentList(els.paComponents, point.paComponents || [], 'pa');
     renderPaDrilldown(point.paDrilldown);
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupComponents],
+      [els.vetoBreakup, els.vetoBreakupTab],
       point.vetoBreakup || [],
       display.statusSuffix ? display.statusSuffix.replace(/^ · /, '') : '',
     );
@@ -1097,7 +1186,7 @@
     replayOptionComponents = data.optionComponents || [];
     vetoTimeline = data.vetoTimeline || [];
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupComponents],
+      [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup || [],
       '',
     );

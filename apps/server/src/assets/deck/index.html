@@ -39,10 +39,25 @@
 
       <nav class="tab-bar" id="tab-bar">
         <button type="button" class="tab-btn active" data-tab="signal">Signal</button>
-        <button type="button" class="tab-btn" data-tab="components">Components</button>
+        <button type="button" class="tab-btn" data-tab="components">Comp</button>
+        <button type="button" class="tab-btn" data-tab="veto">
+          Veto
+          <span id="veto-tab-badge" class="tab-badge hidden"></span>
+        </button>
         <button type="button" class="tab-btn" data-tab="charts">Charts</button>
         <button type="button" class="tab-btn" data-tab="events">Events</button>
       </nav>
+
+      <section id="veto-dock" class="veto-dock collapsed" aria-label="Veto breakup">
+        <button type="button" id="veto-dock-toggle" class="veto-dock-toggle" aria-expanded="false">
+          <span id="veto-dock-summary" class="veto-dock-summary">Veto breakup</span>
+          <span class="veto-dock-chevron" aria-hidden="true">›</span>
+        </button>
+        <div id="veto-dock-body" class="veto-dock-body">
+          <span id="veto-breakup-note" class="veto-dock-note hidden"></span>
+          <div id="veto-breakup" class="veto-breakup-list"></div>
+        </div>
+      </section>
 
       <div id="tab-signal" class="tab-panel active">
         <section class="gauge-block">
@@ -91,13 +106,6 @@
           </div>
         </section>
 
-        <section class="veto-breakup-block" id="veto-breakup-section">
-          <div class="panel-head">
-            <span>Veto breakup</span>
-            <span id="veto-breakup-note" class="panel-note"></span>
-          </div>
-          <div id="veto-breakup" class="veto-breakup-list"></div>
-        </section>
       </div>
 
       <div id="tab-components" class="tab-panel">
@@ -120,11 +128,15 @@
           <div id="pa-drilldown" class="pa-drilldown"></div>
         </section>
 
-        <section class="component-panel">
+      </div>
+
+      <div id="tab-veto" class="tab-panel">
+        <section class="veto-breakup-block veto-tab-panel">
           <div class="panel-head">
             <span>Veto breakup</span>
+            <span class="panel-note">Sorted: block → warn → eased → ok</span>
           </div>
-          <div id="veto-breakup-components" class="veto-breakup-list"></div>
+          <div id="veto-breakup-tab" class="veto-breakup-list"></div>
         </section>
       </div>
 
