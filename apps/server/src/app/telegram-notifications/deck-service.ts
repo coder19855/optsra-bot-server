@@ -48,6 +48,10 @@ import {
   buildDeckOpenPositions,
   DeckOpenPositionsPayload,
 } from './deck-open-positions';
+import {
+  DeckMarketRegime,
+  resolveDeckMarketRegime,
+} from './market-regime';
 
 function resolveEntryThreshold(
   decision: { convictionThresholds?: { enter?: number } },
@@ -194,6 +198,7 @@ export interface DeckLiveStreamTick {
   vetoReason?: string;
   structuralAction?: string;
   patternContext?: DeckPatternContext;
+  marketRegime: DeckMarketRegime;
 }
 
 export interface DeckLivePayload {
@@ -238,6 +243,7 @@ export interface DeckLivePayload {
   strategyRecommendation: DeckStrategyPayload;
   patternContext?: DeckPatternContext;
   openPositions: DeckOpenPositionsPayload;
+  marketRegime: DeckMarketRegime;
 }
 
 export interface DeckReplayPayload {
@@ -424,6 +430,20 @@ function filterCandlesToIstSession(
     (c) => c.t >= session.fromMs && c.t <= session.closeMs + 5 * 60 * 1000,
   );
   return filtered.length ? filtered : candles;
+}
+
+function extractMarketRegime(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  style: TradingStyle,
+): DeckMarketRegime {
+  const raw = decision._debug?.rawPrice;
+  return resolveDeckMarketRegime({
+    symbol: decision.symbol,
+    tradingStyle: style,
+    mtfScore: raw?.confluence?.mtfScore,
+    aligned: raw?.confluence?.aligned,
+    confluenceContext: raw?.confluenceContext,
+  });
 }
 
 function extractPaDrilldown(
@@ -1011,6 +1031,7 @@ export async function buildDeckLivePayload(
       watchedIndexSymbol: indexSymbol,
       ivRegime: decision.optionFlow?.ivRegime,
     }),
+    marketRegime: extractMarketRegime(decision, style),
   };
 }
 
@@ -1084,6 +1105,7 @@ export async function buildDeckLiveStreamTick(
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     patternContext: extractPatternContext(decision, spotSeries),
+    marketRegime: extractMarketRegime(decision, style),
   };
 }
 

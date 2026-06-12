@@ -165,6 +165,89 @@ body.replay-mode {
   font-size: 0.8rem;
 }
 
+.market-regime {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(37, 43, 54, 0.85);
+  background: rgba(18, 21, 27, 0.55);
+}
+
+.market-regime.trending-up {
+  border-color: rgba(52, 211, 153, 0.28);
+}
+
+.market-regime.trending-down {
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.market-regime.sideways {
+  border-color: rgba(139, 149, 168, 0.35);
+}
+
+.market-regime.transitional {
+  border-color: rgba(245, 158, 11, 0.28);
+}
+
+.market-regime.confirming {
+  opacity: 0.92;
+}
+
+.market-regime-arrow {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  background: rgba(37, 43, 54, 0.9);
+}
+
+.market-regime.trending-up .market-regime-arrow {
+  color: var(--ce);
+}
+
+.market-regime.trending-down .market-regime-arrow {
+  color: var(--pe);
+}
+
+.market-regime.sideways .market-regime-arrow,
+.market-regime.transitional .market-regime-arrow {
+  color: var(--muted);
+}
+
+.market-regime-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.market-regime-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.market-regime-confirm {
+  font-size: 0.58rem;
+  color: #e8b84d;
+}
+
+.market-regime-hint {
+  margin-left: auto;
+  text-align: right;
+  font-size: 0.58rem;
+  line-height: 1.25;
+  color: var(--muted);
+  max-width: 46%;
+}
+
 .tab-bar {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

@@ -67,6 +67,11 @@
     positionsCount: document.getElementById('positions-count'),
     positionsNote: document.getElementById('positions-note'),
     positionsTabBadge: document.getElementById('positions-tab-badge'),
+    marketRegime: document.getElementById('market-regime'),
+    marketRegimeArrow: document.getElementById('market-regime-arrow'),
+    marketRegimeLabel: document.getElementById('market-regime-label'),
+    marketRegimeConfirm: document.getElementById('market-regime-confirm'),
+    marketRegimeHint: document.getElementById('market-regime-hint'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -1081,6 +1086,60 @@
     return String(risk || '').toLowerCase() === 'low' ? 'low' : '';
   }
 
+  function marketRegimeClass(regime) {
+    if (!regime) return '';
+    if (regime.kind === 'sideways') return 'sideways';
+    if (regime.kind === 'transitional') return 'transitional';
+    if (regime.direction === 'down') return 'trending-down';
+    return 'trending-up';
+  }
+
+  function renderMarketRegime(regime) {
+    if (!els.marketRegime) return;
+
+    if (!regime?.kind) {
+      els.marketRegime.classList.add('hidden');
+      return;
+    }
+
+    els.marketRegime.classList.remove(
+      'hidden',
+      'sideways',
+      'transitional',
+      'trending-up',
+      'trending-down',
+      'confirming',
+    );
+    const regimeClass = marketRegimeClass(regime);
+    if (regimeClass) els.marketRegime.classList.add(regimeClass);
+    if (regime.confirming) els.marketRegime.classList.add('confirming');
+
+    if (els.marketRegimeArrow) {
+      els.marketRegimeArrow.textContent = regime.arrow || '↔';
+    }
+    if (els.marketRegimeLabel) {
+      els.marketRegimeLabel.textContent = regime.label || '—';
+    }
+    if (els.marketRegimeConfirm) {
+      if (regime.confirming && regime.rawKind && regime.rawKind !== regime.kind) {
+        const next =
+          regime.rawKind === 'sideways'
+            ? 'sideways'
+            : regime.rawKind === 'trending'
+              ? 'trending'
+              : 'transitional';
+        els.marketRegimeConfirm.textContent = `confirming ${next}…`;
+        els.marketRegimeConfirm.classList.remove('hidden');
+      } else {
+        els.marketRegimeConfirm.textContent = '';
+        els.marketRegimeConfirm.classList.add('hidden');
+      }
+    }
+    if (els.marketRegimeHint) {
+      els.marketRegimeHint.textContent = regime.hint || '';
+    }
+  }
+
   function formatPositionPnl(value) {
     const rounded = Math.round(value);
     const sign = rounded >= 0 ? '+' : '';
@@ -2044,6 +2103,7 @@
   function applyDeckTick(tick) {
     els.clock.textContent = `${formatClock(tick.asOf)} IST`;
     if (tick.flowMode) setFlowModeUi(tick.flowMode);
+    if (tick.marketRegime) renderMarketRegime(tick.marketRegime);
     const tickDisplay = resolveLiveDisplay(tick);
     els.action.textContent = tickDisplay.action;
     updateEntryConviction(
@@ -2143,6 +2203,7 @@
     );
     renderStrategyRecommendation(data.strategyRecommendation);
     renderOpenPositions(data.openPositions);
+    renderMarketRegime(data.marketRegime);
     if (els.optionComponentsNote) {
       if (data.flowMode === 'pa-only') {
         els.optionComponentsNote.textContent =
