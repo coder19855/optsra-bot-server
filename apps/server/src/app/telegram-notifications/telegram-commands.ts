@@ -60,6 +60,10 @@ import {
   tradingStyleLabel,
 } from './style-command';
 import {
+  formatFlowStatusMessage,
+  parseFlowCommandArgs,
+} from './flow-command';
+import {
   formatVetoStatusMessage,
   parseVetoCommandArgs,
 } from './veto-command';
@@ -246,6 +250,8 @@ export class TelegramCommandPoller {
         await this.handleVoice(text, replyChatId);
       } else if (command === '/veto') {
         await this.handleVeto(text, replyChatId);
+      } else if (command === '/flow') {
+        await this.handleFlow(text, replyChatId);
       } else if (command === '/style' || command === '/tradingstyle') {
         await this.handleStyle(text, replyChatId);
       }
@@ -772,6 +778,33 @@ export class TelegramCommandPoller {
       formatStyleStatusMessage(
         this.fastify.telegramNotifications.getTradingStyle(),
       ),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleFlow(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseFlowCommandArgs(text);
+
+    if (parsed.action !== 'status') {
+      await this.fastify.telegramNotifications.setFlowMode(parsed.action);
+      const labels: Record<string, string> = {
+        blend:
+          '✅ <b>Flow mode BLEND</b>\nConviction uses price action + option flow (default).',
+        'pa-only':
+          '📊 <b>Flow mode PA ONLY</b>\nOption score ignored for conviction and conflict gates.',
+      };
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          labels[parsed.action] ?? formatFlowStatusMessage(parsed.action),
+          '<i>Use <code>/flow status</code> for details.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatFlowStatusMessage(this.fastify.telegramNotifications.getFlowMode()),
       this.replyOptions(replyChatId),
     );
   }

@@ -101,6 +101,14 @@ export function formatCommandsReferenceMessage(
     '<code>/veto on</code> — alias for strict',
   ]);
 
+  const flowBlock = commandBlock('📊 <b>Option flow scoring</b>', [
+    '<code>/flow status</code> — blend vs PA-only',
+    '<code>/flow pa</code> — ignore option score, PA drives conviction',
+    '<code>/flow blend</code> — PA + options (default)',
+    '<code>/flow off</code> — alias for PA-only',
+    '<code>/flow on</code> — alias for blend',
+  ]);
+
   const voiceBlock = commandBlock('🎙 <b>Alert personality</b>', [
     '<code>/voice</code> — current style',
     '<code>/voice trader</code> — English · jargon',
@@ -160,6 +168,7 @@ export function formatCommandsReferenceMessage(
     nowBlock,
     styleBlock,
     vetoBlock,
+    flowBlock,
     voiceBlock,
     alertsBlock,
     fyersBlock,
@@ -178,6 +187,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'voice', description: 'Alert language & style' },
   { command: 'style', description: 'Intraday / scalper / positional' },
   { command: 'veto', description: 'Chart veto what-if mode' },
+  { command: 'flow', description: 'PA-only vs blend scoring' },
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },
   { command: 'coach', description: "Grade today's trades" },

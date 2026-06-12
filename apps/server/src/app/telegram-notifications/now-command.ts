@@ -116,7 +116,10 @@ export async function buildNowTelegramMessage(
         fastify,
         watch.symbol,
         watch.tradingStyle,
-        { vetoMode: fastify.telegramNotifications.getVetoMode() },
+        {
+          vetoMode: fastify.telegramNotifications.getVetoMode(),
+          flowMode: fastify.telegramNotifications.getFlowMode(),
+        },
       );
       if (payload) items.push(payload);
     } catch (err) {

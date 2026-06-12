@@ -85,6 +85,11 @@ import {
   StylePreferenceState,
 } from '../telegram-notifications/style-preference';
 import {
+  loadFlowPreference,
+  saveFlowPreference,
+  FlowPreferenceState,
+} from '../telegram-notifications/flow-preference';
+import {
   loadVetoPreference,
   saveVetoPreference,
   VetoPreferenceState,
@@ -168,6 +173,9 @@ export default fp(
     };
     let vetoPreferenceState: VetoPreferenceState = {
       vetoMode: 'strict',
+    };
+    let flowPreferenceState: FlowPreferenceState = {
+      flowMode: 'blend',
     };
     let stylePreferenceState: StylePreferenceState = {
       tradingStyle: initialTradingStyle,
@@ -303,6 +311,7 @@ export default fp(
         tradingStyle,
         {
           vetoMode: vetoPreferenceState.vetoMode,
+          flowMode: flowPreferenceState.flowMode,
           pollContext: options?.pollContext,
         },
       );
@@ -976,6 +985,25 @@ export default fp(
       return isVetoOff();
     }
 
+    function getFlowMode(): import('../types/flow-mode').FlowMode {
+      return flowPreferenceState.flowMode;
+    }
+
+    async function setFlowMode(
+      flowMode: import('../types/flow-mode').FlowMode,
+    ): Promise<import('../types/flow-mode').FlowMode> {
+      flowPreferenceState = await saveFlowPreference(
+        fastify,
+        flowPreferenceState,
+        flowMode,
+      );
+      fastify.log.info(
+        { flowMode: flowPreferenceState.flowMode },
+        'Telegram option flow scoring mode updated',
+      );
+      return flowPreferenceState.flowMode;
+    }
+
     function getTradingStyle(): TradingStyle {
       return stylePreferenceState.tradingStyle;
     }
@@ -1080,6 +1108,8 @@ export default fp(
       isVetoOff,
       setVetoMode,
       setVetoOff,
+      getFlowMode,
+      setFlowMode,
       getTradingStyle,
       setTradingStyle,
       getNewsFeed,
@@ -1110,6 +1140,10 @@ export default fp(
         vetoPreferenceState = await loadVetoPreference(
           fastify,
           vetoPreferenceState,
+        );
+        flowPreferenceState = await loadFlowPreference(
+          fastify,
+          flowPreferenceState,
         );
         stylePreferenceState = await loadStylePreference(
           fastify,

@@ -7,12 +7,16 @@ import {
   PriceActionResponse,
   TradeDecisionResult,
 } from '../types';
+import { FlowMode, isPaOnlyFlow } from '../types/flow-mode';
 import { isVetoOff, VetoMode } from '../types/veto-mode';
 
 export interface DecisionEngineOptions {
   vetoMode?: VetoMode;
   /** @deprecated use vetoMode */
   vetoOff?: boolean;
+  flowMode?: FlowMode;
+  /** @deprecated use flowMode */
+  optionFlowOff?: boolean;
 }
 
 export default fp(
@@ -33,6 +37,10 @@ export default fp(
         options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
       const vetoOff = isVetoOff(vetoMode);
       const vetoRelaxed = vetoMode === 'relaxed';
+      const paOnlyFlow =
+        options?.flowMode != null
+          ? isPaOnlyFlow(options.flowMode)
+          : Boolean(options?.optionFlowOff);
       // Use per-TF primary scoring from the evolved PA engine (style-aware)
       // Primary TF score drives conviction for the chosen style.
       // Alignment is now count of TFs agreeing with primary.
@@ -225,15 +233,18 @@ export default fp(
       const { priceActionWeight, optionFlowWeight, convictionThreshold } =
         scoringConfig;
 
-      let blended =
-        priceConviction * priceActionWeight +
-        optionConviction * optionFlowWeight;
+      let blended = paOnlyFlow
+        ? priceConviction
+        : priceConviction * priceActionWeight +
+          optionConviction * optionFlowWeight;
 
       // Alignment & conflict
       let alignment = 0;
       let conflictLevel: 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH' = 'NONE';
 
-      if (priceDirection === optionDirection && priceDirection !== 'neutral') {
+      if (paOnlyFlow) {
+        alignment = aligned >= 2 ? 3 : aligned === 1 ? 2 : 0;
+      } else if (priceDirection === optionDirection && priceDirection !== 'neutral') {
         alignment = 3;
         blended += 18;
       } else if (
@@ -263,10 +274,12 @@ export default fp(
       }
       if (higherTFConfirm) blended += 8;
 
-      if (optionComponentStrength > 0.35 && priceDirection === 'bullish')
-        blended += 12;
-      if (optionComponentStrength < -0.35 && priceDirection === 'bearish')
-        blended += 12;
+      if (!paOnlyFlow) {
+        if (optionComponentStrength > 0.35 && priceDirection === 'bullish')
+          blended += 12;
+        if (optionComponentStrength < -0.35 && priceDirection === 'bearish')
+          blended += 12;
+      }
 
       // ADX for trend strength (benefits all styles, especially when structure is present)
       const priceAdx = (price as any).adx || {};
@@ -291,15 +304,16 @@ export default fp(
       const mediumThreshold = convictionThreshold.medium;
       const strongThreshold = convictionThreshold.strong;
 
-      const optionStronglyAgainst = vetoOff
-        ? false
-        : (priceDirection === 'bullish' && optionDirection === 'bearish') ||
-          (priceDirection === 'bearish' && optionDirection === 'bullish') ||
-          (option.components &&
-            ((priceDirection === 'bullish' &&
-              (option.components.greeks ?? 0) < -0.5) ||
-              (priceDirection === 'bearish' &&
-                (option.components.greeks ?? 0) > 0.5)));
+      const optionStronglyAgainst =
+        paOnlyFlow || vetoOff
+          ? false
+          : (priceDirection === 'bullish' && optionDirection === 'bearish') ||
+            (priceDirection === 'bearish' && optionDirection === 'bullish') ||
+            (option.components &&
+              ((priceDirection === 'bullish' &&
+                (option.components.greeks ?? 0) < -0.5) ||
+                (priceDirection === 'bearish' &&
+                  (option.components.greeks ?? 0) > 0.5)));
 
       const structuralGatesOk =
         (vetoOff || vetoRelaxed || conflictLevel !== 'HIGH') &&
@@ -314,7 +328,7 @@ export default fp(
         action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
       } else if (
         conviction >= mediumThreshold &&
-        priceDirection === optionDirection &&
+        (paOnlyFlow || priceDirection === optionDirection) &&
         priceDirection !== 'neutral' &&
         structuralGatesOk
       ) {

@@ -40,7 +40,9 @@ import {
   nearestOptionChainSnapshot,
 } from './option-chain-snapshot-store';
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
+import { loadFlowPreference } from './flow-preference';
 import { loadVetoPreference, VetoMode } from './veto-preference';
+import { FlowMode } from '../types/flow-mode';
 import { isVetoOff } from '../types/veto-mode';
 
 function resolveEntryThreshold(
@@ -204,6 +206,7 @@ export interface DeckLivePayload {
   chartVetoed: boolean;
   vetoMode: VetoMode;
   vetoOff: boolean;
+  flowMode: FlowMode;
   gauges: ReturnType<typeof buildDeckGauges>;
   lanes: {
     optionPercent: number;
@@ -250,6 +253,7 @@ export interface DeckReplayPayload {
   optionComponentsNote: string;
   vetoTimeline: DeckVetoPoint[];
   vetoMode: VetoMode;
+  flowMode: FlowMode;
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   pnlNote?: string;
@@ -260,11 +264,13 @@ async function fetchTradeDecision(
   symbol: string,
   tradingStyle: TradingStyle,
   vetoMode: VetoMode = 'strict',
+  flowMode: FlowMode = 'blend',
 ) {
   const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
+  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
   const res = await fastify.inject({
     method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}`,
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
   });
   if (res.statusCode !== 200) {
     throw new Error(`trade-decision failed (${res.statusCode})`);
@@ -888,11 +894,13 @@ export async function buildDeckLivePayload(
 ): Promise<DeckLivePayload> {
   const style = parseTradingStyle(params.tradingStyle);
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
+  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
   const decision = await fetchTradeDecision(
     fastify,
     params.symbol,
     style,
     vetoState.vetoMode,
+    flowState.flowMode,
   );
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
@@ -945,6 +953,7 @@ export async function buildDeckLivePayload(
     chartVetoed,
     vetoMode: vetoState.vetoMode,
     vetoOff: isVetoOff(vetoState.vetoMode),
+    flowMode: flowState.flowMode,
     gauges,
     lanes: {
       optionPercent: option,
@@ -995,11 +1004,13 @@ export async function buildDeckLiveStreamTick(
 ): Promise<DeckLiveStreamTick> {
   const style = parseTradingStyle(params.tradingStyle);
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
+  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
   const decision = await fetchTradeDecision(
     fastify,
     params.symbol,
     style,
     vetoState.vetoMode,
+    flowState.flowMode,
   );
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
@@ -1067,11 +1078,13 @@ export async function buildDeckReplayPayload(
   const date = params.sessionDate ?? sessionDate;
 
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
+  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
   const decision = await fetchTradeDecision(
     fastify,
     params.symbol,
     style,
     vetoState.vetoMode,
+    flowState.flowMode,
   );
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
@@ -1199,6 +1212,7 @@ export async function buildDeckReplayPayload(
       : 'Option chain breakdown is a live read until snapshots accumulate · scrub updates price-action components per minute',
     vetoTimeline: timelineToVetoSeries(points),
     vetoMode: vetoState.vetoMode,
+    flowMode: flowState.flowMode,
     vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     strategyRecommendation: extractDeckStrategyPayload(decision, {
       replayNote:

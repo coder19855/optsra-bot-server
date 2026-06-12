@@ -117,7 +117,10 @@ export async function resolveWhyContext(
       fastify,
       args.symbol,
       args.style,
-      { vetoMode: fastify.telegramNotifications.getVetoMode() },
+      {
+        vetoMode: fastify.telegramNotifications.getVetoMode(),
+        flowMode: fastify.telegramNotifications.getFlowMode(),
+      },
     );
     if (!payload?.whyContext) {
       return { why: null, error: 'Could not build a live signal breakdown.' };

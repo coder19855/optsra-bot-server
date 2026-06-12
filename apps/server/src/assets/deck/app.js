@@ -1768,8 +1768,14 @@
     );
     renderStrategyRecommendation(data.strategyRecommendation);
     if (els.optionComponentsNote) {
-      els.optionComponentsNote.classList.add('hidden');
-      els.optionComponentsNote.textContent = '';
+      if (data.flowMode === 'pa-only') {
+        els.optionComponentsNote.textContent =
+          'PA-only mode (/flow pa) — option components shown for reference, not used in conviction';
+        els.optionComponentsNote.classList.remove('hidden');
+      } else {
+        els.optionComponentsNote.classList.add('hidden');
+        els.optionComponentsNote.textContent = '';
+      }
     }
     if (els.vetoSection) {
       vetoTimeline = data.vetoTimeline || [];

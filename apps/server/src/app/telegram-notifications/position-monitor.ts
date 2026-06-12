@@ -495,6 +495,7 @@ export async function evaluateOpenPositionTpAlerts(
           params.tradingStyle,
           {
             vetoMode: fastify.telegramNotifications.getVetoMode(),
+            flowMode: fastify.telegramNotifications.getFlowMode(),
             pollContext: params.pollContext,
           },
         );

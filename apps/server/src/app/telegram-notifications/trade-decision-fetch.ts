@@ -66,21 +66,29 @@ export async function fetchTradeDecisionAlert(
     vetoMode?: import('../types/veto-mode').VetoMode;
     /** @deprecated use vetoMode */
     vetoOff?: boolean;
+    flowMode?: import('../types/flow-mode').FlowMode;
     pollContext?: PollMarketDataContext;
   },
 ): Promise<TradeDecisionAlertPayload | null> {
   const vetoMode =
     options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
-  const cacheKey = pollTradeDecisionCacheKey(symbol, tradingStyle, vetoMode);
+  const flowMode = options?.flowMode ?? 'blend';
+  const cacheKey = pollTradeDecisionCacheKey(
+    symbol,
+    tradingStyle,
+    vetoMode,
+    flowMode,
+  );
   const cached = options?.pollContext?.tradeDecisionCache.get(cacheKey);
   if (cached) {
     return cached;
   }
 
   const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
+  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
   const res = await fastify.inject({
     method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}`,
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
   });
 
   if (res.statusCode !== 200) {
