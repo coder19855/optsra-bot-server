@@ -1316,10 +1316,8 @@
 
   const DEFAULT_CANDLE_MS = 5 * 60 * 1000;
 
-  function candleIntervalMs(candles) {
-    if (!candles?.length || candles.length < 2) return DEFAULT_CANDLE_MS;
-    const step = candles[candles.length - 1].t - candles[candles.length - 2].t;
-    return step > 0 && step <= 60 * 60 * 1000 ? step : DEFAULT_CANDLE_MS;
+  function spotCandleAnchorMs(t) {
+    return buildIstSessionBounds(t).fromMs;
   }
 
   function bucketStartMs(t, intervalMs, anchorMs) {
@@ -1348,8 +1346,8 @@
       .sort((a, b) => a.t - b.t);
     if (!sorted.length) return [];
 
-    const intervalMs = candleIntervalMs(sorted);
-    const anchorMs = sorted[0].t;
+    const intervalMs = DEFAULT_CANDLE_MS;
+    const anchorMs = spotCandleAnchorMs(sorted[sorted.length - 1].t);
     const buckets = new Map();
 
     for (const point of sorted) {
@@ -1402,8 +1400,10 @@
   }
 
   function resolveSpotCandles(data) {
-    if (data.spotCandles?.length) return data.spotCandles;
-    return spotSeriesToCandles(data.spotSeries);
+    if (data.spotCandles?.length) {
+      return normalizeSpotCandles(data.spotCandles);
+    }
+    return normalizeSpotCandles(spotSeriesToCandles(data.spotSeries));
   }
 
   function spotValueNearTime(ms) {
@@ -1661,18 +1661,36 @@
     pnlSeries.setData(toChartData(series));
   }
 
-  function mergeSpotSeriesTail(candles, tail) {
-    if (!tail?.length) return candles || [];
-    const base = candles || [];
-    const intervalMs = candleIntervalMs(base);
-    const anchorMs = base[0]?.t ?? tail[0].t;
-    const firstBucket = bucketStartMs(tail[0].t, intervalMs, anchorMs);
-    const preserved = base.filter((p) => p.t < firstBucket);
-    const overlap = base.filter((p) => p.t >= firstBucket);
-    const tickCandles = tail
-      .filter((p) => p.t && p.v != null)
-      .map((p) => ({ t: p.t, o: p.v, h: p.v, l: p.v, c: p.v }));
-    return normalizeSpotCandles([...preserved, ...overlap, ...tickCandles]);
+  function updateFormingSpotCandle(candles, price, atMs) {
+    if (!candles?.length || price == null || !atMs) return candles || [];
+    const anchorMs = spotCandleAnchorMs(atMs);
+    const bucketT = bucketStartMs(atMs, DEFAULT_CANDLE_MS, anchorMs);
+    const next = candles.map((c) => ({ ...c }));
+    const last = next[next.length - 1];
+
+    if (last.t === bucketT) {
+      next[next.length - 1] = {
+        ...last,
+        h: Math.max(last.h, price),
+        l: Math.min(last.l, price),
+        c: price,
+      };
+      return next;
+    }
+    if (last.t < bucketT) {
+      next.push({
+        t: bucketT,
+        o: price,
+        h: price,
+        l: price,
+        c: price,
+      });
+      return next;
+    }
+    return normalizeSpotCandles([
+      ...next,
+      { t: atMs, o: price, h: price, l: price, c: price },
+    ]);
   }
 
   function applyDeckTick(tick) {
@@ -1712,8 +1730,13 @@
       tick.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
     );
 
-    if (tick.spotSeries?.length) {
-      spotCandlesPayload = mergeSpotSeriesTail(spotCandlesPayload, tick.spotSeries);
+    if (tick.lastPrice != null && spotCandlesPayload.length) {
+      const atMs = tick.asOf ? new Date(tick.asOf).getTime() : Date.now();
+      spotCandlesPayload = updateFormingSpotCandle(
+        spotCandlesPayload,
+        tick.lastPrice,
+        atMs,
+      );
       updateSpotSeries(spotCandlesPayload, null, tick.action);
     }
     renderPatternContext(
@@ -1799,6 +1822,14 @@
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
+    if (data.lastPrice != null && spotCandlesPayload.length) {
+      const atMs = data.asOf ? new Date(data.asOf).getTime() : Date.now();
+      spotCandlesPayload = updateFormingSpotCandle(
+        spotCandlesPayload,
+        data.lastPrice,
+        atMs,
+      );
+    }
     updateSpotSeries(spotCandlesPayload, null, data.action);
     renderPatternContext(
       data.patternContext ?? {
