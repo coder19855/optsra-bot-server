@@ -425,6 +425,55 @@ export function buildGreeksStrikeInsight(
   };
 }
 
+function resolveLegMoneyness(
+  strike: number,
+  atmStrike: number,
+  optionSide: 'CE' | 'PE',
+): GreeksMoneyness {
+  if (strike === atmStrike) return 'ATM';
+  if (optionSide === 'CE') return strike < atmStrike ? 'ITM' : 'OTM';
+  return strike > atmStrike ? 'ITM' : 'OTM';
+}
+
+/** Greeks profile for a specific open-leg strike (not only ATM/ITM/OTM ladder). */
+export function buildLegGreeksProfile(params: {
+  chain: FyersAPI.OptionChainData[];
+  spot: number;
+  optionSide: 'CE' | 'PE';
+  strike: number;
+  ivRegime?: string;
+  context?: GreeksStrikeContext;
+}): GreeksStrikeProfile | null {
+  const { chain, spot, optionSide, strike, ivRegime, context } = params;
+  if (chain.length === 0 || spot <= 0 || strike <= 0) return null;
+
+  const optionType = optionSide === 'CE' ? OptionType.CE : OptionType.PE;
+  const sideChain = chain.filter((row) => row.option_type === optionType);
+  if (sideChain.length === 0) return null;
+
+  const row = findRow(sideChain, strike, optionType);
+  if (!row) return null;
+
+  const lotSize = resolveLotSize(context?.indexSymbol);
+  const daysToExpiry = daysToNearestExpiry(context?.expiryData);
+  const strikes = sortedStrikes(sideChain);
+  const atmStrike = nearestAtmStrike(strikes, spot);
+  const atmRow = findRow(sideChain, atmStrike, optionType);
+  const atmGamma = atmRow?.greeks?.gamma ?? null;
+  const moneyness = resolveLegMoneyness(strike, atmStrike, optionSide);
+
+  return buildProfile(
+    moneyness,
+    row,
+    atmGamma,
+    optionSide,
+    ivRegime,
+    spot,
+    daysToExpiry,
+    lotSize,
+  );
+}
+
 export function buildGreeksStrikeInsightPair(
   chain: FyersAPI.OptionChainData[],
   spot: number,

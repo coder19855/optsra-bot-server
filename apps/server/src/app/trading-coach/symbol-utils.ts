@@ -47,6 +47,45 @@ export function getIstSessionDate(epochMs: number): string {
   }).format(new Date(epochMs));
 }
 
+const STRIKE_PARSE_UNDERLYINGS = [
+  'NIFTYNXT50',
+  'NIFTYBANK',
+  'BANKNIFTY',
+  'MIDCPNIFTY',
+  'FINNIFTY',
+  'NIFTY',
+  'SENSEX',
+  'BANKEX',
+] as const;
+
+/** Parse strike from Fyers option symbology, e.g. NSE:NIFTY2661623200CE → 23200. */
+export function parseStrikeFromFyersOptionSymbol(optionSymbol: string): number | null {
+  const token = optionSymbol.split(':').pop()?.toUpperCase() ?? '';
+  if (!token.endsWith('CE') && !token.endsWith('PE')) return null;
+
+  const withoutSuffix = token.slice(0, -2);
+  const underlying =
+    STRIKE_PARSE_UNDERLYINGS.find((name) => withoutSuffix.startsWith(name)) ??
+    null;
+  if (!underlying) return null;
+
+  const rest = withoutSuffix.slice(underlying.length);
+  if (!rest || !/^\d+$/.test(rest)) return null;
+
+  for (const strikeLen of [5, 4, 6]) {
+    if (rest.length <= strikeLen) continue;
+    const strikePart = rest.slice(-strikeLen);
+    const expiryPart = rest.slice(0, -strikeLen);
+    if (!/^\d+$/.test(strikePart) || !/^\d+$/.test(expiryPart)) continue;
+    if (expiryPart.length < 4) continue;
+
+    const strike = Number(strikePart);
+    if (Number.isFinite(strike) && strike > 0) return strike;
+  }
+
+  return null;
+}
+
 export function resolveOptionMeta(optionSymbol: string): {
   underlying: string;
   indexSymbol: string;

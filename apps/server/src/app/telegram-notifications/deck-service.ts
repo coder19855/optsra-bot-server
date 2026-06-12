@@ -44,6 +44,10 @@ import { loadFlowPreference } from './flow-preference';
 import { loadVetoPreference, VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
 import { isVetoOff } from '../types/veto-mode';
+import {
+  buildDeckOpenPositions,
+  DeckOpenPositionsPayload,
+} from './deck-open-positions';
 
 function resolveEntryThreshold(
   decision: { convictionThresholds?: { enter?: number } },
@@ -233,6 +237,7 @@ export interface DeckLivePayload {
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   patternContext?: DeckPatternContext;
+  openPositions: DeckOpenPositionsPayload;
 }
 
 export interface DeckReplayPayload {
@@ -1002,6 +1007,10 @@ export async function buildDeckLivePayload(
     paDrilldown: extractPaDrilldown(decision),
     strategyRecommendation: extractDeckStrategyPayload(decision),
     patternContext: extractPatternContext(decision, spotSeries),
+    openPositions: await buildDeckOpenPositions(fastify, {
+      watchedIndexSymbol: indexSymbol,
+      ivRegime: decision.optionFlow?.ivRegime,
+    }),
   };
 }
 

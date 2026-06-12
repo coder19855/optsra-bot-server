@@ -50,6 +50,10 @@
           <span id="veto-tab-badge" class="tab-badge hidden"></span>
         </button>
         <button type="button" class="tab-btn" data-tab="strategy">Strat</button>
+        <button type="button" class="tab-btn" data-tab="positions">
+          Open
+          <span id="positions-tab-badge" class="tab-badge hidden"></span>
+        </button>
         <button type="button" class="tab-btn" data-tab="charts">Chart</button>
         <button type="button" class="tab-btn" data-tab="events">Events</button>
       </nav>
@@ -157,6 +161,18 @@
       <div id="tab-strategy" class="tab-panel">
         <p id="strategy-replay-note" class="strategy-replay-note hidden" role="status"></p>
         <div id="strategy-content" class="strategy-content"></div>
+      </div>
+
+      <div id="tab-positions" class="tab-panel">
+        <section class="positions-panel">
+          <div class="panel-head">
+            <span>Open entries</span>
+            <span id="positions-count" class="panel-note">—</span>
+          </div>
+          <p class="positions-hint">Live Fyers legs · greeks impact on your hold</p>
+          <p id="positions-note" class="positions-note hidden" role="status"></p>
+          <div id="positions-list" class="positions-list"></div>
+        </section>
       </div>
 
       <div id="tab-charts" class="tab-panel">

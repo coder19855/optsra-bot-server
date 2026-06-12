@@ -63,6 +63,10 @@
     componentsVetoNotice: document.getElementById('components-veto-notice'),
     strategyContent: document.getElementById('strategy-content'),
     strategyReplayNote: document.getElementById('strategy-replay-note'),
+    positionsList: document.getElementById('positions-list'),
+    positionsCount: document.getElementById('positions-count'),
+    positionsNote: document.getElementById('positions-note'),
+    positionsTabBadge: document.getElementById('positions-tab-badge'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -1077,6 +1081,156 @@
     return String(risk || '').toLowerCase() === 'low' ? 'low' : '';
   }
 
+  function formatPositionPnl(value) {
+    const rounded = Math.round(value);
+    const sign = rounded >= 0 ? '+' : '';
+    return `${sign}₹${rounded}`;
+  }
+
+  function positionPnlClass(value) {
+    if (value > 0) return 'up';
+    if (value < 0) return 'down';
+    return '';
+  }
+
+  function renderOpenPositions(payload) {
+    if (!els.positionsList) return;
+
+    const entries = payload?.entries || [];
+    els.positionsList.innerHTML = '';
+
+    if (els.positionsCount) {
+      els.positionsCount.textContent = entries.length
+        ? `${entries.length} leg${entries.length === 1 ? '' : 's'}`
+        : '—';
+    }
+
+    if (els.positionsTabBadge) {
+      if (entries.length > 0) {
+        els.positionsTabBadge.textContent = String(entries.length);
+        els.positionsTabBadge.classList.remove('hidden');
+        els.positionsTabBadge.classList.remove('warn-only');
+      } else {
+        els.positionsTabBadge.textContent = '';
+        els.positionsTabBadge.classList.add('hidden');
+      }
+    }
+
+    if (els.positionsNote) {
+      if (payload?.note) {
+        els.positionsNote.textContent = payload.note;
+        els.positionsNote.classList.remove('hidden');
+      } else {
+        els.positionsNote.textContent = '';
+        els.positionsNote.classList.add('hidden');
+      }
+    }
+
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'muted';
+      empty.style.fontSize = '0.72rem';
+      empty.textContent =
+        payload?.note || 'No open index option legs in your Fyers account.';
+      els.positionsList.appendChild(empty);
+      return;
+    }
+
+    for (const entry of entries) {
+      const card = document.createElement('article');
+      card.className = `position-card${entry.isWatchedIndex ? ' watched' : ''}`;
+
+      const head = document.createElement('div');
+      head.className = 'position-card-head';
+
+      const titleWrap = document.createElement('div');
+      const symbol = document.createElement('div');
+      symbol.className = 'position-symbol';
+      symbol.textContent = entry.optionLabel;
+      const index = document.createElement('div');
+      index.className = 'position-index';
+      index.textContent = entry.indexLabel;
+      titleWrap.append(symbol, index);
+
+      const pnl = document.createElement('div');
+      pnl.className = `position-pnl ${positionPnlClass(entry.unrealizedPnl)}`;
+      pnl.textContent = formatPositionPnl(entry.unrealizedPnl);
+      head.append(titleWrap, pnl);
+      card.appendChild(head);
+
+      const pills = document.createElement('div');
+      pills.className = 'position-meta-row';
+      const dirPill = document.createElement('span');
+      dirPill.className = `position-pill ${entry.direction === 'CE-BUY' ? 'ce' : 'pe'}`;
+      dirPill.textContent = entry.direction;
+      pills.appendChild(dirPill);
+      if (entry.moneyness) {
+        const moneyPill = document.createElement('span');
+        moneyPill.className = 'position-pill';
+        moneyPill.textContent = entry.moneyness;
+        pills.appendChild(moneyPill);
+      }
+      if (entry.gammaLevel) {
+        const gammaPill = document.createElement('span');
+        gammaPill.className = `position-pill ${entry.gammaLevel === 'high' ? 'warn' : ''}`;
+        gammaPill.textContent = `${entry.gammaLevel} γ`;
+        pills.appendChild(gammaPill);
+      }
+      if (entry.isWatchedIndex) {
+        const watchPill = document.createElement('span');
+        watchPill.className = 'position-pill good';
+        watchPill.textContent = 'Watched';
+        pills.appendChild(watchPill);
+      }
+      card.appendChild(pills);
+
+      const stats = document.createElement('div');
+      stats.className = 'position-stats';
+      const statDefs = [
+        ['Qty', `${entry.netQty} (${entry.lots.toFixed(1)} lots)`],
+        ['Strike', entry.strike != null ? String(entry.strike) : '—'],
+        ['Avg', entry.buyAvg > 0 ? `₹${entry.buyAvg.toFixed(2)}` : '—'],
+        ['LTP', entry.ltp != null ? `₹${entry.ltp.toFixed(2)}` : '—'],
+        ['Delta', entry.delta != null ? entry.delta.toFixed(2) : '—'],
+        ['Spot', entry.spot != null ? entry.spot.toFixed(2) : '—'],
+      ];
+      for (const [label, value] of statDefs) {
+        const stat = document.createElement('div');
+        stat.className = 'position-stat';
+        stat.innerHTML = `${label}<strong>${value}</strong>`;
+        stats.appendChild(stat);
+      }
+      card.appendChild(stats);
+
+      const impact = entry.greeksImpact || {};
+      const impactLines = [
+        impact.summary,
+        impact.move50PtsNote,
+        impact.deltaNote,
+        impact.gammaNote,
+        impact.thetaNote,
+      ].filter(Boolean);
+
+      if (impactLines.length) {
+        const greeks = document.createElement('div');
+        greeks.className = 'position-greeks';
+        const title = document.createElement('div');
+        title.className = 'position-greeks-title';
+        title.textContent = 'Greeks impact';
+        greeks.appendChild(title);
+        for (const line of impactLines) {
+          const row = document.createElement('div');
+          row.className = 'position-greek-row';
+          row.textContent = line;
+          greeks.appendChild(row);
+        }
+        card.appendChild(greeks);
+      }
+
+      els.positionsList.appendChild(card);
+    }
+  }
+
   function renderStrategyRecommendation(payload) {
     if (!els.strategyContent) return;
     els.strategyContent.innerHTML = '';
@@ -1988,6 +2142,7 @@
       buildFlowVetoContext(data),
     );
     renderStrategyRecommendation(data.strategyRecommendation);
+    renderOpenPositions(data.openPositions);
     if (els.optionComponentsNote) {
       if (data.flowMode === 'pa-only') {
         els.optionComponentsNote.textContent =

@@ -1338,6 +1338,152 @@ body.flow-option-only .flow-pa-lane {
   border-top: 0;
 }
 
+.positions-panel {
+  padding: 0 2px;
+}
+
+.positions-hint {
+  margin: 0 0 10px;
+  font-size: 0.64rem;
+  color: var(--muted);
+}
+
+.positions-note {
+  margin: 0 0 10px;
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+
+.positions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.position-card {
+  border: 1px solid rgba(37, 43, 54, 0.85);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(18, 21, 27, 0.55);
+}
+
+.position-card.watched {
+  border-color: rgba(88, 166, 255, 0.35);
+}
+
+.position-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.position-symbol {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.position-index {
+  font-size: 0.6rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.position-pnl {
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.position-pnl.up {
+  color: var(--ce);
+}
+
+.position-pnl.down {
+  color: var(--pe);
+}
+
+.position-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.position-pill {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(37, 43, 54, 0.9);
+  color: var(--muted);
+}
+
+.position-pill.ce {
+  color: var(--ce);
+}
+
+.position-pill.pe {
+  color: var(--pe);
+}
+
+.position-pill.good {
+  color: var(--ce);
+}
+
+.position-pill.warn {
+  color: #e8b84d;
+}
+
+.position-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+
+.position-stat {
+  font-size: 0.62rem;
+  color: var(--muted);
+}
+
+.position-stat strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+.position-greeks {
+  border-top: 1px solid rgba(37, 43, 54, 0.65);
+  padding-top: 8px;
+}
+
+.position-greeks-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.position-greek-row {
+  font-size: 0.63rem;
+  line-height: 1.35;
+  padding: 4px 0;
+  border-top: 1px solid rgba(37, 43, 54, 0.45);
+}
+
+.position-greek-row:first-of-type {
+  border-top: 0;
+}
+
 .hidden {
   display: none !important;
 }

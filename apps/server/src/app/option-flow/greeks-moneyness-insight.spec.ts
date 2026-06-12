@@ -4,6 +4,7 @@ import { TradingStyle } from '../types/trading-style';
 import {
   buildGreeksStrikeInsight,
   buildGreeksStrikeInsightPair,
+  buildLegGreeksProfile,
   formatThetaDecayLabel,
 } from './greeks-moneyness-insight';
 
@@ -63,6 +64,20 @@ describe('buildGreeksStrikeInsight', () => {
     expect(
       buildGreeksStrikeInsight([], 25000, 'PE', TradingStyle.Scalper),
     ).toBeNull();
+  });
+
+  it('builds profile for a specific strike leg', () => {
+    const profile = buildLegGreeksProfile({
+      chain: chainWithGreeks(),
+      spot: 25000,
+      optionSide: 'CE',
+      strike: 24900,
+      ivRegime: 'Normal IV',
+      context: { indexSymbol: 'NSE:NIFTY50-INDEX' },
+    });
+    expect(profile?.strike).toBe(24900);
+    expect(profile?.moneyness).toBe('ITM');
+    expect(profile?.consequence).toEqual(expect.any(String));
   });
 
   it('builds CE/PE pair', () => {
