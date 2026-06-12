@@ -119,6 +119,11 @@ export interface DeckReplayPoint {
   spot: number;
   optionNeedle: number;
   paNeedle: number;
+  /** Lane fill % — matches live `gauges.option.percent` when liveSynced. */
+  optionPercent?: number;
+  /** Lane fill % — matches live `gauges.priceAction.percent` when liveSynced. */
+  paPercent?: number;
+  paGhost?: number | null;
   conviction: number;
   action: string;
   vetoed: boolean;
@@ -130,6 +135,8 @@ export interface DeckReplayPoint {
   paDrilldown?: PaDrilldown;
   optionComponents?: DeckComponentGauge[];
   vetoBreakup?: DeckVetoBreakupItem[];
+  /** Last scrub point overwritten from trade-decision so replay max === live. */
+  liveSynced?: boolean;
 }
 
 export interface DeckVetoPoint {
@@ -230,6 +237,7 @@ export interface DeckReplayPayload {
   symbolLabel: string;
   tradingStyle: string;
   sessionDate: string;
+  entryThreshold: number;
   gauges: ReturnType<typeof buildDeckGauges>;
   replayPoints: DeckReplayPoint[];
   spotSeries: DeckSpotPoint[];
@@ -615,6 +623,91 @@ async function resolveSpotCandles(
   return resolved;
 }
 
+function computeWhatIfFromGauges(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  gauges: ReturnType<typeof buildDeckGauges>,
+): { action: string; conviction: number } {
+  const paValue = gauges.priceAction.value;
+  let action =
+    decision.priceAction.overallSignal.structuralAction ?? decision.action;
+  if (action === 'NO-TRADE' && Math.abs(paValue) >= 0.1) {
+    action = paValue > 0 ? 'CE-BUY' : 'PE-BUY';
+  }
+  if (action === 'NO-TRADE') {
+    return { action: 'NO-TRADE', conviction: 0 };
+  }
+  const conviction = Math.round(
+    Math.min(90, Math.max(20, Math.abs(paValue) * 100)),
+  );
+  return { action, conviction };
+}
+
+function liveChartVetoed(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  vetoMode: VetoMode,
+): boolean {
+  return (
+    !isVetoOff(vetoMode) &&
+    (decision.priceAction.overallSignal.confidence === 0 ||
+      (decision.action === 'NO-TRADE' &&
+        decision.priceAction.overallSignal.action !== 'NO-TRADE'))
+  );
+}
+
+function buildReplayPointFromLiveDecision(
+  base: DeckReplayPoint,
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  gauges: ReturnType<typeof buildDeckGauges>,
+  vetoMode: VetoMode,
+  liveSpot?: number,
+): DeckReplayPoint {
+  const components = extractComponentGauges(decision);
+  const whatIf = computeWhatIfFromGauges(decision, gauges);
+
+  return {
+    ...base,
+    spot: liveSpot ?? base.spot,
+    optionNeedle: gauges.option.value,
+    paNeedle: gauges.priceAction.value,
+    optionPercent: gauges.option.percent,
+    paPercent: gauges.priceAction.percent,
+    paGhost: gauges.priceAction.ghost,
+    conviction: decision.conviction,
+    action: decision.action,
+    vetoed: liveChartVetoed(decision, vetoMode),
+    vetoReason: decision.priceAction.overallSignal.vetoReason,
+    structuralAction: decision.priceAction.overallSignal.structuralAction,
+    whatIfAction: whatIf.action,
+    whatIfConviction: whatIf.conviction,
+    paComponents: components.priceActionComponents,
+    paDrilldown: extractPaDrilldown(decision),
+    optionComponents: components.optionComponents,
+    vetoBreakup: extractVetoBreakup(decision, vetoMode),
+    liveSynced: true,
+  };
+}
+
+function syncLastReplayPointToLive(
+  replayPoints: DeckReplayPoint[],
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  gauges: ReturnType<typeof buildDeckGauges>,
+  vetoMode: VetoMode,
+  liveSpot?: number,
+): DeckReplayPoint[] {
+  if (!replayPoints.length) return replayPoints;
+  const last = replayPoints.length - 1;
+  return [
+    ...replayPoints.slice(0, last),
+    buildReplayPointFromLiveDecision(
+      replayPoints[last],
+      decision,
+      gauges,
+      vetoMode,
+      liveSpot,
+    ),
+  ];
+}
+
 function computeWhatIfSignal(
   p: TimelinePoint,
   primaryTf: '5m' | '15m' | '1h',
@@ -835,11 +928,7 @@ export async function buildDeckLivePayload(
     streamSpotSeries,
   );
 
-  const chartVetoed =
-    !isVetoOff(vetoState.vetoMode) &&
-    (decision.priceAction.overallSignal.confidence === 0 ||
-      (decision.action === 'NO-TRADE' &&
-        decision.priceAction.overallSignal.action !== 'NO-TRADE'));
+  const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
 
   return {
     mode: 'live',
@@ -938,11 +1027,7 @@ export async function buildDeckLiveStreamTick(
   const spotSeries =
     fastify.fyersMarketStream?.getSpotSeries(indexSymbol) ?? [];
 
-  const chartVetoed =
-    !isVetoOff(vetoState.vetoMode) &&
-    (decision.priceAction.overallSignal.confidence === 0 ||
-      (decision.action === 'NO-TRADE' &&
-        decision.priceAction.overallSignal.action !== 'NO-TRADE'));
+  const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
 
   return {
     type: 'tick',
@@ -1015,12 +1100,28 @@ export async function buildDeckReplayPayload(
     style,
     date,
   );
-  const replayPoints = timelineToConvictionSeries(
+  let replayPoints = timelineToConvictionSeries(
     points,
     style,
     optionSnapshots,
     vetoState.vetoMode,
   );
+  const isCurrentSession = date === sessionDate;
+  if (isCurrentSession && replayPoints.length > 0) {
+    const indexSymbol = decision.symbol || params.symbol;
+    const liveSpot = resolveLiveIndexPrice(
+      fastify,
+      indexSymbol,
+      decision.lastPrice,
+    );
+    replayPoints = syncLastReplayPointToLive(
+      replayPoints,
+      decision,
+      gauges,
+      vetoState.vetoMode,
+      liveSpot,
+    );
+  }
   const hasHistoricalOptions = optionSnapshots.length > 0;
 
   const trades: DeckTradeMarker[] = [];
@@ -1070,6 +1171,7 @@ export async function buildDeckReplayPayload(
     symbolLabel: shortSymbol(decision.symbol || params.symbol),
     tradingStyle: String(style),
     sessionDate: date,
+    entryThreshold: resolveEntryThreshold(decision, style),
     gauges,
     replayPoints,
     spotSeries: timelineToSpotSeries(points),

@@ -81,6 +81,8 @@
   let pnlSeries = null;
   let replayPoints = [];
   let replayOptionComponents = [];
+  let replayGauges = null;
+  let replayEntryThreshold = 60;
   let vetoTimeline = [];
   let deckEvents = [];
   let activeTab = 'signal';
@@ -1792,23 +1794,30 @@
     };
   }
 
-  function applyReplayIndex(index) {
-    if (!replayPoints.length) return;
-    const point = replayPoints[Math.max(0, Math.min(index, replayPoints.length - 1))];
-    const display = resolveReplayDisplay(point);
-    const chartAction = display.action;
-    const gauges = {
+  function replayGaugesFromPoint(point) {
+    if (point.liveSynced && replayGauges) return replayGauges;
+    const optionPercent =
+      point.optionPercent ?? Math.round(Math.abs(point.optionNeedle) * 100);
+    const paPercent =
+      point.paPercent ?? Math.round(Math.abs(point.paNeedle) * 100);
+    return {
       option: {
         value: point.optionNeedle,
-        label: point.optionNeedle >= 0.35 ? 'CE' : point.optionNeedle <= -0.35 ? 'PE' : 'FLAT',
-        percent: Math.round(Math.abs(point.optionNeedle) * 100),
+        label:
+          point.optionNeedle >= 0.35
+            ? 'CE'
+            : point.optionNeedle <= -0.35
+              ? 'PE'
+              : 'FLAT',
+        percent: optionPercent,
         ghost: null,
       },
       priceAction: {
         value: point.paNeedle,
-        label: point.paNeedle >= 0.35 ? 'CE' : point.paNeedle <= -0.35 ? 'PE' : 'FLAT',
-        percent: Math.round(Math.abs(point.paNeedle) * 100),
-        ghost: null,
+        label:
+          point.paNeedle >= 0.35 ? 'CE' : point.paNeedle <= -0.35 ? 'PE' : 'FLAT',
+        percent: paPercent,
+        ghost: point.paGhost ?? null,
       },
       aligned:
         Math.sign(point.optionNeedle) === Math.sign(point.paNeedle) ||
@@ -1819,9 +1828,21 @@
         point.paNeedle !== 0 &&
         Math.sign(point.optionNeedle) !== Math.sign(point.paNeedle),
     };
+  }
+
+  function applyReplayIndex(index) {
+    if (!replayPoints.length) return;
+    const point = replayPoints[Math.max(0, Math.min(index, replayPoints.length - 1))];
+    const display = resolveReplayDisplay(point);
+    const chartAction = display.action;
+    const gauges = replayGaugesFromPoint(point);
     applyGauges(gauges, display.conviction, display.action);
     els.action.textContent = display.action;
-    updateEntryConviction(display.conviction, 60, display.action);
+    updateEntryConviction(
+      display.conviction,
+      replayEntryThreshold,
+      display.action,
+    );
     els.replayMeta.textContent = `${formatIstTime(point.t)} · ${display.action} · spot ${point.spot.toLocaleString('en-IN')}${display.statusSuffix}`;
     if (point.vetoed && display.action === point.action) {
       els.status.textContent = `Chart veto · ${point.vetoReason || 'blocked'}`;
@@ -1869,6 +1890,8 @@
 
     replayPoints = data.replayPoints || [];
     replayOptionComponents = data.optionComponents || [];
+    replayGauges = data.gauges || null;
+    replayEntryThreshold = Number(data.entryThreshold) || 60;
     vetoTimeline = data.vetoTimeline || [];
     renderVetoBreakup(
       [els.vetoBreakup, els.vetoBreakupTab],
