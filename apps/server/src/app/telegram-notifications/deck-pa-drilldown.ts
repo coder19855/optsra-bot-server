@@ -2,7 +2,6 @@ import {
   ConfluenceContext,
   PriceActionResponse,
   Timeframe,
-  TimelineMomentumDecay,
   TimelinePoint,
 } from '../types/technical-analysis';
 import { isHigherTfSupportive } from '../technical-analysis/timeframe-alignment';
@@ -209,7 +208,12 @@ export interface PaDrilldownBuildInput {
     vetoReason?: string;
     structuralAction?: string;
   };
-  momentumDecay?: TimelineMomentumDecay;
+  momentumDecay?: {
+    decayPercent: number;
+    reasons?: string[];
+    confidenceBefore?: number;
+    confidenceAfter?: number;
+  };
 }
 
 export function buildPaDrilldown(input: PaDrilldownBuildInput): PaDrilldown {
@@ -312,12 +316,17 @@ export function buildPaDrilldown(input: PaDrilldownBuildInput): PaDrilldown {
         value: `${input.momentumDecay.decayPercent.toFixed(1)}%`,
         tone: 'warn',
       },
-      {
+    ];
+    if (
+      input.momentumDecay.confidenceBefore != null &&
+      input.momentumDecay.confidenceAfter != null
+    ) {
+      decayRows.push({
         label: 'Confidence',
         value: `${input.momentumDecay.confidenceBefore}% → ${input.momentumDecay.confidenceAfter}%`,
         tone: 'warn',
-      },
-    ];
+      });
+    }
     for (const reason of input.momentumDecay.reasons ?? []) {
       if (reason.trim()) {
         decayRows.push({ label: 'Factor', value: reason, tone: 'warn' });

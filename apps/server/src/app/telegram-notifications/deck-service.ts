@@ -284,7 +284,7 @@ function extractPaDrilldown(
     confluenceContext: raw?.confluenceContext,
     confluenceSummary: raw?.confluence?.summary,
     signal: pa.overallSignal,
-    momentumDecay: raw?.momentumDecay ?? decision.momentumDecay,
+    momentumDecay: raw?.momentumDecay ?? decision.momentumDecay ?? undefined,
   });
 }
 
