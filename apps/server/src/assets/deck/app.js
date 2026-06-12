@@ -56,6 +56,8 @@
     vetoDockToggle: document.getElementById('veto-dock-toggle'),
     vetoDockSummary: document.getElementById('veto-dock-summary'),
     vetoTabBadge: document.getElementById('veto-tab-badge'),
+    signalVetoNotice: document.getElementById('signal-veto-notice'),
+    componentsVetoNotice: document.getElementById('components-veto-notice'),
     vetoSection: document.getElementById('veto-section'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
@@ -552,6 +554,125 @@
     });
   }
 
+  function analyzeVetoScoreImpact(items) {
+    const impact = {
+      pa: false,
+      combined: false,
+      option: false,
+      notes: [],
+    };
+
+    for (const item of items || []) {
+      const id = item.id || '';
+      const state = item.state || 'ok';
+      const detail = item.detail || '';
+
+      if (id === 'decay') {
+        const decayMatch = detail.match(/after (\d+)% decay/i);
+        if (decayMatch && Number(decayMatch[1]) > 0) {
+          impact.pa = true;
+          impact.notes.push(`PA −${decayMatch[1]}% decay`);
+        } else if (state === 'block' || state === 'warn') {
+          impact.pa = true;
+          impact.notes.push('PA momentum decay');
+        }
+      }
+
+      if (id.startsWith('decay-reason') && detail.trim()) {
+        impact.pa = true;
+      }
+
+      if (id === 'chart' && state !== 'ok') {
+        impact.pa = true;
+        impact.combined = true;
+        impact.notes.push('Chart gate');
+      }
+
+      if (id === 'structural' && state !== 'ok') {
+        impact.pa = true;
+        impact.combined = true;
+      }
+
+      if (id === 'min-confidence' && state !== 'ok' && state !== 'skipped') {
+        impact.pa = true;
+        impact.combined = true;
+        impact.notes.push('PA confidence floor');
+      }
+
+      if (id === 'enter-threshold' && state !== 'ok') {
+        impact.combined = true;
+        impact.notes.push('Below enter bar');
+      }
+
+      if (id === 'conflict' && state !== 'ok') {
+        impact.option = true;
+        impact.combined = true;
+        impact.notes.push('Option vs PA conflict');
+      }
+    }
+
+    impact.notes = [...new Set(impact.notes)];
+    return impact;
+  }
+
+  function ensureVetoScoreTag(zoneEl) {
+    if (!zoneEl || zoneEl.querySelector('.veto-score-tag')) return;
+    const tag = document.createElement('span');
+    tag.className = 'veto-score-tag';
+    tag.textContent = 'Vetoed';
+    zoneEl.appendChild(tag);
+  }
+
+  function setVetoZoneMuted(zoneEl, muted) {
+    if (!zoneEl) return;
+    zoneEl.classList.toggle('veto-score-muted', muted);
+    if (muted) ensureVetoScoreTag(zoneEl);
+  }
+
+  function applyVetoScoreFilter(items) {
+    const impact = analyzeVetoScoreImpact(items);
+    const anyImpact = impact.pa || impact.combined || impact.option;
+    const noticeText = impact.notes.length
+      ? `<strong>Veto eating score</strong> — ${impact.notes.join(' · ')}`
+      : '';
+
+    const signalNotice = impact.pa || impact.combined ? noticeText : '';
+    const componentsNotice = impact.pa ? noticeText : '';
+
+    if (els.signalVetoNotice) {
+      if (signalNotice) {
+        els.signalVetoNotice.innerHTML = signalNotice;
+        els.signalVetoNotice.classList.remove('hidden');
+      } else {
+        els.signalVetoNotice.textContent = '';
+        els.signalVetoNotice.classList.add('hidden');
+      }
+    }
+    if (els.componentsVetoNotice) {
+      if (componentsNotice) {
+        els.componentsVetoNotice.innerHTML = componentsNotice;
+        els.componentsVetoNotice.classList.remove('hidden');
+      } else {
+        els.componentsVetoNotice.textContent = '';
+        els.componentsVetoNotice.classList.add('hidden');
+      }
+    }
+
+    setVetoZoneMuted(document.getElementById('signal-pa-gauge'), impact.pa);
+    setVetoZoneMuted(document.getElementById('signal-pa-lane'), impact.pa);
+    setVetoZoneMuted(
+      document.getElementById('signal-combined-lane'),
+      impact.combined,
+    );
+    setVetoZoneMuted(document.getElementById('components-pa-panel'), impact.pa);
+
+    if (!anyImpact) {
+      document
+        .querySelectorAll('.veto-score-zone')
+        .forEach((zone) => zone.classList.remove('veto-score-muted'));
+    }
+  }
+
   function renderVetoBreakup(containers, items, noteText) {
     const sorted = updateVetoChrome(items);
     const targets = (Array.isArray(containers) ? containers : [containers]).filter(
@@ -609,6 +730,8 @@
         els.vetoBreakupNote.classList.add('hidden');
       }
     }
+
+    applyVetoScoreFilter(sorted);
   }
 
   let paDrilldownOpen = true;

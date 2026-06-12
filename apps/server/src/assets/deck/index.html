@@ -60,6 +60,7 @@
       </section>
 
       <div id="tab-signal" class="tab-panel active">
+        <p id="signal-veto-notice" class="veto-score-notice hidden" role="status"></p>
         <section class="gauge-block">
           <div class="gauge-head">
             <span>Option flow</span>
@@ -74,7 +75,7 @@
           <div class="gauge-scale"><span>-1</span><span>0</span><span>+1</span></div>
         </section>
 
-        <section class="gauge-block">
+        <section class="gauge-block veto-score-zone" id="signal-pa-gauge" data-veto-zone="pa">
           <div class="gauge-head">
             <span>Price action</span>
             <span id="pa-value" class="gauge-readout">0.00 CE</span>
@@ -94,12 +95,12 @@
             <div class="lane-bar"><div id="lane-option" class="lane-fill option"></div></div>
             <span id="lane-option-pct">0%</span>
           </div>
-          <div class="lane-row">
+          <div class="lane-row veto-score-zone" id="signal-pa-lane" data-veto-zone="pa">
             <span>PA</span>
             <div class="lane-bar"><div id="lane-pa" class="lane-fill pa"></div></div>
             <span id="lane-pa-pct">0%</span>
           </div>
-          <div class="lane-row">
+          <div class="lane-row veto-score-zone" id="signal-combined-lane" data-veto-zone="combined">
             <span>Combined</span>
             <div class="lane-bar"><div id="lane-combined" class="lane-fill combined"></div></div>
             <span id="lane-combined-pct">0%</span>
@@ -109,6 +110,7 @@
       </div>
 
       <div id="tab-components" class="tab-panel">
+        <p id="components-veto-notice" class="veto-score-notice hidden" role="status"></p>
         <section class="component-panel">
           <div class="panel-head">
             <span>Option components</span>
@@ -117,7 +119,7 @@
           <div id="option-components" class="component-list"></div>
         </section>
 
-        <section class="component-panel">
+        <section class="component-panel veto-score-zone" id="components-pa-panel" data-veto-zone="pa">
           <div class="panel-head">
             <span>Price action components</span>
             <button type="button" id="pa-drilldown-toggle" class="drilldown-toggle" aria-expanded="true">
