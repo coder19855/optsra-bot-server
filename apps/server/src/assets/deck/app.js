@@ -541,9 +541,6 @@
         els.vetoTabBadge.classList.remove('warn-only');
       }
     }
-    if (!vetoDockTouched && counts.block > 0) {
-      setVetoDockOpen(true);
-    }
     return sorted;
   }
 
