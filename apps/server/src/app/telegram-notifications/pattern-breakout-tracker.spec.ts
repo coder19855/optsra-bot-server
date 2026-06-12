@@ -89,4 +89,19 @@ describe('detectChartPatternBreakout', () => {
     });
     expect(detectChartPatternBreakout(null, current).shouldNotify).toBe(false);
   });
+
+  it('fires on bull flag forming → confirmed', () => {
+    const previous = snap({
+      chartPattern: 'bull_flag',
+      chartPatternStatus: 'forming',
+      chartPatternTimeframe: '15m',
+    });
+    const current = snap({
+      chartPattern: 'bull_flag',
+      chartPatternStatus: 'confirmed',
+      chartPatternTimeframe: '15m',
+    });
+
+    expect(detectChartPatternBreakout(previous, current).shouldNotify).toBe(true);
+  });
 });

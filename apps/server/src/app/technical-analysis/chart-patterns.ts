@@ -16,6 +16,18 @@ function barRange(c: FyersAPI.Candle): number {
   return Math.max(0.01, c[2] - c[3]);
 }
 
+function breakoutBuffer(price: number): number {
+  return priceTolerance(price) * 0.35;
+}
+
+function brokeAbove(close: number, level: number): boolean {
+  return close > level + breakoutBuffer(level);
+}
+
+function brokeBelow(close: number, level: number): boolean {
+  return close < level - breakoutBuffer(level);
+}
+
 /** Major chart patterns on primary TF — used for confluence scoring and opposing gates. */
 export function detectChartPattern(
   candles: FyersAPI.Candle[],
@@ -23,7 +35,7 @@ export function detectChartPattern(
   support: number,
   resistance: number,
 ): ChartPatternResult {
-  if (candles.length < 20) return NONE;
+  if (candles.length < 25) return NONE;
 
   const lastClose = candles[candles.length - 1][4];
 
@@ -229,10 +241,11 @@ function detectDoubleBottom(
   };
 }
 
-function detectWedge(candles: FyersAPI.Candle[]): ChartPatternResult | null {
-  const window = candles.slice(-20);
-  if (window.length < 20) return null;
+export function detectWedge(candles: FyersAPI.Candle[]): ChartPatternResult | null {
+  if (candles.length < 21) return null;
 
+  const lastClose = candles[candles.length - 1][4];
+  const window = candles.slice(-21, -1);
   const early = window.slice(0, 8);
   const late = window.slice(-8);
 
@@ -247,11 +260,14 @@ function detectWedge(candles: FyersAPI.Candle[]): ChartPatternResult | null {
     lateLow - earlyLow > (lateHigh - earlyHigh) * 1.2;
 
   if (highsRising && lowsRisingFaster) {
+    const neckline = lateLow;
+    const confirmed = brokeBelow(lastClose, neckline);
     return {
       pattern: 'rising_wedge',
       direction: 'bearish',
-      scoreBoost: -0.07,
-      status: 'forming',
+      scoreBoost: confirmed ? -0.11 : -0.07,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline,
     };
   }
 
@@ -261,24 +277,28 @@ function detectWedge(candles: FyersAPI.Candle[]): ChartPatternResult | null {
     earlyLow - lateLow > (earlyHigh - lateHigh) * 1.2;
 
   if (highsFalling && lowsFallingFaster) {
+    const neckline = lateHigh;
+    const confirmed = brokeAbove(lastClose, neckline);
     return {
       pattern: 'falling_wedge',
       direction: 'bullish',
-      scoreBoost: 0.07,
-      status: 'forming',
+      scoreBoost: confirmed ? 0.11 : 0.07,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline,
     };
   }
 
   return null;
 }
 
-function detectFlagPennant(
+export function detectFlagPennant(
   candles: FyersAPI.Candle[],
 ): ChartPatternResult | null {
-  if (candles.length < 24) return null;
+  if (candles.length < 25) return null;
 
-  const impulse = candles.slice(-24, -8);
-  const consolidation = candles.slice(-8);
+  const lastClose = candles[candles.length - 1][4];
+  const impulse = candles.slice(-25, -9);
+  const consolidation = candles.slice(-9, -1);
 
   const impulseRanges = impulse.map(barRange);
   const consRanges = consolidation.map(barRange);
@@ -294,33 +314,42 @@ function detectFlagPennant(
 
   if (!narrowing) return null;
 
+  const consHigh = Math.max(...consolidation.map((c) => c[2]));
+  const consLow = Math.min(...consolidation.map((c) => c[3]));
+
   if (impulseMove > impulseAvg * 2) {
+    const confirmed = brokeAbove(lastClose, consHigh);
     return {
       pattern: 'bull_flag',
       direction: 'bullish',
-      scoreBoost: 0.08,
-      status: 'forming',
+      scoreBoost: confirmed ? 0.12 : 0.08,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline: consHigh,
     };
   }
 
   if (impulseMove < -impulseAvg * 2) {
+    const confirmed = brokeBelow(lastClose, consLow);
     return {
       pattern: 'bear_flag',
       direction: 'bearish',
-      scoreBoost: -0.08,
-      status: 'forming',
+      scoreBoost: confirmed ? -0.12 : -0.08,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline: consLow,
     };
   }
 
   return null;
 }
 
-function detectTriangle(
+export function detectTriangle(
   candles: FyersAPI.Candle[],
 ): ChartPatternResult | null {
-  const window = candles.slice(-15);
-  if (window.length < 15) return null;
+  if (candles.length < 16) return null;
 
+  const lastClose = candles[candles.length - 1][4];
+  const window = candles.slice(-16, -1);
+  if (window.length < 15) return null;
   const highs = window.map((c) => c[2]);
   const lows = window.map((c) => c[3]);
 
@@ -333,6 +362,24 @@ function detectTriangle(
   const lowsRising = lateLow > earlyLow * 1.002;
 
   if (highsFalling && lowsRising) {
+    if (brokeAbove(lastClose, lateHigh)) {
+      return {
+        pattern: 'triangle_symmetric',
+        direction: 'bullish',
+        scoreBoost: 0.08,
+        status: 'confirmed',
+        neckline: lateHigh,
+      };
+    }
+    if (brokeBelow(lastClose, lateLow)) {
+      return {
+        pattern: 'triangle_symmetric',
+        direction: 'bearish',
+        scoreBoost: -0.08,
+        status: 'confirmed',
+        neckline: lateLow,
+      };
+    }
     return {
       pattern: 'triangle_symmetric',
       direction: 'neutral',
@@ -346,11 +393,14 @@ function detectTriangle(
     !lowsRising &&
     Math.abs(lateLow - earlyLow) < earlyLow * 0.003
   ) {
+    const neckline = Math.min(earlyLow, lateLow);
+    const confirmed = brokeBelow(lastClose, neckline);
     return {
       pattern: 'triangle_descending',
       direction: 'bearish',
-      scoreBoost: -0.06,
-      status: 'forming',
+      scoreBoost: confirmed ? -0.1 : -0.06,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline,
     };
   }
 
@@ -359,11 +409,14 @@ function detectTriangle(
     !highsFalling &&
     Math.abs(lateHigh - earlyHigh) < earlyHigh * 0.003
   ) {
+    const neckline = Math.max(earlyHigh, lateHigh);
+    const confirmed = brokeAbove(lastClose, neckline);
     return {
       pattern: 'triangle_ascending',
       direction: 'bullish',
-      scoreBoost: 0.06,
-      status: 'forming',
+      scoreBoost: confirmed ? 0.1 : 0.06,
+      status: confirmed ? 'confirmed' : 'forming',
+      neckline,
     };
   }
 
