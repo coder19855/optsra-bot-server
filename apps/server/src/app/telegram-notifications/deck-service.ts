@@ -34,6 +34,7 @@ import {
   DeckStrategyPayload,
   extractDeckStrategyPayload,
 } from './deck-strategy';
+import { buildDeckTradePlanner } from './deck-trade-planner';
 import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
 import {
   loadOptionChainSnapshotsForSession,
@@ -430,6 +431,41 @@ function filterCandlesToIstSession(
     (c) => c.t >= session.fromMs && c.t <= session.closeMs + 5 * 60 * 1000,
   );
   return filtered.length ? filtered : candles;
+}
+
+async function extractStrategyRecommendation(
+  fastify: FastifyInstance,
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  style: TradingStyle,
+  opts?: {
+    replayNote?: string;
+    replayMode?: boolean;
+    marketRegime?: ReturnType<typeof extractMarketRegime>;
+  },
+): Promise<DeckStrategyPayload> {
+  const raw = decision._debug?.rawPrice as PriceActionResponse | undefined;
+  const marketRegime = opts?.marketRegime;
+  const base = extractDeckStrategyPayload(decision, {
+    replayNote: opts?.replayNote,
+  });
+
+  const tradePlanner = await buildDeckTradePlanner(fastify, {
+    symbol: decision.symbol,
+    tradingStyle: style,
+    action: decision.action,
+    conviction: decision.conviction,
+    enterThreshold: decision.convictionThresholds?.enter ?? 60,
+    shouldConsiderTrade: Boolean(decision.tradeGuidance?.shouldConsiderTrade),
+    structuralAction: decision.priceAction.overallSignal.structuralAction,
+    tradeSetup: raw?.tradeSetup ?? null,
+    exactStrike: decision.optionFlow?.exactStrikeRecommendation ?? null,
+    signalConfidence: raw?.signal?.confidence,
+    signalAction: raw?.signal?.action,
+    marketRegime,
+    replayMode: opts?.replayMode,
+  });
+
+  return { ...base, tradePlanner };
 }
 
 function extractMarketRegime(
@@ -1025,7 +1061,12 @@ export async function buildDeckLivePayload(
     ),
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
-    strategyRecommendation: extractDeckStrategyPayload(decision),
+    strategyRecommendation: await extractStrategyRecommendation(
+      fastify,
+      decision,
+      style,
+      { marketRegime: extractMarketRegime(decision, style) },
+    ),
     patternContext: extractPatternContext(decision, spotSeries),
     openPositions: await buildDeckOpenPositions(fastify, {
       watchedIndexSymbol: indexSymbol,
@@ -1261,10 +1302,16 @@ export async function buildDeckReplayPayload(
       vetoState.vetoMode,
       flowState.flowMode,
     ),
-    strategyRecommendation: extractDeckStrategyPayload(decision, {
-      replayNote:
-        'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',
-    }),
+    strategyRecommendation: await extractStrategyRecommendation(
+      fastify,
+      decision,
+      style,
+      {
+        replayNote:
+          'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',
+        replayMode: true,
+      },
+    ),
     pnlNote:
       trades.length === 0
         ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'

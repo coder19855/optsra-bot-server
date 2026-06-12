@@ -1,5 +1,6 @@
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { GreeksStrikeInsight, GreeksStrikeProfile } from '../types/greeks-strike-insight';
+import { DeckTradePlannerPayload } from './deck-trade-planner';
 
 export interface DeckStrategyItem {
   strategy: string;
@@ -44,6 +45,7 @@ export interface DeckStrategyPayload {
   strategies: DeckStrategyItem[];
   greeksStrikeInsight?: GreeksStrikeInsight | null;
   exactStrike?: ExactStrikeRecommendation | null;
+  tradePlanner?: DeckTradePlannerPayload | null;
   replayNote?: string;
 }
 

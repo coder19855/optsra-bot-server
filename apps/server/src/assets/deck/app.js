@@ -1290,6 +1290,167 @@
     }
   }
 
+  function formatInr(value) {
+    if (value == null || !Number.isFinite(value)) return '—';
+    const rounded = Math.round(value);
+    return `₹${rounded.toLocaleString('en-IN')}`;
+  }
+
+  function renderTradePlanner(planner) {
+    if (!planner) return null;
+
+    const card = document.createElement('section');
+    card.className = `strategy-card trade-planner-card${
+      planner.favorable ? ' highlight' : ''
+    }`;
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'trade-planner-toggle';
+    toggle.setAttribute('aria-expanded', planner.favorable ? 'true' : 'false');
+
+    const head = document.createElement('div');
+    head.className = 'trade-planner-head';
+    const title = document.createElement('div');
+    title.className = 'strategy-card-title';
+    title.textContent = 'Trade planner';
+    const sub = document.createElement('div');
+    sub.className = 'trade-planner-sub';
+    sub.textContent = planner.headline;
+    head.append(title, sub);
+
+    const chevron = document.createElement('span');
+    chevron.className = 'trade-planner-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    toggle.append(head, chevron);
+
+    const body = document.createElement('div');
+    body.className = `trade-planner-body${
+      planner.favorable ? '' : ' collapsed'
+    }`;
+
+    toggle.addEventListener('click', () => {
+      const open = body.classList.toggle('collapsed');
+      toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+    });
+
+    if (planner.detail) {
+      const detail = document.createElement('p');
+      detail.className = 'trade-planner-detail';
+      detail.textContent = planner.detail;
+      body.appendChild(detail);
+    }
+    if (planner.unavailableReason) {
+      const note = document.createElement('p');
+      note.className = 'trade-planner-detail';
+      note.textContent = planner.unavailableReason;
+      body.appendChild(note);
+    }
+    if (planner.replayNote) {
+      const note = document.createElement('p');
+      note.className = 'trade-planner-detail';
+      note.textContent = planner.replayNote;
+      body.appendChild(note);
+    }
+
+    if (planner.setup) {
+      const setupGrid = document.createElement('div');
+      setupGrid.className = 'trade-planner-setup';
+      const setupRows = [
+        ['Side', planner.suggestion ?? '—'],
+        ['Action', planner.suggestionAction ?? '—'],
+        [
+          'Entry / SL',
+          `${planner.setup.entry} · SL ${planner.setup.stopLoss} (${planner.setup.riskPoints.toFixed(1)} pts)`,
+        ],
+        [
+          'Conviction',
+          `${planner.conviction}% (enter ${planner.enterThreshold}%)`,
+        ],
+      ];
+      for (const [label, value] of setupRows) {
+        const row = document.createElement('div');
+        row.className = 'trade-planner-setup-row';
+        row.innerHTML = `<span>${label}</span><strong>${value}</strong>`;
+        setupGrid.appendChild(row);
+      }
+      body.appendChild(setupGrid);
+
+      if (planner.setup.targets?.length) {
+        const targetWrap = document.createElement('div');
+        targetWrap.className = 'trade-planner-targets';
+        for (const target of planner.setup.targets) {
+          const chip = document.createElement('span');
+          chip.className = 'trade-planner-target-chip';
+          chip.textContent = `${target.rr} @ ${target.indexPrice} · ${formatInr(target.rewardPerLotInr)}/lot`;
+          targetWrap.appendChild(chip);
+        }
+        body.appendChild(targetWrap);
+      }
+    }
+
+    if (planner.strike) {
+      const strike = document.createElement('p');
+      strike.className = 'trade-planner-strike';
+      const delta =
+        planner.strike.delta != null
+          ? ` · Δ ${planner.strike.delta.toFixed(2)}`
+          : '';
+      strike.textContent = `${planner.strike.strike} @ ${formatInr(planner.strike.premium)}${delta} · lot ${planner.strike.lotSize}`;
+      body.appendChild(strike);
+    }
+
+    if (planner.account.availableBalance != null) {
+      const acct = document.createElement('p');
+      acct.className = 'trade-planner-strike';
+      acct.textContent = `Funds ${formatInr(planner.account.availableBalance)} · risk budget ${formatInr(planner.account.riskBudgetInr)} · ~${formatInr(planner.account.riskPerLotInr)}/lot`;
+      body.appendChild(acct);
+    }
+
+    if (planner.scenarios?.length) {
+      const tableWrap = document.createElement('div');
+      tableWrap.className = 'trade-planner-table-wrap';
+      const table = document.createElement('table');
+      table.className = 'trade-planner-table';
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th>Lots</th>
+            <th>Risk</th>
+            <th>Margin</th>
+            <th>1:1</th>
+            <th>1:2</th>
+            <th>1:3</th>
+          </tr>
+        </thead>
+      `;
+      const tbody = document.createElement('tbody');
+      for (const row of planner.scenarios) {
+        const tr = document.createElement('tr');
+        if (row.recommended) tr.classList.add('recommended');
+        if (!row.fitsRiskBudget || !row.fitsMarginCap) {
+          tr.classList.add('over-budget');
+        }
+        tr.innerHTML = `
+          <td>${row.lots}${row.recommended ? ' ★' : ''}</td>
+          <td>${formatInr(row.capitalAtRiskInr)}</td>
+          <td>${formatInr(row.marginInr)}</td>
+          <td>${formatInr(row.reward1RInr)}</td>
+          <td>${formatInr(row.reward2RInr)}</td>
+          <td>${formatInr(row.reward3RInr)}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      tableWrap.appendChild(table);
+      body.appendChild(tableWrap);
+    }
+
+    card.append(toggle, body);
+    return card;
+  }
+
   function renderStrategyRecommendation(payload) {
     if (!els.strategyContent) return;
     els.strategyContent.innerHTML = '';
@@ -1309,6 +1470,9 @@
         '<div class="muted" style="font-size:0.72rem">No strategy data</div>';
       return;
     }
+
+    const plannerCard = renderTradePlanner(payload.tradePlanner);
+    if (plannerCard) els.strategyContent.appendChild(plannerCard);
 
     const summary = createStrategyCard('Decision summary', true);
     const pillRow = document.createElement('div');
