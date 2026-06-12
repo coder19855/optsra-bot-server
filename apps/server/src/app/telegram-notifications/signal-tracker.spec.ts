@@ -550,6 +550,45 @@ describe('detectSignalChange', () => {
       expect(result.alertTone).toBe('caution');
     });
 
+    it('suppresses same-direction entry alerts while holding an open leg', () => {
+      const previous = snap({
+        action: 'CE-BUY',
+        paAction: 'NO-TRADE',
+        bias: 'Moderate Bullish',
+        conviction: 72,
+        shouldConsiderTrade: true,
+        directionalStreak: 2,
+        engagedDirection: 'CE-BUY',
+      });
+      const current = snap({
+        action: 'CE-BUY',
+        paAction: 'CE-BUY',
+        bias: 'Strong Bullish',
+        conviction: 88,
+        shouldConsiderTrade: true,
+        directionalStreak: 3,
+      });
+      const telemetry = buildExitTelemetry(
+        {
+          lastPrice: 25100,
+          priceAction: { action: 'CE-BUY', confidence: 88 },
+        } as Parameters<typeof buildExitTelemetry>[0],
+        'CE-BUY',
+      );
+
+      const result = detectSignalChange(previous, current, {
+        ...defaultDetectOptions,
+        engagement: buildEngagementContext({
+          enterThreshold: 60,
+          heldDirection: 'CE-BUY',
+        }),
+        telemetry,
+      });
+
+      expect(result.kinds).toEqual([]);
+      expect(result.shouldNotify).toBe(false);
+    });
+
     it('skips flat 3-poll exit while engaged', () => {
       const previous = snap({
         action: 'NO-TRADE',

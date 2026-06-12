@@ -151,6 +151,9 @@ export function detectSignalChange(
         },
       };
     }
+
+    // Open leg on book — only exit-policy alerts (above) may fire; skip re-entry copy.
+    return { shouldNotify: false, kinds: [], previous, current };
   }
 
   const skipFlatExit = options?.engagement?.engaged === true;
