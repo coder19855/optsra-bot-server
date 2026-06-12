@@ -79,6 +79,61 @@ function biasCamp(bias: TradeBias): 'bullish' | 'bearish' | 'neutral' {
   return 'neutral';
 }
 
+function isEntryConfirmPoll(
+  previous: SignalSnapshot,
+  current: SignalSnapshot,
+  entryStreakReady: boolean,
+): boolean {
+  return (
+    Boolean(previous.awaitingEntryConfirmation) &&
+    entryStreakReady &&
+    isDirectionalAction(current.action) &&
+    previous.action === current.action
+  );
+}
+
+function isExitConfirmPoll(
+  previous: SignalSnapshot,
+  current: SignalSnapshot,
+  exitStreakReady: boolean,
+  skipFlatExit: boolean,
+): boolean {
+  return (
+    !skipFlatExit &&
+    Boolean(previous.awaitingExitConfirmation) &&
+    exitStreakReady &&
+    current.action === 'NO-TRADE'
+  );
+}
+
+/** Entry/exit alerts fire on direction change — not bias/strategy/PA tweaks. */
+function shouldNotifyActionChange(
+  previous: SignalSnapshot,
+  current: SignalSnapshot,
+  params: {
+    entryStreakReady: boolean;
+    exitStreakReady: boolean;
+    skipFlatExit: boolean;
+    notify: boolean;
+  },
+): boolean {
+  if (!params.notify) return false;
+
+  if (
+    isEntryConfirmPoll(previous, current, params.entryStreakReady) ||
+    isExitConfirmPoll(
+      previous,
+      current,
+      params.exitStreakReady,
+      params.skipFlatExit,
+    )
+  ) {
+    return true;
+  }
+
+  return previous.action !== current.action;
+}
+
 export function buildSignalSnapshot(
   payload: TradeDecisionAlertPayload,
 ): SignalSnapshot {
@@ -176,19 +231,17 @@ export function detectSignalChange(
     return { shouldNotify: false, kinds, previous, current };
   }
 
+  if (isEntryConfirmPoll(previous, current, entryStreakReady)) {
+    kinds.push('ACTION');
+    return { shouldNotify: true, kinds, previous, current };
+  }
+
+  if (isExitConfirmPoll(previous, current, exitStreakReady, skipFlatExit)) {
+    kinds.push('ACTION');
+    return { shouldNotify: true, kinds, previous, current };
+  }
+
   if (previous.fingerprint === current.fingerprint) {
-    if (previous.awaitingEntryConfirmation && entryStreakReady) {
-      kinds.push('ACTION');
-      return { shouldNotify: true, kinds, previous, current };
-    }
-    if (
-      !skipFlatExit &&
-      previous.awaitingExitConfirmation &&
-      exitStreakReady
-    ) {
-      kinds.push('ACTION');
-      return { shouldNotify: true, kinds, previous, current };
-    }
     return { shouldNotify: false, kinds, previous, current };
   }
 
@@ -241,7 +294,14 @@ export function detectSignalChange(
     notify = isDirectionalAction(current.action) ? entryStreakReady : true;
   }
 
-  const shouldNotify = kinds.length > 0 && notify;
+  const shouldNotify =
+    kinds.length > 0 &&
+    shouldNotifyActionChange(previous, current, {
+      entryStreakReady,
+      exitStreakReady,
+      skipFlatExit,
+      notify,
+    });
 
   return { shouldNotify, kinds, previous, current };
 }

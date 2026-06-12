@@ -162,6 +162,54 @@ describe('detectSignalChange', () => {
 
       expect(result.shouldNotify).toBe(false);
     });
+
+    it('does not re-alert when CE stays CE but bias or strategy changes', () => {
+      const previous = snap({
+        action: 'CE-BUY',
+        paAction: 'CE-BUY',
+        bias: 'Moderate Bullish',
+        conviction: 68,
+        shouldConsiderTrade: true,
+        directionalStreak: 4,
+        topStrategy: 'Long Call',
+      });
+      const current = snap({
+        action: 'CE-BUY',
+        paAction: 'CE-BUY',
+        bias: 'Strong Bullish',
+        conviction: 72,
+        shouldConsiderTrade: true,
+        directionalStreak: 5,
+        topStrategy: 'Bull Call Spread',
+      });
+
+      const result = detectSignalChange(previous, current, defaultDetectOptions);
+
+      expect(result.shouldNotify).toBe(false);
+    });
+
+    it('does not alert on PA-only tweaks while brain action is unchanged', () => {
+      const previous = snap({
+        action: 'CE-BUY',
+        paAction: 'NO-TRADE',
+        bias: 'Strong Bullish',
+        conviction: 68,
+        shouldConsiderTrade: true,
+        directionalStreak: 4,
+      });
+      const current = snap({
+        action: 'CE-BUY',
+        paAction: 'CE-BUY',
+        bias: 'Strong Bullish',
+        conviction: 70,
+        shouldConsiderTrade: true,
+        directionalStreak: 5,
+      });
+
+      const result = detectSignalChange(previous, current, defaultDetectOptions);
+
+      expect(result.shouldNotify).toBe(false);
+    });
   });
 
   describe('entry confirmation (anti-whipsaw)', () => {
@@ -230,7 +278,7 @@ describe('detectSignalChange', () => {
 
       const result = detectSignalChange(previous, current, defaultDetectOptions);
 
-      expect(result.kinds).toContain('PA_SIGNAL');
+      expect(result.kinds).toContain('ACTION');
       expect(result.shouldNotify).toBe(true);
     });
 
@@ -641,7 +689,7 @@ describe('detectSignalChange', () => {
       expect(result.shouldNotify).toBe(true);
     });
 
-    it('notifies when NO-TRADE becomes trade-ready without a directional action', () => {
+    it('suppresses trade-ready churn while direction stays NO-TRADE', () => {
       const previous = snap({
         action: 'NO-TRADE',
         bias: 'Neutral',
@@ -659,10 +707,10 @@ describe('detectSignalChange', () => {
       const result = detectSignalChange(previous, current, defaultDetectOptions);
 
       expect(result.kinds).toContain('TRADE_READY');
-      expect(result.shouldNotify).toBe(true);
+      expect(result.shouldNotify).toBe(false);
     });
 
-    it('waits for entry streak before PA signal catch-up notifies', () => {
+    it('suppresses PA catch-up alerts when brain direction is unchanged', () => {
       const previous = snap({
         action: 'PE-BUY',
         paAction: 'NO-TRADE',
@@ -683,7 +731,7 @@ describe('detectSignalChange', () => {
       const result = detectSignalChange(previous, current, defaultDetectOptions);
 
       expect(result.kinds).toContain('PA_SIGNAL');
-      expect(result.shouldNotify).toBe(true);
+      expect(result.shouldNotify).toBe(false);
     });
 
     it('suppresses PA signal notify when entry streak is not confirmed', () => {
