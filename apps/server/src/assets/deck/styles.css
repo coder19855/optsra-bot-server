@@ -166,7 +166,8 @@ body.replay-mode {
 }
 
 .tab-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   margin-bottom: 12px;
   position: sticky;
@@ -177,9 +178,8 @@ body.replay-mode {
 }
 
 .tab-btn {
-  flex: 1;
   min-width: 0;
-  padding: 8px 1px;
+  padding: 8px 4px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
