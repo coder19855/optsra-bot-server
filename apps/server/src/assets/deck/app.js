@@ -58,6 +58,8 @@
     vetoDockSummary: document.getElementById('veto-dock-summary'),
     vetoTabBadge: document.getElementById('veto-tab-badge'),
     signalVetoNotice: document.getElementById('signal-veto-notice'),
+    signalFlowNote: document.getElementById('signal-flow-note'),
+    laneCombinedLabel: document.getElementById('lane-combined-label'),
     componentsVetoNotice: document.getElementById('components-veto-notice'),
     strategyContent: document.getElementById('strategy-content'),
     strategyReplayNote: document.getElementById('strategy-replay-note'),
@@ -92,6 +94,7 @@
   const FALLBACK_POLL_MS = 45_000;
   let vetoMode = 'strict';
   let serverVetoMode = 'strict';
+  let serverFlowMode = 'blend';
   let currentMode = mode;
   let spotCandlesPayload = [];
   let pendingSpotScrubPoint = null;
@@ -367,6 +370,37 @@
     if (mode === 'off') return 'Veto-off what-if mode';
     if (mode === 'relaxed') return 'Relaxed veto — hard decay only';
     return 'Chart veto active';
+  }
+
+  function setFlowModeUi(mode) {
+    serverFlowMode = mode || 'blend';
+    document.body.classList.toggle('flow-pa-only', serverFlowMode === 'pa-only');
+    document.body.classList.toggle('flow-option-only', serverFlowMode === 'option-only');
+
+    if (els.laneCombinedLabel) {
+      els.laneCombinedLabel.textContent =
+        serverFlowMode === 'pa-only'
+          ? 'PA entry'
+          : serverFlowMode === 'option-only'
+            ? 'Option entry'
+            : 'Combined';
+    }
+
+    const signalNote =
+      serverFlowMode === 'pa-only'
+        ? 'PA-only (/flow pa) — entry score uses price action only; option shown for reference'
+        : serverFlowMode === 'option-only'
+          ? 'Option-only (/flow option) — entry score uses option flow only; PA shown for reference'
+          : '';
+    if (els.signalFlowNote) {
+      if (signalNote) {
+        els.signalFlowNote.textContent = signalNote;
+        els.signalFlowNote.classList.remove('hidden');
+      } else {
+        els.signalFlowNote.textContent = '';
+        els.signalFlowNote.classList.add('hidden');
+      }
+    }
   }
 
   function setVetoModeUi(mode, { replayOverride = false } = {}) {
@@ -1449,9 +1483,13 @@
     els.laneCombinedPct.textContent = `${combined}%`;
 
     els.actionCard.classList.remove('bullish', 'bearish', 'conflict');
-    if (gauges.conflict) els.actionCard.classList.add('conflict');
-    else if (option.value > 0.2 && pa.value > 0.2) els.actionCard.classList.add('bullish');
-    else if (option.value < -0.2 && pa.value < -0.2) els.actionCard.classList.add('bearish');
+    if (serverFlowMode !== 'pa-only' && serverFlowMode !== 'option-only' && gauges.conflict) {
+      els.actionCard.classList.add('conflict');
+    } else if (option.value > 0.2 && pa.value > 0.2) {
+      els.actionCard.classList.add('bullish');
+    } else if (option.value < -0.2 && pa.value < -0.2) {
+      els.actionCard.classList.add('bearish');
+    }
   }
 
   function ensurePnlChart() {
@@ -1851,6 +1889,7 @@
 
   function applyDeckTick(tick) {
     els.clock.textContent = `${formatClock(tick.asOf)} IST`;
+    if (tick.flowMode) setFlowModeUi(tick.flowMode);
     const tickDisplay = resolveLiveDisplay(tick);
     els.action.textContent = tickDisplay.action;
     updateEntryConviction(
@@ -1912,6 +1951,7 @@
     els.clock.textContent = `${formatClock(data.asOf)} IST`;
     serverVetoMode = data.vetoMode || (data.vetoOff ? 'off' : 'strict');
     setVetoModeUi(serverVetoMode);
+    setFlowModeUi(data.flowMode || 'blend');
     const liveDisplay = resolveLiveDisplay(data);
     els.action.textContent = liveDisplay.action;
     updateEntryConviction(
@@ -2124,6 +2164,7 @@
     }
     serverVetoMode = data.vetoMode || 'strict';
     setVetoModeUi(serverVetoMode);
+    setFlowModeUi(data.flowMode || 'blend');
     if (els.vetoModeOptions) {
       els.vetoModeOptions.querySelectorAll('.veto-mode-btn').forEach((btn) => {
         btn.disabled = false;

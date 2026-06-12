@@ -186,6 +186,7 @@ export interface DeckLiveStreamTick {
   priceActionComponents: DeckComponentGauge[];
   paDrilldown: PaDrilldown;
   vetoBreakup: DeckVetoBreakupItem[];
+  flowMode: FlowMode;
   vetoReason?: string;
   structuralAction?: string;
   patternContext?: DeckPatternContext;
@@ -458,6 +459,7 @@ function extractPaDrilldown(
 function extractVetoBreakup(
   decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
   vetoMode: VetoMode,
+  flowMode: FlowMode = 'blend',
 ): DeckVetoBreakupItem[] {
   const rawDecay = decision._debug?.rawPrice?.momentumDecay;
   const alignmentField = decision.confluenceAndDecision.find(
@@ -471,6 +473,7 @@ function extractVetoBreakup(
 
   return buildDeckVetoBreakup({
     vetoMode,
+    flowMode,
     action: decision.action,
     conviction: decision.conviction,
     priceConviction: decision.priceConviction ?? 0,
@@ -990,7 +993,11 @@ export async function buildDeckLivePayload(
     vetoTimeline: timelineToVetoSeries(recent),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
-    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
+    vetoBreakup: extractVetoBreakup(
+      decision,
+      vetoState.vetoMode,
+      flowState.flowMode,
+    ),
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
     strategyRecommendation: extractDeckStrategyPayload(decision),
@@ -1059,7 +1066,12 @@ export async function buildDeckLiveStreamTick(
     spotSeries,
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
-    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
+    flowMode: flowState.flowMode,
+    vetoBreakup: extractVetoBreakup(
+      decision,
+      vetoState.vetoMode,
+      flowState.flowMode,
+    ),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     patternContext: extractPatternContext(decision, spotSeries),
@@ -1213,7 +1225,11 @@ export async function buildDeckReplayPayload(
     vetoTimeline: timelineToVetoSeries(points),
     vetoMode: vetoState.vetoMode,
     flowMode: flowState.flowMode,
-    vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
+    vetoBreakup: extractVetoBreakup(
+      decision,
+      vetoState.vetoMode,
+      flowState.flowMode,
+    ),
     strategyRecommendation: extractDeckStrategyPayload(decision, {
       replayNote:
         'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',

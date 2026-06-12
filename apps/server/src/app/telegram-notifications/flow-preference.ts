@@ -20,9 +20,16 @@ export async function loadFlowPreference(
   if (!col) return memoryState;
 
   const doc = await col.findOne({ key: FLOW_PREFERENCE_KEY });
-  if (doc?.flowMode == null) return memoryState;
+  if (doc?.flowMode != null) {
+    return { flowMode: normalizeFlowMode(doc.flowMode) };
+  }
 
-  return { flowMode: normalizeFlowMode(doc.flowMode) };
+  const live = fastify.telegramNotifications?.getFlowMode?.();
+  if (live) {
+    return { flowMode: normalizeFlowMode(live) };
+  }
+
+  return memoryState;
 }
 
 export async function saveFlowPreference(

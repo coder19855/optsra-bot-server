@@ -67,7 +67,8 @@
 
       <div id="tab-signal" class="tab-panel active">
         <p id="signal-veto-notice" class="veto-score-notice hidden" role="status"></p>
-        <section class="gauge-block">
+        <p id="signal-flow-note" class="flow-mode-notice hidden" role="status"></p>
+        <section class="gauge-block flow-option-block" id="signal-option-gauge">
           <div class="gauge-head">
             <span>Option flow</span>
             <span id="option-value" class="gauge-readout">0.00 CE</span>
@@ -81,7 +82,7 @@
           <div class="gauge-scale"><span>-1</span><span>0</span><span>+1</span></div>
         </section>
 
-        <section class="gauge-block">
+        <section class="gauge-block flow-pa-block" id="signal-pa-gauge">
           <div class="gauge-head">
             <span>Price action</span>
             <span id="pa-value" class="gauge-readout">0.00 CE</span>
@@ -101,18 +102,18 @@
             <div class="lane-scale"><span>0%</span><span>50%</span><span>100%</span></div>
             <span aria-hidden="true"></span>
           </div>
-          <div class="lane-row">
+          <div class="lane-row flow-option-lane" id="signal-option-lane">
             <span>Option</span>
             <div class="lane-bar"><div id="lane-option" class="lane-fill option"></div></div>
             <span id="lane-option-pct">0%</span>
           </div>
-          <div class="lane-row">
+          <div class="lane-row flow-pa-lane" id="signal-pa-lane">
             <span>PA</span>
             <div class="lane-bar"><div id="lane-pa" class="lane-fill pa"></div></div>
             <span id="lane-pa-pct">0%</span>
           </div>
-          <div class="lane-row">
-            <span>Combined</span>
+          <div class="lane-row flow-combined-lane" id="signal-combined-lane">
+            <span id="lane-combined-label">Combined</span>
             <div class="lane-bar"><div id="lane-combined" class="lane-fill combined"></div></div>
             <span id="lane-combined-pct">0%</span>
           </div>

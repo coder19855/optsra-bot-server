@@ -1,3 +1,4 @@
+import { FlowMode, isOptionOnlyFlow, isPaOnlyFlow } from '../types/flow-mode';
 import { isSoftDecayVetoReason, isVetoOff, VetoMode } from '../types/veto-mode';
 
 export type DeckVetoBreakupState = 'block' | 'warn' | 'ok' | 'skipped';
@@ -13,6 +14,7 @@ export interface DeckVetoBreakupItem {
 
 export interface DeckVetoBreakupInput {
   vetoMode: VetoMode;
+  flowMode?: FlowMode;
   action: string;
   conviction: number;
   priceConviction: number;
@@ -186,6 +188,13 @@ export function buildDeckVetoBreakup(input: DeckVetoBreakupInput): DeckVetoBreak
     detail: `${aligned}/3 timeframes aligned with primary`,
   });
 
+  const flowMode = input.flowMode ?? 'blend';
+  const thresholdDetail = isPaOnlyFlow(flowMode)
+    ? `PA-only flow · ${input.conviction}% vs ${input.enterThreshold}% bar (PA ${input.priceConviction}% — option ignored)`
+    : isOptionOnlyFlow(flowMode)
+      ? `Option-only flow · ${input.conviction}% vs ${input.enterThreshold}% bar (option ${input.optionConviction}% — PA ignored)`
+      : `Combined ${input.conviction}% vs ${input.enterThreshold}% bar (option ${input.optionConviction}% · PA ${input.priceConviction}%)`;
+
   pushItem(items, {
     id: 'enter-threshold',
     label: 'Enter threshold',
@@ -199,7 +208,7 @@ export function buildDeckVetoBreakup(input: DeckVetoBreakupInput): DeckVetoBreak
       100,
       Math.round((input.conviction / Math.max(1, input.enterThreshold)) * 100),
     ),
-    detail: `Combined ${input.conviction}% vs ${input.enterThreshold}% bar (option ${input.optionConviction}% · PA ${input.priceConviction}%)`,
+    detail: thresholdDetail,
   });
 
   if (input.action === 'NO-TRADE' && !vetoReason && decayPct === 0) {

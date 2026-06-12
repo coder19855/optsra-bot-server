@@ -690,6 +690,28 @@ body.replay-mode {
   font-weight: 600;
 }
 
+.flow-mode-notice {
+  font-size: 0.68rem;
+  color: var(--conflict);
+  margin: 0 0 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+}
+
+body.flow-pa-only .flow-option-block,
+body.flow-pa-only .flow-option-lane {
+  opacity: 0.42;
+  filter: grayscale(0.55) saturate(0.45);
+}
+
+body.flow-option-only .flow-pa-block,
+body.flow-option-only .flow-pa-lane {
+  opacity: 0.42;
+  filter: grayscale(0.55) saturate(0.45);
+}
+
 .veto-breakup-block {
   background: var(--surface);
   border: 1px solid var(--border);

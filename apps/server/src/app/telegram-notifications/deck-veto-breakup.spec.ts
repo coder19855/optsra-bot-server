@@ -56,4 +56,22 @@ describe('deck-veto-breakup', () => {
     expect(items.find((item) => item.id === 'decay')?.state).toBe('skipped');
     expect(items.find((item) => item.id === 'mode')?.detail).toContain('Relaxed');
   });
+
+  it('labels enter threshold as PA-only when flow mode is pa-only', () => {
+    const items = buildDeckVetoBreakup({
+      vetoMode: 'relaxed',
+      flowMode: 'pa-only',
+      action: 'NO-TRADE',
+      conviction: 44,
+      priceConviction: 26,
+      optionConviction: 27,
+      enterThreshold: 60,
+      paSignal: { action: 'NO-TRADE', confidence: 26 },
+    });
+
+    const threshold = items.find((item) => item.id === 'enter-threshold');
+    expect(threshold?.detail).toContain('PA-only flow');
+    expect(threshold?.detail).toContain('option ignored');
+    expect(threshold?.detail).not.toContain('option 27% · PA');
+  });
 });
