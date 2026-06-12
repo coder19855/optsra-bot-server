@@ -759,7 +759,161 @@
     return impact;
   }
 
-  function applyVetoScoreNotice(items) {
+  function parseVetoedSideFromText(text) {
+    const sides = { ce: false, pe: false };
+    const t = (text || '').toLowerCase();
+    if (
+      /ce blocked|ce-buy|bullish chart|bullish structure|momentum decay vetoed bullish|allows ce|suggests ce|structural direction.*ce/i.test(
+        t,
+      )
+    ) {
+      sides.ce = true;
+    }
+    if (
+      /pe blocked|pe-buy|bearish chart|bearish structure|momentum decay vetoed bearish|allows pe|suggests pe|structural direction.*pe/i.test(
+        t,
+      )
+    ) {
+      sides.pe = true;
+    }
+    return sides;
+  }
+
+  function mergeVetoedSides(target, source) {
+    target.ce = target.ce || source.ce;
+    target.pe = target.pe || source.pe;
+  }
+
+  function inferVetoedSideFromSign(sign, structuralAction) {
+    const sides = { ce: false, pe: false };
+    if (structuralAction === 'CE-BUY') sides.ce = true;
+    else if (structuralAction === 'PE-BUY') sides.pe = true;
+    else if (sign > 0.05) sides.ce = true;
+    else if (sign < -0.05) sides.pe = true;
+    return sides;
+  }
+
+  function analyzeVetoedFlowSides(items, context = {}) {
+    const pa = { ce: false, pe: false };
+    const option = { ce: false, pe: false };
+    const optionSign = context.gauges?.option?.value ?? 0;
+    const paSign = context.gauges?.priceAction?.value ?? 0;
+    const structuralAction = context.structuralAction;
+
+    for (const item of items || []) {
+      const state = item.state || 'ok';
+      if (state === 'ok' || state === 'skipped') continue;
+      const id = item.id || '';
+      const detail = item.detail || '';
+      const parsed = parseVetoedSideFromText(detail);
+
+      if (
+        id === 'chart' ||
+        id === 'structural' ||
+        id === 'decay' ||
+        id.startsWith('decay-reason') ||
+        id === 'min-confidence'
+      ) {
+        mergeVetoedSides(pa, parsed);
+        if (!parsed.ce && !parsed.pe) {
+          mergeVetoedSides(
+            pa,
+            inferVetoedSideFromSign(paSign, structuralAction),
+          );
+        }
+      }
+
+      if (id === 'chart' || id === 'enter-threshold' || id === 'outcome') {
+        mergeVetoedSides(option, parsed);
+        if (!parsed.ce && !parsed.pe) {
+          mergeVetoedSides(
+            option,
+            inferVetoedSideFromSign(optionSign, structuralAction),
+          );
+        }
+      }
+
+      if (id === 'conflict') {
+        if (optionSign > 0.05 && paSign < -0.05) option.ce = true;
+        else if (optionSign < -0.05 && paSign > 0.05) option.pe = true;
+        else mergeVetoedSides(option, parsed);
+      }
+    }
+
+    if (context.vetoReason) {
+      const fromReason = parseVetoedSideFromText(context.vetoReason);
+      mergeVetoedSides(pa, fromReason);
+      if (context.chartVetoed) mergeVetoedSides(option, fromReason);
+    }
+
+    if (context.chartVetoed && structuralAction) {
+      if (structuralAction === 'CE-BUY') pa.ce = true;
+      if (structuralAction === 'PE-BUY') pa.pe = true;
+    }
+
+    if (context.gauges?.priceAction?.ghost != null) {
+      mergeVetoedSides(
+        pa,
+        inferVetoedSideFromSign(
+          context.gauges.priceAction.ghost ?? paSign,
+          structuralAction,
+        ),
+      );
+    }
+
+    for (const item of items || []) {
+      if (item.id !== 'decay') continue;
+      const decayMatch = (item.detail || '').match(/after (\d+)% decay/i);
+      if (!decayMatch || Number(decayMatch[1]) <= 0) continue;
+      mergeVetoedSides(pa, parseVetoedSideFromText(item.detail));
+      if (!pa.ce && !pa.pe) {
+        mergeVetoedSides(
+          pa,
+          inferVetoedSideFromSign(paSign, structuralAction),
+        );
+      }
+    }
+
+    const impact = analyzeVetoScoreImpact(items);
+    if (impact.pa && !pa.ce && !pa.pe) {
+      mergeVetoedSides(pa, inferVetoedSideFromSign(paSign, structuralAction));
+    }
+    if (impact.option && !option.ce && !option.pe) {
+      mergeVetoedSides(
+        option,
+        inferVetoedSideFromSign(optionSign, structuralAction),
+      );
+    }
+
+    return { pa, option };
+  }
+
+  function applyFlowSideVetoFilter(items, context = {}) {
+    const sides = analyzeVetoedFlowSides(items, context);
+    const tracks = [
+      { el: document.getElementById('gauge-option'), sides: sides.option },
+      { el: document.getElementById('gauge-pa'), sides: sides.pa },
+    ];
+
+    for (const { el, sides: flowSides } of tracks) {
+      if (!el) continue;
+      const peZone = el.querySelector('.gauge-zone.pe');
+      const ceZone = el.querySelector('.gauge-zone.ce');
+      if (peZone) peZone.classList.toggle('flow-side-vetoed', Boolean(flowSides.pe));
+      if (ceZone) ceZone.classList.toggle('flow-side-vetoed', Boolean(flowSides.ce));
+    }
+  }
+
+  function buildFlowVetoContext(source = {}) {
+    return {
+      gauges: source.gauges,
+      structuralAction: source.structuralAction,
+      vetoReason: source.vetoReason,
+      chartVetoed: Boolean(source.chartVetoed ?? source.vetoed),
+    };
+  }
+
+  function applyVetoScoreNotice(items, vetoContext = {}) {
     const impact = analyzeVetoScoreImpact(items);
     const anyImpact = impact.pa || impact.combined || impact.option;
     const noticeText = impact.notes.length
@@ -784,9 +938,11 @@
         els.componentsVetoNotice.classList.add('hidden');
       }
     }
+
+    applyFlowSideVetoFilter(items, vetoContext);
   }
 
-  function renderVetoBreakup(containers, items, noteText) {
+  function renderVetoBreakup(containers, items, noteText, vetoContext = {}) {
     const sorted = updateVetoChrome(items);
     const targets = (Array.isArray(containers) ? containers : [containers]).filter(
       Boolean,
@@ -844,7 +1000,7 @@
       }
     }
 
-    applyVetoScoreNotice(sorted);
+    applyVetoScoreNotice(sorted, vetoContext);
   }
 
   function appendStrategyDetail(parent, label, value) {
@@ -1728,6 +1884,7 @@
       [els.vetoBreakup, els.vetoBreakupTab],
       tick.vetoBreakup,
       tick.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
+      buildFlowVetoContext(tick),
     );
 
     if (tick.lastPrice != null && spotCandlesPayload.length) {
@@ -1788,6 +1945,7 @@
       [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup,
       data.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
+      buildFlowVetoContext(data),
     );
     renderStrategyRecommendation(data.strategyRecommendation);
     if (els.optionComponentsNote) {
@@ -1938,6 +2096,12 @@
       [els.vetoBreakup, els.vetoBreakupTab],
       point.vetoBreakup || [],
       display.statusSuffix ? display.statusSuffix.replace(/^ · /, '') : '',
+      buildFlowVetoContext({
+        gauges: replayGaugesFromPoint(point),
+        structuralAction: point.structuralAction,
+        vetoReason: point.vetoReason,
+        vetoed: point.vetoed,
+      }),
     );
     renderVetoStrip(index);
     pendingSpotScrubPoint = point;
@@ -1975,6 +2139,7 @@
       [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup || [],
       '',
+      buildFlowVetoContext(data),
     );
     renderStrategyRecommendation(data.strategyRecommendation);
     if (els.optionComponentsNote && data.optionComponentsNote) {
