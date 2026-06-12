@@ -279,7 +279,10 @@ export interface TimelinePoint {
   momentum: {
     recent: Record<Timeframe, number>;
     adx?: Record<Timeframe, number>;
+    fakeout?: Record<Timeframe, number>;
   };
+  atr?: Record<Timeframe, number>;
+  structureElements?: PriceActionResponse['structureElements'];
   momentumDecay?: TimelineMomentumDecay;
   confluenceContext?: ConfluenceContext;
   levels: {

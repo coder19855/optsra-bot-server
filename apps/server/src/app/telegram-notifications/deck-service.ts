@@ -1,7 +1,13 @@
 import { FastifyInstance } from 'fastify';
 import { ResponseStatus } from '../types/common';
 import { TradingStyle } from '../types/trading-style';
-import { TimelinePoint } from '../types/technical-analysis';
+import {
+  ConfluenceContext,
+  PriceActionResponse,
+  TimelineMomentumDecay,
+  TimelinePoint,
+  Timeframe,
+} from '../types/technical-analysis';
 import {
   buildOptionComponentGauges,
   buildPriceActionComponentGauges,
@@ -13,6 +19,11 @@ import {
   buildReplayVetoBreakup,
   DeckVetoBreakupItem,
 } from './deck-veto-breakup';
+import {
+  buildPaDrilldown,
+  buildPaDrilldownFromTimelinePoint,
+  PaDrilldown,
+} from './deck-pa-drilldown';
 import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
 import {
   loadOptionChainSnapshotsForSession,
@@ -77,6 +88,7 @@ export interface DeckReplayPoint {
   whatIfAction: string;
   whatIfConviction: number;
   paComponents: DeckComponentGauge[];
+  paDrilldown?: PaDrilldown;
   optionComponents?: DeckComponentGauge[];
   vetoBreakup?: DeckVetoBreakupItem[];
 }
@@ -137,6 +149,7 @@ export interface DeckLivePayload {
   events: DeckEvent[];
   optionComponents: DeckComponentGauge[];
   priceActionComponents: DeckComponentGauge[];
+  paDrilldown: PaDrilldown;
   vetoTimeline: DeckVetoPoint[];
   vetoReason?: string;
   structuralAction?: string;
@@ -193,9 +206,18 @@ async function fetchTradeDecision(
     convictionThresholds?: { enter: number };
     priceAction: {
       components: Record<string, { score: number }>;
+      levels?: { support: number; resistance: number };
+      atr?: Record<string, number>;
+      adx?: Record<string, number>;
+      momentum?: {
+        recent?: Record<string, number>;
+        fakeout?: Record<string, number>;
+      };
+      structureElements?: PriceActionResponse['structureElements'];
       overallSignal: {
         confidence: number;
         action: string;
+        strength?: string;
         vetoReason?: string;
         structuralAction?: string;
         confidenceBeforeDecay?: number;
@@ -214,16 +236,56 @@ async function fetchTradeDecision(
     confluenceAndDecision: Array<{ field: string; value: number | string }>;
     _debug?: {
       rawPrice?: {
-        momentumDecay?: {
-          decayPercent: number;
-          reasons: string[];
-          vetoedByDecay?: boolean;
-          minConfidenceRequired?: number;
+        primaryTimeframe?: string;
+        timeframeScores?: Record<Timeframe, number>;
+        confluence?: {
+          mtfScore?: number;
+          aligned?: number;
+          higherTimeframeConfirmation?: boolean;
+          summary?: string;
         };
+        confluenceContext?: ConfluenceContext;
+        candlestick?: Record<string, string>;
+        momentumDecay?: TimelineMomentumDecay;
         signal?: { vetoedByDecay?: boolean };
       };
     };
   };
+}
+
+function extractPaDrilldown(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+): PaDrilldown {
+  const primaryTf = primaryTimeframeForStyle(
+    decision.tradingStyle as TradingStyle,
+  );
+  const pa = decision.priceAction;
+  const raw = decision._debug?.rawPrice;
+  const components = pa.components;
+
+  return buildPaDrilldown({
+    primaryTimeframe: (raw?.primaryTimeframe as Timeframe) ?? primaryTf,
+    timeframeScores: raw?.timeframeScores ?? {
+      '5m': components['5m']?.score ?? 0,
+      '15m': components['15m']?.score ?? 0,
+      '1h': components['1h']?.score ?? 0,
+    },
+    mtfScore: raw?.confluence?.mtfScore ?? components.mtfScore?.score,
+    aligned: raw?.confluence?.aligned ?? components.alignment?.score,
+    higherTfSupport:
+      raw?.confluence?.higherTimeframeConfirmation ??
+      components.higherTFConfirmation?.score === 1,
+    levels: pa.levels,
+    atr: pa.atr as PriceActionResponse['atr'],
+    adx: pa.adx as PriceActionResponse['adx'],
+    momentum: pa.momentum as PriceActionResponse['momentum'],
+    structureElements: pa.structureElements,
+    candlestick: raw?.candlestick,
+    confluenceContext: raw?.confluenceContext,
+    confluenceSummary: raw?.confluence?.summary,
+    signal: pa.overallSignal,
+    momentumDecay: raw?.momentumDecay ?? decision.momentumDecay,
+  });
 }
 
 function extractVetoBreakup(
@@ -482,6 +544,7 @@ function timelineToConvictionSeries(
         p.aligned,
         primaryTf,
       ),
+      paDrilldown: buildPaDrilldownFromTimelinePoint(p),
       optionComponents,
       vetoBreakup: buildReplayVetoBreakup({
         vetoMode,
@@ -649,6 +712,7 @@ export async function buildDeckLivePayload(
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     ...extractComponentGauges(decision),
+    paDrilldown: extractPaDrilldown(decision),
   };
 }
 

@@ -361,6 +361,116 @@ body.replay-mode {
   color: var(--text);
 }
 
+.drilldown-toggle {
+  border: 1px solid var(--border);
+  background: #0a0c10;
+  color: var(--pa);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.drilldown-toggle[aria-expanded='false'] {
+  color: var(--muted);
+}
+
+.pa-drilldown {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pa-drilldown.hidden {
+  display: none;
+}
+
+.drilldown-section {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a0c10;
+}
+
+.drilldown-section-head {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+
+.drilldown-section-head .chevron {
+  color: var(--muted);
+  font-size: 0.62rem;
+  transition: transform 0.15s ease;
+}
+
+.drilldown-section.open .drilldown-section-head .chevron {
+  transform: rotate(90deg);
+}
+
+.drilldown-section-body {
+  display: none;
+  padding: 0 10px 8px;
+}
+
+.drilldown-section.open .drilldown-section-body {
+  display: block;
+}
+
+.drilldown-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 0.64rem;
+  border-top: 1px solid rgba(37, 43, 54, 0.65);
+}
+
+.drilldown-row:first-child {
+  border-top: 0;
+}
+
+.drilldown-label {
+  color: var(--muted);
+}
+
+.drilldown-value {
+  text-align: right;
+  word-break: break-word;
+}
+
+.drilldown-value.tone-positive {
+  color: var(--ce);
+}
+
+.drilldown-value.tone-negative {
+  color: var(--pe);
+}
+
+.drilldown-value.tone-warn {
+  color: var(--conflict);
+}
+
+.drilldown-value.tone-neutral {
+  color: var(--text);
+}
+
 .lane-block {
   background: var(--surface);
   border: 1px solid var(--border);

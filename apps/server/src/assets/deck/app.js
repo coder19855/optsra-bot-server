@@ -46,6 +46,8 @@
     error: document.getElementById('error-line'),
     optionComponents: document.getElementById('option-components'),
     paComponents: document.getElementById('pa-components'),
+    paDrilldown: document.getElementById('pa-drilldown'),
+    paDrilldownToggle: document.getElementById('pa-drilldown-toggle'),
     optionComponentsNote: document.getElementById('option-components-note'),
     vetoBreakup: document.getElementById('veto-breakup'),
     vetoBreakupComponents: document.getElementById('veto-breakup-components'),
@@ -520,6 +522,73 @@
     }
   }
 
+  let paDrilldownOpen = true;
+  const paDrilldownSectionState = new Map();
+
+  function setPaDrilldownVisible(open) {
+    paDrilldownOpen = open;
+    if (els.paDrilldown) {
+      els.paDrilldown.classList.toggle('hidden', !open);
+    }
+    if (els.paDrilldownToggle) {
+      els.paDrilldownToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+  }
+
+  function renderPaDrilldown(drilldown) {
+    if (!els.paDrilldown) return;
+    els.paDrilldown.innerHTML = '';
+    if (!drilldown?.sections?.length) {
+      els.paDrilldown.innerHTML =
+        '<div class="muted" style="font-size:0.68rem">No breakdown available</div>';
+      return;
+    }
+
+    for (const section of drilldown.sections) {
+      const wrap = document.createElement('div');
+      wrap.className = 'drilldown-section';
+      const defaultOpen =
+        paDrilldownSectionState.get(section.id) ??
+        (section.id.startsWith('tf-') && section.title.includes('primary'));
+      if (defaultOpen) wrap.classList.add('open');
+
+      const head = document.createElement('button');
+      head.type = 'button';
+      head.className = 'drilldown-section-head';
+      head.innerHTML = `<span>${section.title}</span><span class="chevron">›</span>`;
+      head.addEventListener('click', () => {
+        wrap.classList.toggle('open');
+        paDrilldownSectionState.set(section.id, wrap.classList.contains('open'));
+      });
+
+      const body = document.createElement('div');
+      body.className = 'drilldown-section-body';
+      for (const row of section.rows) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'drilldown-row';
+        const label = document.createElement('span');
+        label.className = 'drilldown-label';
+        label.textContent = row.label;
+        const value = document.createElement('span');
+        value.className = 'drilldown-value';
+        if (row.tone) value.classList.add(`tone-${row.tone}`);
+        value.textContent = row.value;
+        rowEl.append(label, value);
+        body.appendChild(rowEl);
+      }
+
+      wrap.append(head, body);
+      els.paDrilldown.appendChild(wrap);
+    }
+    setPaDrilldownVisible(paDrilldownOpen);
+  }
+
+  if (els.paDrilldownToggle) {
+    els.paDrilldownToggle.addEventListener('click', () => {
+      setPaDrilldownVisible(!paDrilldownOpen);
+    });
+  }
+
   function renderComponentList(container, components, variant) {
     if (!container) return;
     container.innerHTML = '';
@@ -883,6 +952,7 @@
     applyGauges(data.gauges, data.lanes);
     renderComponentList(els.optionComponents, data.optionComponents, 'option');
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
+    renderPaDrilldown(data.paDrilldown);
     renderVetoBreakup(
       [els.vetoBreakup, els.vetoBreakupComponents],
       data.vetoBreakup,
@@ -990,6 +1060,7 @@
       'option',
     );
     renderComponentList(els.paComponents, point.paComponents || [], 'pa');
+    renderPaDrilldown(point.paDrilldown);
     renderVetoBreakup(
       [els.vetoBreakup, els.vetoBreakupComponents],
       point.vetoBreakup || [],
