@@ -118,6 +118,12 @@ export function formatCommandsReferenceMessage(
     '<code>/voice preview</code> — sample all four',
   ]);
 
+  const alertFormatBlock = commandBlock('🔔 <b>Alert length</b>', [
+    '<code>/alert status</code> — full vs compact',
+    '<code>/alert full</code> — PA, Greeks, playbook in chat (default)',
+    '<code>/alert compact</code> — short ping + Deck for detail',
+  ]);
+
   const alertsBlock = commandBlock('⏯ <b>Alert cool-off</b>', [
     '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
     '<code>/start</code> — resume alerts (needs live Fyers session)',
@@ -170,6 +176,7 @@ export function formatCommandsReferenceMessage(
     vetoBlock,
     flowBlock,
     voiceBlock,
+    alertFormatBlock,
     alertsBlock,
     fyersBlock,
     apiBlock,
@@ -185,6 +192,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'stop', description: 'Pause signal alerts' },
   { command: 'now', description: 'Live market recommendation' },
   { command: 'voice', description: 'Alert language & style' },
+  { command: 'alert', description: 'Full vs compact signal pings' },
   { command: 'style', description: 'Intraday / scalper / positional' },
   { command: 'veto', description: 'Chart veto what-if mode' },
   { command: 'flow', description: 'PA-only vs blend scoring' },

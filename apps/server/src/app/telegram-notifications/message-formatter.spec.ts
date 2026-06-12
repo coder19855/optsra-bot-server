@@ -156,6 +156,117 @@ describe('formatTelegramAlertMessage', () => {
     expect(message).toContain('Pehle');
   });
 
+  it('compact mode omits PA, playbook, and structure blocks', () => {
+    const full = formatTelegramAlertMessage({
+      payload: minimalPayload({
+        action: 'PE-BUY',
+        bias: 'Strong Bearish',
+        conviction: 62,
+        tradeGuidance: { shouldConsiderTrade: true },
+        priceAction: { action: 'PE-BUY', confidence: 58 },
+        optionFlow: {
+          bias: 'Bearish',
+          ivRegime: 'Elevated',
+          greeksStrikeInsight: {
+            optionSide: 'PE',
+            profiles: [
+              {
+                strike: 25000,
+                moneyness: 'ATM',
+                delta: -0.45,
+                gammaLevel: 'high',
+                thetaLabel: 'fast',
+                premium: 120,
+              },
+            ],
+            bestFit: 'ATM gamma sweet spot',
+          },
+        },
+        recommendedStrategies: [
+          {
+            strategy: 'Bear put spread',
+            confidenceScore: 72,
+            executionHint: 'Sell OTM put wing',
+          },
+        ],
+        structureContext: {
+          primaryTimeframe: '15m',
+          primaryScore: -0.42,
+          enterThreshold: 55,
+          timeframeScores: { '5m': -0.3, '15m': -0.42, '1h': -0.28 },
+        },
+      }),
+      previous: minimalSnapshot('NO-TRADE'),
+      current: minimalSnapshot('PE-BUY'),
+      kinds: ['ACTION'],
+    });
+
+    const compact = formatTelegramAlertMessage({
+      payload: minimalPayload({
+        action: 'PE-BUY',
+        bias: 'Strong Bearish',
+        conviction: 62,
+        tradeGuidance: { shouldConsiderTrade: true },
+        priceAction: { action: 'PE-BUY', confidence: 58 },
+        optionFlow: {
+          bias: 'Bearish',
+          ivRegime: 'Elevated',
+          greeksStrikeInsight: {
+            optionSide: 'PE',
+            profiles: [
+              {
+                strike: 25000,
+                moneyness: 'ATM',
+                delta: -0.45,
+                gammaLevel: 'high',
+                thetaLabel: 'fast',
+                premium: 120,
+              },
+            ],
+            bestFit: 'ATM gamma sweet spot',
+          },
+        },
+        recommendedStrategies: [
+          {
+            strategy: 'Bear put spread',
+            confidenceScore: 72,
+            executionHint: 'Sell OTM put wing',
+          },
+        ],
+        structureContext: {
+          primaryTimeframe: '15m',
+          primaryScore: -0.42,
+          enterThreshold: 55,
+          timeframeScores: { '5m': -0.3, '15m': -0.42, '1h': -0.28 },
+        },
+      }),
+      previous: minimalSnapshot('NO-TRADE'),
+      current: minimalSnapshot('PE-BUY'),
+      kinds: ['ACTION'],
+      alertFormat: 'compact',
+    });
+
+    expect(full).toContain('PE-BUY (bearish) · 58%');
+    expect(full).toContain('Bear put spread');
+    expect(compact).not.toContain('PE-BUY (bearish) · 58%');
+    expect(compact).not.toContain('Bear put spread');
+    expect(compact).toContain('open Deck');
+    expect(compact).toContain('Was');
+  });
+
+  it('compact mode keeps veto one-liner on chart exit', () => {
+    const compact = formatTelegramAlertMessage({
+      payload: minimalPayload(),
+      previous: minimalSnapshot('PE-BUY'),
+      current: minimalSnapshot('NO-TRADE'),
+      kinds: ['ACTION'],
+      alertFormat: 'compact',
+    });
+
+    expect(compact).toContain('chart vetoed');
+    expect(compact).not.toContain('🧭');
+  });
+
   it('uses marathi voice for edge fade cautions', () => {
     const message = formatTelegramAlertMessage({
       payload: minimalPayload(),

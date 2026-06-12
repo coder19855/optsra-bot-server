@@ -67,6 +67,11 @@ import {
   formatVetoStatusMessage,
   parseVetoCommandArgs,
 } from './veto-command';
+import { alertFormatLabel } from '../types/alert-format';
+import {
+  formatAlertStatusMessage,
+  parseAlertCommandArgs,
+} from './alert-command';
 
 interface TelegramUpdate {
   update_id: number;
@@ -254,6 +259,8 @@ export class TelegramCommandPoller {
         await this.handleFlow(text, replyChatId);
       } else if (command === '/style' || command === '/tradingstyle') {
         await this.handleStyle(text, replyChatId);
+      } else if (command === '/alert') {
+        await this.handleAlert(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -834,6 +841,34 @@ export class TelegramCommandPoller {
 
     await this.deps.sendMessage(
       formatVetoStatusMessage(this.fastify.telegramNotifications.getVetoMode()),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleAlert(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseAlertCommandArgs(text);
+
+    if (parsed.action !== 'status') {
+      const alertFormat =
+        await this.fastify.telegramNotifications.setAlertFormat(parsed.action);
+      const label = alertFormatLabel(alertFormat);
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>Alert format → ${label}</b>`,
+          alertFormat === 'compact'
+            ? '<i>Signal pings stay short — open Deck for PA, flow, Greeks, and playbook.</i>'
+            : '<i>Signal pings include full PA, structure, Greeks, and playbook in chat.</i>',
+          '<i>Use <code>/alert status</code> for details.</i>',
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatAlertStatusMessage(
+        this.fastify.telegramNotifications.getAlertFormat(),
+      ),
       this.replyOptions(replyChatId),
     );
   }

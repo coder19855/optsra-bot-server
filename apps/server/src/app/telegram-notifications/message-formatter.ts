@@ -10,6 +10,10 @@ import {
   TelegramPositionSizing,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
+import {
+  AlertFormatMode,
+  DEFAULT_ALERT_FORMAT,
+} from '../types/alert-format';
 import { DecisionAction, TradeBias } from '../types/trade-decision';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
@@ -345,6 +349,69 @@ function formatPlaybookSection(
   ].join('\n');
 }
 
+const COMPACT_DECK_HINT =
+  '📱 PA · flow · Greeks · playbook → open Deck';
+
+function formatCompactTelegramAlertMessage(params: {
+  payload: TradeDecisionAlertPayload;
+  previous: SignalSnapshot | null;
+  current: SignalSnapshot;
+  kinds: SignalChangeKind[];
+  alertTone?: SignalAlertTone;
+  exitReason?: string | null;
+  voice: TelegramVoice;
+}): string {
+  const {
+    payload,
+    previous,
+    current,
+    kinds,
+    alertTone,
+    exitReason,
+    voice,
+  } = params;
+  const label = shortSymbol(payload.symbol);
+  const flipped = isSignalFlip(previous, current);
+  const headline = tradeHeadlineBanner(payload.action, flipped, voice, {
+    alertTone,
+    exitReason,
+    kinds,
+  });
+  const pa = payload.priceAction;
+  const biasIcon = biasEmoji(payload.bias);
+  const change = formatChangeLine(previous, current, kinds, voice, { exitReason });
+  const exactStrike = formatExactStrikeSection(
+    payload.exactStrikeRecommendation,
+    payload.action,
+    voice,
+  );
+
+  const chartVetoed =
+    pa.confidence === 0 ||
+    (payload.action === 'NO-TRADE' &&
+      (pa.action === 'NO-TRADE' ||
+        pa.structuralAction === 'CE-BUY' ||
+        pa.structuralAction === 'PE-BUY'));
+
+  const vetoOneLiner = chartVetoed
+    ? priceActionLine(pa, payload.action, voice)
+    : null;
+
+  const identityBlock = joinTelegramLines(
+    `<b>${escapeHtml(label)}</b> · ${payload.tradingStyle} · ${signalActionLabel(payload.action, voice)}`,
+    `💰 Spot ${payload.lastPrice.toLocaleString('en-IN')} · ${biasIcon} ${escapeHtml(payload.bias)} · ${signalConvictionLine(payload.conviction, voice)}`,
+  );
+
+  return joinTelegramSections(
+    headline,
+    identityBlock,
+    vetoOneLiner,
+    exactStrike,
+    change,
+    COMPACT_DECK_HINT,
+  );
+}
+
 export function formatTelegramAlertMessage(params: {
   payload: TradeDecisionAlertPayload;
   previous: SignalSnapshot | null;
@@ -353,6 +420,7 @@ export function formatTelegramAlertMessage(params: {
   alertTone?: SignalAlertTone;
   exitReason?: string | null;
   voice?: TelegramVoice;
+  alertFormat?: AlertFormatMode;
 }): string {
   const {
     payload,
@@ -362,7 +430,20 @@ export function formatTelegramAlertMessage(params: {
     alertTone,
     exitReason,
     voice = DEFAULT_TELEGRAM_VOICE,
+    alertFormat = DEFAULT_ALERT_FORMAT,
   } = params;
+
+  if (alertFormat === 'compact') {
+    return formatCompactTelegramAlertMessage({
+      payload,
+      previous,
+      current,
+      kinds,
+      alertTone,
+      exitReason,
+      voice,
+    });
+  }
   const label = shortSymbol(payload.symbol);
   const flipped = isSignalFlip(previous, current);
   const headline = tradeHeadlineBanner(payload.action, flipped, voice, {

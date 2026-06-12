@@ -409,6 +409,10 @@ declare module 'fastify' {
       setVoice: (
         voice: import('./types/telegram-voice').TelegramVoice,
       ) => Promise<import('./types/telegram-voice').TelegramVoice>;
+      getAlertFormat: () => import('./types/alert-format').AlertFormatMode;
+      setAlertFormat: (
+        alertFormat: import('./types/alert-format').AlertFormatMode,
+      ) => Promise<import('./types/alert-format').AlertFormatMode>;
       getVetoMode: () => import('./types/veto-mode').VetoMode;
       isVetoOff: () => boolean;
       setVetoMode: (

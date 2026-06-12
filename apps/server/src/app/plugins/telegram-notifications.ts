@@ -94,6 +94,12 @@ import {
   saveVetoPreference,
   VetoPreferenceState,
 } from '../telegram-notifications/veto-preference';
+import {
+  defaultAlertFormatPreferenceState,
+  loadAlertFormatPreference,
+  saveAlertFormatPreference,
+  AlertFormatPreferenceState,
+} from '../telegram-notifications/alert-format-preference';
 import { mergeDeckKeyboard } from '../telegram-notifications/deck-keyboard';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import {
@@ -183,6 +189,8 @@ export default fp(
     let newsFeedPreferenceState: NewsFeedPreferenceState = {
       feedId: 'google',
     };
+    let alertFormatPreferenceState: AlertFormatPreferenceState =
+      defaultAlertFormatPreferenceState();
 
     function syncActiveWatchedStyles(tradingStyle: TradingStyle): void {
       activeWatchedStyles.length = 0;
@@ -418,6 +426,7 @@ export default fp(
           alertTone: change.alertTone,
           exitReason: change.exitReason,
           voice: voicePreferenceState.voice,
+          alertFormat: alertFormatPreferenceState.alertFormat,
         });
         await sendTelegramMessage(
           message,
@@ -1053,6 +1062,25 @@ export default fp(
       return voicePreferenceState.voice;
     }
 
+    function getAlertFormat(): import('../types/alert-format').AlertFormatMode {
+      return alertFormatPreferenceState.alertFormat;
+    }
+
+    async function setAlertFormat(
+      alertFormat: import('../types/alert-format').AlertFormatMode,
+    ): Promise<import('../types/alert-format').AlertFormatMode> {
+      alertFormatPreferenceState = await saveAlertFormatPreference(
+        fastify,
+        alertFormatPreferenceState,
+        alertFormat,
+      );
+      fastify.log.info(
+        { alertFormat: alertFormatPreferenceState.alertFormat },
+        'Telegram alert format updated',
+      );
+      return alertFormatPreferenceState.alertFormat;
+    }
+
     async function setAlertsPaused(paused: boolean): Promise<void> {
       pollingPauseState = await savePollingPauseState(
         fastify,
@@ -1104,6 +1132,8 @@ export default fp(
       setAlertsPaused,
       getVoice,
       setVoice,
+      getAlertFormat,
+      setAlertFormat,
       getVetoMode,
       isVetoOff,
       setVetoMode,
@@ -1152,6 +1182,10 @@ export default fp(
         newsFeedPreferenceState = await loadNewsFeedPreference(
           fastify,
           newsFeedPreferenceState,
+        );
+        alertFormatPreferenceState = await loadAlertFormatPreference(
+          fastify,
+          alertFormatPreferenceState,
         );
         syncActiveWatchedStyles(stylePreferenceState.tradingStyle);
         if (pollingPauseState.alertsPaused) {
