@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { FastifyInstance } from 'fastify';
-import { TELEGRAM_API_BASE } from '../constants/telegram-notifications';
+import {
+  TELEGRAM_API_BASE,
+  TELEGRAM_NOTIFICATION_DEFAULTS,
+} from '../constants/telegram-notifications';
 import { AdaptiveConvictionInsight } from '../types/adaptive-conviction';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { SignalSnapshot } from '../types/telegram-notifications';
@@ -107,10 +110,24 @@ export interface TelegramCommandDeps {
   onCoachCommandComplete?: (sessionDate: string) => Promise<void>;
 }
 
+function commandPollLongTimeoutSec(): number {
+  const raw = process.env.TELEGRAM_COMMAND_POLL_LONG_TIMEOUT_SEC?.trim();
+  const parsed = raw ? Number(raw) : NaN;
+  if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 50) {
+    return parsed;
+  }
+  return TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_LONG_TIMEOUT_SEC;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class TelegramCommandPoller {
   private offset = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private pollInFlight = false;
+  private stopped = true;
+  private errorBackoffMs =
+    TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS;
   private coachInFlight = false;
   private readonly seenUpdateIds = new Set<number>();
 
@@ -127,11 +144,11 @@ export class TelegramCommandPoller {
     }
   }
 
-  start(intervalMs = 5000): void {
+  start(errorBackoffMs = TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS): void {
     this.stop();
-    this.timer = setInterval(() => {
-      void this.pollOnce();
-    }, intervalMs);
+    this.stopped = false;
+    this.errorBackoffMs = errorBackoffMs;
+    void this.runPollLoop();
   }
 
   commandsContext() {
@@ -146,32 +163,54 @@ export class TelegramCommandPoller {
   }
 
   stop(): void {
-    if (!this.timer) return;
-    clearInterval(this.timer);
-    this.timer = null;
+    this.stopped = true;
   }
 
-  private async pollOnce(): Promise<void> {
-    if (!this.deps.botToken || this.pollInFlight) return;
-
-    this.pollInFlight = true;
-    try {
-      const url = `${TELEGRAM_API_BASE}/bot${this.deps.botToken}/getUpdates`;
-      const res = await axios.get(url, {
-        params: { offset: this.offset, timeout: 0, limit: 20 },
-      });
-
-      const updates = (res.data?.result ?? []) as TelegramUpdate[];
-      for (const update of updates) {
-        this.offset = Math.max(this.offset, update.update_id + 1);
-        if (this.seenUpdateIds.has(update.update_id)) continue;
-        this.rememberUpdateId(update.update_id);
-        await this.handleUpdate(update);
+  private async runPollLoop(): Promise<void> {
+    while (!this.stopped) {
+      if (!this.deps.botToken) {
+        await sleep(this.errorBackoffMs);
+        continue;
       }
-    } catch (err) {
-      this.fastify.log.debug({ err }, 'Telegram command poll failed');
-    } finally {
-      this.pollInFlight = false;
+
+      try {
+        await this.fetchUpdates();
+      } catch (err) {
+        this.fastify.log.debug({ err }, 'Telegram command poll failed');
+        await sleep(this.errorBackoffMs);
+      }
+    }
+  }
+
+  private async fetchUpdates(): Promise<void> {
+    const longPollSec = commandPollLongTimeoutSec();
+    const url = `${TELEGRAM_API_BASE}/bot${this.deps.botToken}/getUpdates`;
+    const res = await axios.get(url, {
+      params: { offset: this.offset, timeout: longPollSec, limit: 20 },
+      timeout: (longPollSec + 10) * 1000,
+    });
+
+    const updates = (res.data?.result ?? []) as TelegramUpdate[];
+    for (const update of updates) {
+      this.offset = Math.max(this.offset, update.update_id + 1);
+      if (this.seenUpdateIds.has(update.update_id)) continue;
+      this.rememberUpdateId(update.update_id);
+      void this.handleUpdate(update).catch((err) => {
+        this.fastify.log.warn({ err }, 'Telegram command handler failed');
+      });
+    }
+  }
+
+  private async sendTyping(chatId?: number): Promise<void> {
+    if (chatId == null || !this.deps.botToken) return;
+    try {
+      await axios.post(
+        `${TELEGRAM_API_BASE}/bot${this.deps.botToken}/sendChatAction`,
+        { chat_id: chatId, action: 'typing' },
+        { timeout: 5000 },
+      );
+    } catch {
+      // Non-critical UX hint — ignore failures.
     }
   }
 
@@ -209,6 +248,8 @@ export class TelegramCommandPoller {
 
     const command = text.split(/\s+/)[0]?.toLowerCase().split('@')[0];
     const replyChatId = update.message?.chat.id;
+
+    void this.sendTyping(replyChatId);
 
     try {
       if (command === '/why') {

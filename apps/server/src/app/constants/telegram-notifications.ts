@@ -38,8 +38,10 @@ export const TELEGRAM_NOTIFICATION_DEFAULTS = {
   SIGNAL_OUTCOMES_COLLECTION: 'signal-outcomes',
   /** Closed paper-trade outcomes purged after this many days (Mongo TTL). */
   SIGNAL_OUTCOME_RETENTION_DAYS: 90,
-  /** Poll Telegram getUpdates for /why, /outcomes, etc. */
-  COMMAND_POLL_INTERVAL_MS: 5 * 1000,
+  /** Long-poll Telegram getUpdates (seconds) for near-instant /command pickup. */
+  COMMAND_POLL_LONG_TIMEOUT_SEC: 25,
+  /** Backoff when getUpdates fails before retrying. */
+  COMMAND_POLL_INTERVAL_MS: 2 * 1000,
   /** How long after a CE/PE entry alert we still treat a new open leg as intentional. */
   ENTRY_INTENT_WINDOW_MS: 3 * 60 * 60 * 1000,
   /**
