@@ -89,7 +89,23 @@
   let spotCandlesPayload = [];
   let pendingSpotScrubPoint = null;
   let pendingSpotScrubAction = null;
+  let hasDisplayedDeck = false;
   const SPOT_CHART_HEIGHT = 200;
+
+  function deckHasRenderableContent(data) {
+    if (!data) return false;
+    if (data.mode === 'replay') {
+      return (data.replayPoints?.length ?? 0) > 0;
+    }
+    return (
+      (data.optionComponents?.length ?? 0) > 0 ||
+      (data.priceActionComponents?.length ?? 0) > 0
+    );
+  }
+
+  function shouldShowLoadingOverlay() {
+    return !hasDisplayedDeck;
+  }
 
   function needleLeft(value) {
     const clamped = Math.max(-1, Math.min(1, Number(value) || 0));
@@ -1567,7 +1583,8 @@
   }
 
   async function refresh() {
-    setLoading(true);
+    const showLoader = shouldShowLoadingOverlay();
+    if (showLoader) setLoading(true);
     try {
       const data = await fetchDeck();
       currentMode = data.mode || mode;
@@ -1577,10 +1594,14 @@
         els.replayDock?.classList.add('hidden');
         applyLive(data);
       }
+      if (deckHasRenderableContent(data)) {
+        hasDisplayedDeck = true;
+      }
+      setError('');
     } catch (err) {
       setError(err.message || 'Failed to load deck');
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   }
 
