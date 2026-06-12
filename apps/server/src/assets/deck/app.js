@@ -1218,6 +1218,58 @@
     return Math.sign(lean) * magnitude;
   }
 
+  function computeWhatIfFromGauges(data) {
+    const paValue = data.gauges?.priceAction?.value ?? 0;
+    let action = data.structuralAction || data.action;
+    if (action === 'NO-TRADE' && Math.abs(paValue) >= 0.1) {
+      action = paValue > 0 ? 'CE-BUY' : 'PE-BUY';
+    }
+    if (action === 'NO-TRADE') {
+      return { action: 'NO-TRADE', conviction: 0 };
+    }
+    const conviction = Math.round(
+      Math.min(90, Math.max(20, Math.abs(paValue) * 100)),
+    );
+    return { action, conviction };
+  }
+
+  function resolveLiveDisplay(data) {
+    const vetoed = Boolean(
+      data.chartVetoed ||
+        data.vetoReason ||
+        (data.action === 'NO-TRADE' &&
+          data.structuralAction &&
+          data.structuralAction !== 'NO-TRADE'),
+    );
+
+    if (!vetoed || serverVetoMode === 'strict') {
+      return {
+        action: data.action,
+        conviction: data.conviction,
+        whatIf: false,
+      };
+    }
+
+    const useWhatIf =
+      serverVetoMode === 'off' ||
+      (serverVetoMode === 'relaxed' && isSoftDecayVetoReason(data.vetoReason));
+
+    if (!useWhatIf) {
+      return {
+        action: data.action,
+        conviction: data.conviction,
+        whatIf: false,
+      };
+    }
+
+    const whatIf = computeWhatIfFromGauges(data);
+    return {
+      action: whatIf.action,
+      conviction: whatIf.conviction,
+      whatIf: true,
+    };
+  }
+
   function updateEntryConviction(conviction, threshold, action) {
     const pct = Number(conviction) || 0;
     const need = Number(threshold) || 60;
@@ -1240,7 +1292,7 @@
     return '#8b95a8';
   }
 
-  function applyGauges(gauges, lanes, action = 'NO-TRADE') {
+  function applyGauges(gauges, combinedPercent, action = 'NO-TRADE') {
     const option = gauges.option;
     const pa = gauges.priceAction;
     els.needleOption.style.left = needleLeft(option.value);
@@ -1255,28 +1307,19 @@
       els.ghostPa.classList.add('hidden');
     }
 
-    if (lanes) {
-      const optionPct = applySignedLane(
-        els.laneOption,
-        option.value,
-        lanes.optionPercent,
-      );
-      const paPct = applySignedLane(els.lanePa, pa.value, lanes.priceActionPercent);
-      const combinedSigned = combinedSignedValue(
-        action,
-        lanes.combinedPercent,
-        option.value,
-        pa.value,
-      );
-      const combinedPct = applySignedLane(
-        els.laneCombined,
-        combinedSigned,
-        lanes.combinedPercent,
-      );
-      els.laneOptionPct.textContent = `${optionPct}%`;
-      els.lanePaPct.textContent = `${paPct}%`;
-      els.laneCombinedPct.textContent = `${combinedPct}%`;
-    }
+    const combined = Number(combinedPercent) || 0;
+    applySignedLane(els.laneOption, option.value, option.percent);
+    applySignedLane(els.lanePa, pa.value, pa.percent);
+    const combinedSigned = combinedSignedValue(
+      action,
+      combined,
+      option.value,
+      pa.value,
+    );
+    applySignedLane(els.laneCombined, combinedSigned, combined);
+    els.laneOptionPct.textContent = `${option.percent}%`;
+    els.lanePaPct.textContent = `${pa.percent}%`;
+    els.laneCombinedPct.textContent = `${combined}%`;
 
     els.actionCard.classList.remove('bullish', 'bearish', 'conflict');
     if (gauges.conflict) els.actionCard.classList.add('conflict');
@@ -1595,23 +1638,32 @@
 
   function applyDeckTick(tick) {
     els.clock.textContent = `${formatClock(tick.asOf)} IST`;
-    els.action.textContent = tick.action;
-    updateEntryConviction(tick.conviction, tick.entryThreshold, tick.action);
+    const tickDisplay = resolveLiveDisplay(tick);
+    els.action.textContent = tickDisplay.action;
+    updateEntryConviction(
+      tickDisplay.conviction,
+      tick.entryThreshold,
+      tickDisplay.action,
+    );
 
     if (tick.marketOpen) els.live.classList.remove('hidden');
     else els.live.classList.add('hidden');
 
-    els.status.textContent = tick.chartVetoed
-      ? vetoModeStatusText(serverVetoMode)
-      : serverVetoMode !== 'strict'
-        ? vetoModeStatusText(serverVetoMode)
-        : tick.gauges.aligned
-          ? 'Option & PA aligned'
-          : tick.gauges.conflict
-            ? 'Option vs PA conflict'
-            : tick.bias;
+    if (tickDisplay.whatIf) {
+      els.status.textContent = `What-if (${serverVetoMode})`;
+    } else if (tick.chartVetoed) {
+      els.status.textContent = vetoModeStatusText(serverVetoMode);
+    } else if (serverVetoMode !== 'strict') {
+      els.status.textContent = vetoModeStatusText(serverVetoMode);
+    } else if (tick.gauges.aligned) {
+      els.status.textContent = 'Option & PA aligned';
+    } else if (tick.gauges.conflict) {
+      els.status.textContent = 'Option vs PA conflict';
+    } else {
+      els.status.textContent = tick.bias;
+    }
 
-    applyGauges(tick.gauges, tick.lanes, tick.action);
+    applyGauges(tick.gauges, tickDisplay.conviction, tickDisplay.action);
     renderComponentList(els.optionComponents, tick.optionComponents, 'option');
     renderComponentList(els.paComponents, tick.priceActionComponents, 'pa');
     renderPaDrilldown(tick.paDrilldown);
@@ -1639,24 +1691,34 @@
     els.symbol.textContent = data.symbolLabel || data.symbol;
     els.style.textContent = data.tradingStyle;
     els.clock.textContent = `${formatClock(data.asOf)} IST`;
-    els.action.textContent = data.action;
-    updateEntryConviction(data.conviction, data.entryThreshold, data.action);
     serverVetoMode = data.vetoMode || (data.vetoOff ? 'off' : 'strict');
     setVetoModeUi(serverVetoMode);
-    els.status.textContent = data.chartVetoed
-      ? vetoModeStatusText(serverVetoMode)
-      : serverVetoMode !== 'strict'
-        ? vetoModeStatusText(serverVetoMode)
-        : data.gauges.aligned
-          ? 'Option & PA aligned'
-          : data.gauges.conflict
-            ? 'Option vs PA conflict'
-            : data.bias;
+    const liveDisplay = resolveLiveDisplay(data);
+    els.action.textContent = liveDisplay.action;
+    updateEntryConviction(
+      liveDisplay.conviction,
+      data.entryThreshold,
+      liveDisplay.action,
+    );
+
+    if (liveDisplay.whatIf) {
+      els.status.textContent = `What-if (${serverVetoMode})`;
+    } else if (data.chartVetoed) {
+      els.status.textContent = vetoModeStatusText(serverVetoMode);
+    } else if (serverVetoMode !== 'strict') {
+      els.status.textContent = vetoModeStatusText(serverVetoMode);
+    } else if (data.gauges.aligned) {
+      els.status.textContent = 'Option & PA aligned';
+    } else if (data.gauges.conflict) {
+      els.status.textContent = 'Option vs PA conflict';
+    } else {
+      els.status.textContent = data.bias;
+    }
 
     if (data.marketOpen) els.live.classList.remove('hidden');
     else els.live.classList.add('hidden');
 
-    applyGauges(data.gauges, data.lanes, data.action);
+    applyGauges(data.gauges, liveDisplay.conviction, liveDisplay.action);
     renderComponentList(els.optionComponents, data.optionComponents, 'option');
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
     renderPaDrilldown(data.paDrilldown);
@@ -1757,15 +1819,7 @@
         point.paNeedle !== 0 &&
         Math.sign(point.optionNeedle) !== Math.sign(point.paNeedle),
     };
-    applyGauges(
-      gauges,
-      {
-        optionPercent: Math.round(Math.abs(point.optionNeedle) * 100),
-        priceActionPercent: Math.round(Math.abs(point.paNeedle) * 100),
-        combinedPercent: display.conviction,
-      },
-      display.action,
-    );
+    applyGauges(gauges, display.conviction, display.action);
     els.action.textContent = display.action;
     updateEntryConviction(display.conviction, 60, display.action);
     els.replayMeta.textContent = `${formatIstTime(point.t)} · ${display.action} · spot ${point.spot.toLocaleString('en-IN')}${display.statusSuffix}`;
