@@ -1188,36 +1188,11 @@
     }
   }
 
-  function applySignedLane(fillEl, signedValue, percent) {
-    const v = Math.max(-1, Math.min(1, Number(signedValue) || 0));
-    fillEl.classList.remove('signed-positive', 'signed-negative');
-
-    if (v > 0.02) {
-      fillEl.classList.add('signed-positive');
-      fillEl.style.left = '50%';
-      fillEl.style.right = 'auto';
-      fillEl.style.width = `${v * 50}%`;
-    } else if (v < -0.02) {
-      fillEl.classList.add('signed-negative');
-      fillEl.style.left = 'auto';
-      fillEl.style.right = '50%';
-      fillEl.style.width = `${Math.abs(v) * 50}%`;
-    } else {
-      fillEl.style.left = '50%';
-      fillEl.style.right = 'auto';
-      fillEl.style.width = '0%';
-    }
-    return percent;
-  }
-
-  function combinedSignedValue(action, convictionPercent, optionValue, paValue) {
-    const magnitude =
-      Math.min(100, Math.max(0, Number(convictionPercent) || 0)) / 100;
-    if (action === 'CE-BUY') return magnitude;
-    if (action === 'PE-BUY') return -magnitude;
-    const lean = (Number(optionValue) + Number(paValue)) / 2;
-    if (Math.abs(lean) < 0.02) return 0;
-    return Math.sign(lean) * magnitude;
+  function applyPercentLane(fillEl, percent) {
+    const pct = Math.min(100, Math.max(0, Number(percent) || 0));
+    fillEl.style.left = '0';
+    fillEl.style.right = 'auto';
+    fillEl.style.width = `${pct}%`;
   }
 
   function computeWhatIfFromGauges(data) {
@@ -1310,15 +1285,9 @@
     }
 
     const combined = Number(combinedPercent) || 0;
-    applySignedLane(els.laneOption, option.value, option.percent);
-    applySignedLane(els.lanePa, pa.value, pa.percent);
-    const combinedSigned = combinedSignedValue(
-      action,
-      combined,
-      option.value,
-      pa.value,
-    );
-    applySignedLane(els.laneCombined, combinedSigned, combined);
+    applyPercentLane(els.laneOption, option.percent);
+    applyPercentLane(els.lanePa, pa.percent);
+    applyPercentLane(els.laneCombined, combined);
     els.laneOptionPct.textContent = `${option.percent}%`;
     els.lanePaPct.textContent = `${pa.percent}%`;
     els.laneCombinedPct.textContent = `${combined}%`;
