@@ -1,5 +1,6 @@
 import { FastifyInstance } from 'fastify';
 import { ResponseStatus } from '../types/common';
+import { getStyleScoringConfig } from '../trading-style';
 import { TradingStyle } from '../types/trading-style';
 import {
   ConfluenceContext,
@@ -41,6 +42,16 @@ import {
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
 import { loadVetoPreference, VetoMode } from './veto-preference';
 import { isVetoOff } from '../types/veto-mode';
+
+function resolveEntryThreshold(
+  decision: { convictionThresholds?: { enter?: number } },
+  style: TradingStyle,
+): number {
+  return (
+    decision.convictionThresholds?.enter ??
+    getStyleScoringConfig(style).convictionThreshold.enter
+  );
+}
 
 function parseTradingStyle(styleQuery?: string): TradingStyle {
   const styleStr = (styleQuery || 'INTRADAY').toUpperCase();
@@ -152,6 +163,7 @@ export interface DeckLiveStreamTick {
   action: string;
   bias: string;
   conviction: number;
+  entryThreshold: number;
   lastPrice: number;
   chartVetoed: boolean;
   gauges: ReturnType<typeof buildDeckGauges>;
@@ -180,6 +192,7 @@ export interface DeckLivePayload {
   action: string;
   bias: string;
   conviction: number;
+  entryThreshold: number;
   lastPrice: number;
   chartVetoed: boolean;
   vetoMode: VetoMode;
@@ -838,6 +851,7 @@ export async function buildDeckLivePayload(
     action: decision.action,
     bias: decision.bias,
     conviction: decision.conviction,
+    entryThreshold: resolveEntryThreshold(decision, style),
     lastPrice: liveLastPrice,
     chartVetoed,
     vetoMode: vetoState.vetoMode,
@@ -937,6 +951,7 @@ export async function buildDeckLiveStreamTick(
     action: decision.action,
     bias: decision.bias,
     conviction: decision.conviction,
+    entryThreshold: resolveEntryThreshold(decision, style),
     lastPrice: liveLastPrice,
     chartVetoed,
     gauges,

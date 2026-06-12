@@ -22,6 +22,7 @@
     actionCard: document.getElementById('action-card'),
     action: document.getElementById('action-label'),
     conviction: document.getElementById('conviction-label'),
+    convictionThreshold: document.getElementById('conviction-threshold'),
     status: document.getElementById('status-line'),
     optionValue: document.getElementById('option-value'),
     paValue: document.getElementById('pa-value'),
@@ -1187,17 +1188,50 @@
 
   function applySignedLane(fillEl, signedValue, percent) {
     const v = Math.max(-1, Math.min(1, Number(signedValue) || 0));
-    const width = `${Math.abs(v) * 50}%`;
-    fillEl.style.width = width;
     fillEl.classList.remove('signed-positive', 'signed-negative');
-    if (v > 0.02) fillEl.classList.add('signed-positive');
-    else if (v < -0.02) fillEl.classList.add('signed-negative');
-    else {
+
+    if (v > 0.02) {
+      fillEl.classList.add('signed-positive');
+      fillEl.style.left = '50%';
+      fillEl.style.right = 'auto';
+      fillEl.style.width = `${v * 50}%`;
+    } else if (v < -0.02) {
+      fillEl.classList.add('signed-negative');
+      fillEl.style.left = 'auto';
+      fillEl.style.right = '50%';
+      fillEl.style.width = `${Math.abs(v) * 50}%`;
+    } else {
       fillEl.style.left = '50%';
       fillEl.style.right = 'auto';
       fillEl.style.width = '0%';
     }
     return percent;
+  }
+
+  function combinedSignedValue(action, convictionPercent, optionValue, paValue) {
+    const magnitude =
+      Math.min(100, Math.max(0, Number(convictionPercent) || 0)) / 100;
+    if (action === 'CE-BUY') return magnitude;
+    if (action === 'PE-BUY') return -magnitude;
+    const lean = (Number(optionValue) + Number(paValue)) / 2;
+    if (Math.abs(lean) < 0.02) return 0;
+    return Math.sign(lean) * magnitude;
+  }
+
+  function updateEntryConviction(conviction, threshold, action) {
+    const pct = Number(conviction) || 0;
+    const need = Number(threshold) || 60;
+    els.conviction.textContent = `${pct}%`;
+    if (els.convictionThreshold) {
+      els.convictionThreshold.textContent = ` / ${need}%`;
+    }
+    els.conviction.classList.remove('at-threshold', 'below-threshold');
+    const tradeable = action === 'CE-BUY' || action === 'PE-BUY';
+    if (tradeable && pct >= need) {
+      els.conviction.classList.add('at-threshold');
+    } else {
+      els.conviction.classList.add('below-threshold');
+    }
   }
 
   function spotColorForAction(action) {
@@ -1206,7 +1240,7 @@
     return '#8b95a8';
   }
 
-  function applyGauges(gauges, lanes) {
+  function applyGauges(gauges, lanes, action = 'NO-TRADE') {
     const option = gauges.option;
     const pa = gauges.priceAction;
     els.needleOption.style.left = needleLeft(option.value);
@@ -1228,13 +1262,20 @@
         lanes.optionPercent,
       );
       const paPct = applySignedLane(els.lanePa, pa.value, lanes.priceActionPercent);
-      els.laneCombined.style.width = `${lanes.combinedPercent}%`;
-      els.laneCombined.classList.remove('signed-positive', 'signed-negative');
-      els.laneCombined.style.left = '0';
-      els.laneCombined.style.right = 'auto';
+      const combinedSigned = combinedSignedValue(
+        action,
+        lanes.combinedPercent,
+        option.value,
+        pa.value,
+      );
+      const combinedPct = applySignedLane(
+        els.laneCombined,
+        combinedSigned,
+        lanes.combinedPercent,
+      );
       els.laneOptionPct.textContent = `${optionPct}%`;
       els.lanePaPct.textContent = `${paPct}%`;
-      els.laneCombinedPct.textContent = `${lanes.combinedPercent}%`;
+      els.laneCombinedPct.textContent = `${combinedPct}%`;
     }
 
     els.actionCard.classList.remove('bullish', 'bearish', 'conflict');
@@ -1555,7 +1596,7 @@
   function applyDeckTick(tick) {
     els.clock.textContent = `${formatClock(tick.asOf)} IST`;
     els.action.textContent = tick.action;
-    els.conviction.textContent = `${tick.conviction}%`;
+    updateEntryConviction(tick.conviction, tick.entryThreshold, tick.action);
 
     if (tick.marketOpen) els.live.classList.remove('hidden');
     else els.live.classList.add('hidden');
@@ -1570,7 +1611,7 @@
             ? 'Option vs PA conflict'
             : tick.bias;
 
-    applyGauges(tick.gauges, tick.lanes);
+    applyGauges(tick.gauges, tick.lanes, tick.action);
     renderComponentList(els.optionComponents, tick.optionComponents, 'option');
     renderComponentList(els.paComponents, tick.priceActionComponents, 'pa');
     renderPaDrilldown(tick.paDrilldown);
@@ -1599,7 +1640,7 @@
     els.style.textContent = data.tradingStyle;
     els.clock.textContent = `${formatClock(data.asOf)} IST`;
     els.action.textContent = data.action;
-    els.conviction.textContent = `${data.conviction}%`;
+    updateEntryConviction(data.conviction, data.entryThreshold, data.action);
     serverVetoMode = data.vetoMode || (data.vetoOff ? 'off' : 'strict');
     setVetoModeUi(serverVetoMode);
     els.status.textContent = data.chartVetoed
@@ -1615,7 +1656,7 @@
     if (data.marketOpen) els.live.classList.remove('hidden');
     else els.live.classList.add('hidden');
 
-    applyGauges(data.gauges, data.lanes);
+    applyGauges(data.gauges, data.lanes, data.action);
     renderComponentList(els.optionComponents, data.optionComponents, 'option');
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
     renderPaDrilldown(data.paDrilldown);
@@ -1716,13 +1757,17 @@
         point.paNeedle !== 0 &&
         Math.sign(point.optionNeedle) !== Math.sign(point.paNeedle),
     };
-    applyGauges(gauges, {
-      optionPercent: Math.round(Math.abs(point.optionNeedle) * 100),
-      priceActionPercent: Math.round(Math.abs(point.paNeedle) * 100),
-      combinedPercent: display.conviction,
-    });
+    applyGauges(
+      gauges,
+      {
+        optionPercent: Math.round(Math.abs(point.optionNeedle) * 100),
+        priceActionPercent: Math.round(Math.abs(point.paNeedle) * 100),
+        combinedPercent: display.conviction,
+      },
+      display.action,
+    );
     els.action.textContent = display.action;
-    els.conviction.textContent = `${display.conviction}%`;
+    updateEntryConviction(display.conviction, 60, display.action);
     els.replayMeta.textContent = `${formatIstTime(point.t)} · ${display.action} · spot ${point.spot.toLocaleString('en-IN')}${display.statusSuffix}`;
     if (point.vetoed && display.action === point.action) {
       els.status.textContent = `Chart veto · ${point.vetoReason || 'blocked'}`;

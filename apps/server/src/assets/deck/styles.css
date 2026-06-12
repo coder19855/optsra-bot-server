@@ -108,18 +108,55 @@ body.replay-mode {
 .action-main {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .action-label {
   font-size: 1.1rem;
   font-weight: 700;
+  line-height: 1.25;
+}
+
+.entry-conviction {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.entry-conviction-label {
+  display: block;
+  font-size: 0.62rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.entry-conviction-value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
 }
 
 .conviction {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 1.25rem;
   font-weight: 700;
+}
+
+.conviction.at-threshold {
+  color: #4ade80;
+}
+
+.conviction.below-threshold {
+  color: #fbbf24;
+}
+
+.conviction-threshold {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
 }
 
 .status-line {
@@ -497,6 +534,18 @@ body.replay-mode {
   margin-bottom: 14px;
 }
 
+.lane-scale-row {
+  margin-bottom: 4px;
+}
+
+.lane-scale {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  font-size: 0.58rem;
+  color: var(--muted);
+}
+
 .lane-row {
   display: grid;
   grid-template-columns: 64px 1fr 36px;
@@ -536,14 +585,6 @@ body.replay-mode {
   border-radius: 999px;
   width: 0%;
   transition: width 0.35s ease, left 0.35s ease, right 0.35s ease;
-}
-
-.lane-fill.signed-positive {
-  left: 50%;
-}
-
-.lane-fill.signed-negative {
-  right: 50%;
 }
 
 .lane-fill.option {

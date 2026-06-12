@@ -32,7 +32,12 @@
       <section class="action-card" id="action-card">
         <div class="action-main">
           <span id="action-label" class="action-label">—</span>
-          <span id="conviction-label" class="conviction">—</span>
+          <div class="entry-conviction" aria-label="Entry conviction">
+            <span class="entry-conviction-label">Entry</span>
+            <span class="entry-conviction-value">
+              <span id="conviction-label" class="conviction">—</span><span id="conviction-threshold" class="conviction-threshold"></span>
+            </span>
+          </div>
         </div>
         <p id="status-line" class="status-line">Loading…</p>
       </section>
@@ -91,6 +96,11 @@
         </section>
 
         <section class="lane-block">
+          <div class="lane-row lane-scale-row">
+            <span aria-hidden="true"></span>
+            <div class="lane-scale"><span>PE</span><span>0</span><span>CE</span></div>
+            <span aria-hidden="true"></span>
+          </div>
           <div class="lane-row">
             <span>Option</span>
             <div class="lane-bar"><div id="lane-option" class="lane-fill option"></div></div>
