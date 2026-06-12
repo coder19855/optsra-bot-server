@@ -650,8 +650,9 @@ body.replay-mode {
 }
 
 .veto-score-zone.veto-score-muted {
-  opacity: 0.42;
-  filter: grayscale(0.9) saturate(0.35);
+  opacity: 0.88;
+  filter: grayscale(0.5) saturate(0.72) brightness(0.96);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
 }
 
 .veto-score-zone.veto-score-muted::after {
@@ -659,7 +660,7 @@ body.replay-mode {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  background: rgba(13, 15, 18, 0.28);
+  background: rgba(148, 163, 184, 0.1);
   pointer-events: none;
   z-index: 2;
 }
@@ -680,9 +681,10 @@ body.replay-mode {
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: #cbd5e1;
-  background: rgba(71, 85, 105, 0.75);
-  border: 1px solid rgba(148, 163, 184, 0.35);
+  color: #94a3b8;
+  background: rgba(71, 85, 105, 0.45);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  backdrop-filter: blur(4px);
 }
 
 .lane-row.veto-score-muted .veto-score-tag {
