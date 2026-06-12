@@ -5,6 +5,8 @@ import {
   resolveCandleCacheTtlHigherMs,
   resolveOptionChainCacheTtlMs,
 } from '../constants/market-data-cache';
+import { notifyOptionChainFetched } from './market-stream-coordinator';
+import { patchOptionChainWithLiveQuotes } from './option-chain-patch';
 
 interface CacheEntry<T> {
   value: T;
@@ -96,15 +98,16 @@ export class MarketDataStore {
 
     if (cached && nowMs - cached.fetchedAt < ttl) {
       this.optionChainHits += 1;
-      return cached.value;
+      return patchOptionChainWithLiveQuotes(cached.value, nowMs);
     }
 
     this.optionChainMisses += 1;
     const value = await fetch();
     if (value.s === 'ok') {
       this.optionChainCache.set(key, { value, fetchedAt: nowMs });
+      notifyOptionChainFetched(params.symbol, value);
     }
-    return value;
+    return patchOptionChainWithLiveQuotes(value, nowMs);
   }
 
   getStats(): MarketDataCacheStats {

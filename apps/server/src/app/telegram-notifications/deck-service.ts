@@ -59,6 +59,25 @@ function shortSymbol(symbol: string): string {
   return part.replace('-INDEX', '');
 }
 
+function mergeSpotSeriesWithStream(
+  timelineSeries: DeckSpotPoint[],
+  streamSeries: DeckSpotPoint[],
+): DeckSpotPoint[] {
+  if (!streamSeries.length) return timelineSeries;
+  const cutoff = streamSeries[0].t;
+  const base = timelineSeries.filter((p) => p.t < cutoff);
+  return [...base, ...streamSeries];
+}
+
+function resolveLiveIndexPrice(
+  fastify: FastifyInstance,
+  indexSymbol: string,
+  fallback: number,
+): number {
+  const streamed = fastify.fyersMarketStream?.getIndexLtp(indexSymbol);
+  return streamed ?? fallback;
+}
+
 export interface DeckSpotPoint {
   t: number;
   v: number;
@@ -698,6 +717,18 @@ export async function buildDeckLivePayload(
   const recent = points.slice(-48);
 
   const marketOpen = isIndianMarketOpen(Date.now());
+  const indexSymbol = decision.symbol || params.symbol;
+  const liveLastPrice = resolveLiveIndexPrice(
+    fastify,
+    indexSymbol,
+    decision.lastPrice,
+  );
+  const streamSpotSeries =
+    fastify.fyersMarketStream?.getSpotSeries(indexSymbol) ?? [];
+  const spotSeries = mergeSpotSeriesWithStream(
+    timelineToSpotSeries(recent),
+    streamSpotSeries,
+  );
 
   const chartVetoed =
     !isVetoOff(vetoState.vetoMode) &&
@@ -715,7 +746,7 @@ export async function buildDeckLivePayload(
     action: decision.action,
     bias: decision.bias,
     conviction: decision.conviction,
-    lastPrice: decision.lastPrice,
+    lastPrice: liveLastPrice,
     chartVetoed,
     vetoMode: vetoState.vetoMode,
     vetoOff: isVetoOff(vetoState.vetoMode),
@@ -725,12 +756,12 @@ export async function buildDeckLivePayload(
       priceActionPercent: price,
       combinedPercent: decision.conviction,
     },
-    spotSeries: timelineToSpotSeries(recent),
+    spotSeries,
     spotCandles: await resolveSpotCandles(
       fastify,
-      decision.symbol || params.symbol,
+      indexSymbol,
       style,
-      timelineToSpotSeries(recent),
+      spotSeries,
       Date.now(),
     ),
     convictionSeries: recent.map((p) => ({

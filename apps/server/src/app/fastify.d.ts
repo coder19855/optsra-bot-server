@@ -29,6 +29,8 @@ import { TradingStyle } from './types/trading-style';
 import { FyersTrackedMethod } from './constants/fyers-usage';
 import { FyersUsageResponse } from './types/fyers-usage';
 import { MarketDataCacheStats } from './market-data/market-data-store';
+import { MarketStreamStats } from './market-data/fyers-market-stream-manager';
+import { LiveQuote } from './market-data/quote-cache';
 import {
   TelegramNotificationStatus,
   TelegramSendOptions,
@@ -75,6 +77,19 @@ declare module 'fastify' {
     };
     marketDataCache: {
       getStats: () => MarketDataCacheStats;
+    };
+    fyersMarketStream?: {
+      isEnabled: () => boolean;
+      isConnected: () => boolean;
+      getIndexLtp: (symbol: string) => number | null;
+      getOptionLtp: (symbol: string) => number | null;
+      getSpotSeries: (
+        symbol: string,
+        maxAgeMs?: number,
+      ) => Array<{ t: number; v: number }>;
+      getQuote: (symbol: string) => LiveQuote | null;
+      getStats: () => MarketStreamStats;
+      syncSession: () => Promise<void>;
     };
     mongo?: {
       client: MongoClient;

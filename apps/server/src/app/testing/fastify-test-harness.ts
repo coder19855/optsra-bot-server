@@ -100,6 +100,33 @@ export function decorateTelegramNotifications(
   return { sendMessage, pollNow, getStatus };
 }
 
+export function decorateFyersMarketStream(fastify: FastifyInstance) {
+  fastify.decorate('fyersMarketStream', {
+    isEnabled: jest.fn().mockReturnValue(false),
+    isConnected: jest.fn().mockReturnValue(false),
+    getIndexLtp: jest.fn().mockReturnValue(null),
+    getOptionLtp: jest.fn().mockReturnValue(null),
+    getSpotSeries: jest.fn().mockReturnValue([]),
+    getQuote: jest.fn().mockReturnValue(null),
+    getStats: jest.fn().mockReturnValue({
+      enabled: false,
+      connected: false,
+      desiredSymbols: 0,
+      activeSymbols: 0,
+      messages: 0,
+      lastMessageAt: null,
+      lastError: null,
+      quoteCache: {
+        quoteCount: 0,
+        wsUpdates: 0,
+        restSeeds: 0,
+        ringSymbols: 0,
+      },
+    }),
+    syncSession: jest.fn().mockResolvedValue(undefined),
+  });
+}
+
 export function decorateFyersUsage(fastify: FastifyInstance) {
   fastify.decorate('fyersUsage', {
     record: jest.fn(),

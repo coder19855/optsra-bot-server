@@ -38,10 +38,12 @@ import {
   snapshotKey,
 } from '../telegram-notifications/signal-tracker';
 import { saveAlertWhyContext } from '../telegram-notifications/alert-context-store';
+import { notifyOpenOutcomeSymbols } from '../market-data/market-stream-coordinator';
 import { createPollMarketDataContext } from '../market-data/poll-market-data-context';
 import { evaluateOpenPositionTpAlerts } from '../telegram-notifications/position-monitor';
 import {
   closeSessionSignalOutcomes,
+  loadOpenOutcomeOptionSymbols,
   recordSignalOutcome,
   updateOpenSignalOutcomes,
 } from '../telegram-notifications/signal-outcome-tracker';
@@ -763,6 +765,8 @@ export default fp(
               symbols: watchedSymbols,
               spotBySymbol,
             });
+            const outcomeSymbols = await loadOpenOutcomeOptionSymbols(fastify);
+            notifyOpenOutcomeSymbols(outcomeSymbols);
           } catch (err) {
             fastify.log.warn({ err }, 'Signal outcome tracker update failed');
           }

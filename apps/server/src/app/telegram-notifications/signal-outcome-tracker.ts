@@ -5,6 +5,7 @@ import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation'
 import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { formatScenarioBanner, tintLine } from './telegram-palette';
+import { notifyOpenOutcomeSymbols } from '../market-data/market-stream-coordinator';
 import { getIstSessionClock } from './signal-tracker';
 
 const COLLECTION = 'signal-outcomes';
@@ -70,12 +71,16 @@ export async function recordSignalOutcome(
   };
 
   await col.insertOne(record);
+  notifyOpenOutcomeSymbols([exactStrike.fyersSymbol]);
 }
 
 async function fetchOptionPremium(
   fastify: FastifyInstance,
   optionSymbol: string,
 ): Promise<number | null> {
+  const streamed = fastify.fyersMarketStream?.getOptionLtp(optionSymbol);
+  if (streamed != null) return streamed;
+
   try {
     if (!(await fastify.ensureFyersSession())) return null;
     const res = await fastify.fyers.getQuotes({ symbols: [optionSymbol] });
@@ -165,6 +170,18 @@ export async function closeSessionSignalOutcomes(
   }
 
   return closed;
+}
+
+export async function loadOpenOutcomeOptionSymbols(
+  fastify: FastifyInstance,
+): Promise<string[]> {
+  const col = collection(fastify);
+  if (!col) return [];
+
+  const open = await col.find({ status: 'open' }).toArray();
+  return open
+    .map((row) => row.optionSymbol)
+    .filter((symbol): symbol is string => Boolean(symbol));
 }
 
 export async function loadSignalOutcomes(

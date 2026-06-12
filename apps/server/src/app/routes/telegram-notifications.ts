@@ -10,7 +10,11 @@ export default async function telegramNotificationsRoute(
   });
 
   fastify.get('/api/notifications/fyers-usage', async (_request, reply) => {
-    return reply.send(fastify.fyersUsage.getStats());
+    return reply.send({
+      ...fastify.fyersUsage.getStats(),
+      marketStream: fastify.fyersMarketStream?.getStats() ?? null,
+      marketDataCache: fastify.marketDataCache?.getStats() ?? null,
+    });
   });
 
   async function sendTestNotification(message?: string) {
