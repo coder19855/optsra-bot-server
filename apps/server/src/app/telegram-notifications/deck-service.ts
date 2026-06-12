@@ -25,6 +25,10 @@ import {
   PaDrilldown,
 } from './deck-pa-drilldown';
 import {
+  buildDeckPatternContext,
+  DeckPatternContext,
+} from './deck-pattern-context';
+import {
   DeckStrategyPayload,
   extractDeckStrategyPayload,
 } from './deck-strategy';
@@ -162,6 +166,7 @@ export interface DeckLiveStreamTick {
   vetoBreakup: DeckVetoBreakupItem[];
   vetoReason?: string;
   structuralAction?: string;
+  patternContext?: DeckPatternContext;
 }
 
 export interface DeckLivePayload {
@@ -202,6 +207,7 @@ export interface DeckLivePayload {
   structuralAction?: string;
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
+  patternContext?: DeckPatternContext;
 }
 
 export interface DeckReplayPayload {
@@ -336,6 +342,15 @@ async function fetchTradeDecision(
       };
     };
   };
+}
+
+function extractPatternContext(
+  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  spotSeries: DeckSpotPoint[],
+): DeckPatternContext | undefined {
+  const rawPrice = decision._debug?.rawPrice as PriceActionResponse | undefined;
+  if (!rawPrice) return undefined;
+  return buildDeckPatternContext(rawPrice, spotSeries);
 }
 
 function extractPaDrilldown(
@@ -811,6 +826,7 @@ export async function buildDeckLivePayload(
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
     strategyRecommendation: extractDeckStrategyPayload(decision),
+    patternContext: extractPatternContext(decision, spotSeries),
   };
 }
 
@@ -879,6 +895,7 @@ export async function buildDeckLiveStreamTick(
     vetoBreakup: extractVetoBreakup(decision, vetoState.vetoMode),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
+    patternContext: extractPatternContext(decision, spotSeries),
   };
 }
 

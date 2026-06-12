@@ -171,10 +171,29 @@ function marketContextSection(ctx: ConfluenceContext | undefined): PaDrilldownSe
     });
   }
   if (ctx.chartPattern && ctx.chartPattern !== 'none') {
+    const status =
+      ctx.chartPatternStatus === 'forming' ? 'forming · ' : '';
+    const direction = ctx.chartPatternDirection;
     rows.push({
       label: 'Chart pattern',
-      value: humanizeToken(ctx.chartPattern),
-      tone: 'neutral',
+      value: `${status}${humanizeToken(ctx.chartPattern)}`,
+      tone:
+        direction === 'bullish'
+          ? 'positive'
+          : direction === 'bearish'
+            ? 'negative'
+            : 'neutral',
+    });
+  }
+  if (ctx.candlestickPrimary && ctx.candlestickPrimary !== 'none') {
+    rows.push({
+      label: 'Primary candle',
+      value: humanizeToken(ctx.candlestickPrimary),
+      tone: /bull|hammer|morning|soldiers|piercing/i.test(ctx.candlestickPrimary)
+        ? 'positive'
+        : /bear|shooting|evening|crows|dark_cloud/i.test(ctx.candlestickPrimary)
+          ? 'negative'
+          : 'neutral',
     });
   }
 

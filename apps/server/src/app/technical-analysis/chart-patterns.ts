@@ -27,11 +27,20 @@ export function detectChartPattern(
 
   const lastClose = candles[candles.length - 1][4];
 
+  const headAndShoulders = detectHeadAndShoulders(swings, lastClose);
+  if (headAndShoulders) return headAndShoulders;
+
+  const inverseHs = detectInverseHeadAndShoulders(swings, lastClose);
+  if (inverseHs) return inverseHs;
+
   const doubleTop = detectDoubleTop(swings, lastClose);
   if (doubleTop) return doubleTop;
 
   const doubleBottom = detectDoubleBottom(swings, lastClose);
   if (doubleBottom) return doubleBottom;
+
+  const wedge = detectWedge(candles);
+  if (wedge) return wedge;
 
   const flag = detectFlagPennant(candles);
   if (flag) return flag;
@@ -46,6 +55,92 @@ export function detectChartPattern(
   if (trendBreak) return trendBreak;
 
   return NONE;
+}
+
+function detectHeadAndShoulders(
+  swings: Swing,
+  lastClose: number,
+): ChartPatternResult | null {
+  const highs = swings.highs;
+  if (highs.length < 3) return null;
+
+  const left = highs[highs.length - 3];
+  const head = highs[highs.length - 2];
+  const right = highs[highs.length - 1];
+  if (right.index - left.index < 8) return null;
+
+  const tol = priceTolerance(head.price);
+  const shouldersSimilar = Math.abs(left.price - right.price) <= tol;
+  const headHigher =
+    head.price > left.price + tol && head.price > right.price + tol;
+  if (!shouldersSimilar || !headHigher) return null;
+
+  const lowsBetween = swings.lows.filter(
+    (l) => l.index > left.index && l.index < right.index,
+  );
+  const neckline =
+    lowsBetween.length > 0
+      ? Math.min(...lowsBetween.map((l) => l.price))
+      : Math.min(left.price, right.price) - tol * 2;
+
+  if (lastClose < neckline) {
+    return {
+      pattern: 'head_and_shoulders',
+      direction: 'bearish',
+      scoreBoost: -0.12,
+      status: 'confirmed',
+    };
+  }
+
+  return {
+    pattern: 'head_and_shoulders',
+    direction: 'bearish',
+    scoreBoost: -0.05,
+    status: 'forming',
+  };
+}
+
+function detectInverseHeadAndShoulders(
+  swings: Swing,
+  lastClose: number,
+): ChartPatternResult | null {
+  const lows = swings.lows;
+  if (lows.length < 3) return null;
+
+  const left = lows[lows.length - 3];
+  const head = lows[lows.length - 2];
+  const right = lows[lows.length - 1];
+  if (right.index - left.index < 8) return null;
+
+  const tol = priceTolerance(head.price);
+  const shouldersSimilar = Math.abs(left.price - right.price) <= tol;
+  const headLower =
+    head.price < left.price - tol && head.price < right.price - tol;
+  if (!shouldersSimilar || !headLower) return null;
+
+  const highsBetween = swings.highs.filter(
+    (h) => h.index > left.index && h.index < right.index,
+  );
+  const neckline =
+    highsBetween.length > 0
+      ? Math.max(...highsBetween.map((h) => h.price))
+      : Math.max(left.price, right.price) + tol * 2;
+
+  if (lastClose > neckline) {
+    return {
+      pattern: 'inverse_head_and_shoulders',
+      direction: 'bullish',
+      scoreBoost: 0.12,
+      status: 'confirmed',
+    };
+  }
+
+  return {
+    pattern: 'inverse_head_and_shoulders',
+    direction: 'bullish',
+    scoreBoost: 0.05,
+    status: 'forming',
+  };
 }
 
 function detectDoubleTop(
@@ -75,10 +170,16 @@ function detectDoubleTop(
       pattern: 'double_top',
       direction: 'bearish',
       scoreBoost: -0.1,
+      status: 'confirmed',
     };
   }
 
-  return null;
+  return {
+    pattern: 'double_top',
+    direction: 'bearish',
+    scoreBoost: -0.04,
+    status: 'forming',
+  };
 }
 
 function detectDoubleBottom(
@@ -108,6 +209,55 @@ function detectDoubleBottom(
       pattern: 'double_bottom',
       direction: 'bullish',
       scoreBoost: 0.1,
+      status: 'confirmed',
+    };
+  }
+
+  return {
+    pattern: 'double_bottom',
+    direction: 'bullish',
+    scoreBoost: 0.04,
+    status: 'forming',
+  };
+}
+
+function detectWedge(candles: FyersAPI.Candle[]): ChartPatternResult | null {
+  const window = candles.slice(-20);
+  if (window.length < 20) return null;
+
+  const early = window.slice(0, 8);
+  const late = window.slice(-8);
+
+  const earlyHigh = Math.max(...early.map((c) => c[2]));
+  const lateHigh = Math.max(...late.map((c) => c[2]));
+  const earlyLow = Math.min(...early.map((c) => c[3]));
+  const lateLow = Math.min(...late.map((c) => c[3]));
+
+  const highsRising = lateHigh > earlyHigh * 1.002;
+  const lowsRisingFaster =
+    lateLow > earlyLow * 1.004 &&
+    lateLow - earlyLow > (lateHigh - earlyHigh) * 1.2;
+
+  if (highsRising && lowsRisingFaster) {
+    return {
+      pattern: 'rising_wedge',
+      direction: 'bearish',
+      scoreBoost: -0.07,
+      status: 'forming',
+    };
+  }
+
+  const highsFalling = lateHigh < earlyHigh * 0.998;
+  const lowsFallingFaster =
+    lateLow < earlyLow * 0.996 &&
+    earlyLow - lateLow > (earlyHigh - lateHigh) * 1.2;
+
+  if (highsFalling && lowsFallingFaster) {
+    return {
+      pattern: 'falling_wedge',
+      direction: 'bullish',
+      scoreBoost: 0.07,
+      status: 'forming',
     };
   }
 
@@ -130,8 +280,7 @@ function detectFlagPennant(
 
   if (impulseAvg <= 0 || consAvg / impulseAvg > 0.72) return null;
 
-  const impulseMove =
-    impulse[impulse.length - 1][4] - impulse[0][1];
+  const impulseMove = impulse[impulse.length - 1][4] - impulse[0][1];
   const narrowing =
     consRanges[0] > consRanges[consRanges.length - 1] * 1.15;
 
@@ -142,6 +291,7 @@ function detectFlagPennant(
       pattern: 'bull_flag',
       direction: 'bullish',
       scoreBoost: 0.08,
+      status: 'forming',
     };
   }
 
@@ -150,6 +300,7 @@ function detectFlagPennant(
       pattern: 'bear_flag',
       direction: 'bearish',
       scoreBoost: -0.08,
+      status: 'forming',
     };
   }
 
@@ -178,22 +329,33 @@ function detectTriangle(
       pattern: 'triangle_symmetric',
       direction: 'neutral',
       scoreBoost: 0,
+      status: 'forming',
     };
   }
 
-  if (highsFalling && !lowsRising && Math.abs(lateLow - earlyLow) < earlyLow * 0.003) {
+  if (
+    highsFalling &&
+    !lowsRising &&
+    Math.abs(lateLow - earlyLow) < earlyLow * 0.003
+  ) {
     return {
       pattern: 'triangle_descending',
       direction: 'bearish',
       scoreBoost: -0.06,
+      status: 'forming',
     };
   }
 
-  if (lowsRising && !highsFalling && Math.abs(lateHigh - earlyHigh) < earlyHigh * 0.003) {
+  if (
+    lowsRising &&
+    !highsFalling &&
+    Math.abs(lateHigh - earlyHigh) < earlyHigh * 0.003
+  ) {
     return {
       pattern: 'triangle_ascending',
       direction: 'bullish',
       scoreBoost: 0.06,
+      status: 'forming',
     };
   }
 
@@ -225,6 +387,7 @@ function detectRangeBreakout(
       pattern: 'range_breakout_bull',
       direction: 'bullish',
       scoreBoost: 0.09,
+      status: 'confirmed',
     };
   }
 
@@ -233,6 +396,7 @@ function detectRangeBreakout(
       pattern: 'range_breakout_bear',
       direction: 'bearish',
       scoreBoost: -0.09,
+      status: 'confirmed',
     };
   }
 
@@ -260,6 +424,7 @@ function detectTrendlineBreak(
           pattern: 'trendline_break_bear',
           direction: 'bearish',
           scoreBoost: -0.07,
+          status: 'confirmed',
         };
       }
     }
@@ -276,6 +441,7 @@ function detectTrendlineBreak(
           pattern: 'trendline_break_bull',
           direction: 'bullish',
           scoreBoost: 0.07,
+          status: 'confirmed',
         };
       }
     }

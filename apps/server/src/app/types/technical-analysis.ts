@@ -7,14 +7,28 @@ export type CandlestickPatternId =
   | 'bearish_engulfing'
   | 'hammer'
   | 'shooting_star'
+  | 'inverted_hammer'
+  | 'morning_star'
+  | 'evening_star'
+  | 'bullish_harami'
+  | 'bearish_harami'
+  | 'three_white_soldiers'
+  | 'three_black_crows'
+  | 'piercing_line'
+  | 'dark_cloud_cover'
+  | 'spinning_top'
   | 'doji'
   | 'none';
 
 export type ChartPatternId =
   | 'double_top'
   | 'double_bottom'
+  | 'head_and_shoulders'
+  | 'inverse_head_and_shoulders'
   | 'bull_flag'
   | 'bear_flag'
+  | 'rising_wedge'
+  | 'falling_wedge'
   | 'triangle_ascending'
   | 'triangle_descending'
   | 'triangle_symmetric'
@@ -26,10 +40,13 @@ export type ChartPatternId =
 
 export type ChartPatternDirection = 'bullish' | 'bearish' | 'neutral';
 
+export type PatternStatus = 'forming' | 'confirmed';
+
 export interface ChartPatternResult {
   pattern: ChartPatternId;
   direction: ChartPatternDirection;
   scoreBoost: number;
+  status?: PatternStatus;
 }
 
 export type AtrTrend = 'rising' | 'falling' | 'flat';
@@ -71,6 +88,9 @@ export interface TrendQuality {
 
 export interface ConfluenceContext {
   chartPattern: ChartPatternId;
+  chartPatternStatus?: PatternStatus;
+  chartPatternDirection?: ChartPatternDirection;
+  candlestickPrimary?: CandlestickPatternId;
   volatility: VolatilityRegime;
   session: SessionBias;
   trendQuality: TrendQuality;

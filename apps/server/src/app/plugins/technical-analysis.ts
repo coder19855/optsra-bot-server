@@ -923,9 +923,9 @@ export default fp(
           }
         }
 
-        // Step 5: opposing major chart pattern
+        // Step 5: opposing major chart pattern (confirmed only; forming patterns inform score)
         const cp = momentum?.chartPatternPrimary;
-        if (allowTrade && cp && cp.pattern !== 'none') {
+        if (allowTrade && cp && cp.pattern !== 'none' && cp.status !== 'forming') {
           if (isBullishPrimary && cp.direction === 'bearish') {
             allowTrade = false;
             noteVeto(`CE blocked: bearish chart pattern (${cp.pattern.replace(/_/g, ' ')})`);
@@ -1027,9 +1027,44 @@ export default fp(
           (action === 'CE-BUY' && cp.direction === 'bullish') ||
           (action === 'PE-BUY' && cp.direction === 'bearish');
         if (aligned && cp.pattern !== 'none') {
+          const formingFactor = cp.status === 'forming' ? 0.5 : 1;
           finalConfidence = Math.min(
             TA_CONFIDENCE.MAX,
-            finalConfidence + enhance.ALIGNED_PATTERN_CONFIDENCE_BOOST,
+            finalConfidence +
+              Math.round(
+                enhance.ALIGNED_PATTERN_CONFIDENCE_BOOST * formingFactor,
+              ),
+          );
+        }
+      }
+
+      if (
+        action !== 'NO-TRADE' &&
+        enhance.ENABLED_FOR_INTRADAY &&
+        tradingStyle === TradingStyle.Intraday &&
+        momentum?.candlestickPrimary
+      ) {
+        const cs = momentum.candlestickPrimary;
+        const aligned =
+          (action === 'CE-BUY' && cs.direction === 'bullish') ||
+          (action === 'PE-BUY' && cs.direction === 'bearish');
+        if (aligned && cs.pattern !== 'none' && cs.pattern !== 'doji') {
+          finalConfidence = Math.min(
+            TA_CONFIDENCE.MAX,
+            finalConfidence + enhance.ALIGNED_CANDLESTICK_CONFIDENCE_BOOST,
+          );
+        }
+        const cs15 = momentum.candlestick15m;
+        if (
+          cs15 &&
+          cs.pattern !== 'none' &&
+          cs15.pattern !== 'none' &&
+          cs.direction === cs15.direction &&
+          cs.direction !== 'neutral'
+        ) {
+          finalConfidence = Math.min(
+            TA_CONFIDENCE.MAX,
+            finalConfidence + enhance.MULTI_TF_CANDLESTICK_CONFIDENCE_BOOST,
           );
         }
       }

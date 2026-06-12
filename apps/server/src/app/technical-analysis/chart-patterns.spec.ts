@@ -13,6 +13,21 @@ describe('detectChartPattern', () => {
     expect(result.pattern).toBe('none');
   });
 
+  it('detects forming double top before neckline break', () => {
+    const candles = sampleCandles(30, 25000);
+    const swings = {
+      highs: [
+        { index: 8, price: 25120 },
+        { index: 18, price: 25115 },
+      ],
+      lows: [{ index: 12, price: 24980 }],
+    };
+    const result = detectChartPattern(candles, swings, 24900, 25100);
+    expect(result.pattern).toBe('double_top');
+    expect(result.status).toBe('forming');
+    expect(result.direction).toBe('bearish');
+  });
+
   it('detects range breakout when price clears resistance', () => {
     const candles = sampleCandles(30, 25000);
     const last = candles[candles.length - 1];

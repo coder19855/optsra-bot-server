@@ -65,6 +65,7 @@
     vetoModeOptions: document.getElementById('veto-mode-options'),
     vetoModeNote: document.getElementById('veto-mode-note'),
     spotScrubLabel: document.getElementById('spot-scrub-label'),
+    patternContext: document.getElementById('pattern-context'),
     spotChartEmpty: document.getElementById('spot-chart-empty'),
     spotChartError: document.getElementById('spot-chart-error'),
     pnlNote: document.getElementById('pnl-note'),
@@ -92,6 +93,7 @@
   let pendingSpotScrubPoint = null;
   let pendingSpotScrubAction = null;
   let hasDisplayedDeck = false;
+  let patternMarkers = [];
   const SPOT_CHART_HEIGHT = 200;
 
   function deckHasRenderableContent(data) {
@@ -1252,12 +1254,59 @@
     return idx >= 0 ? idx : spotDataCache.length - 1;
   }
 
+  function patternMarkerColor(tone) {
+    if (tone === 'bull') return '#22c55e';
+    if (tone === 'bear') return '#ef4444';
+    return '#8b95a8';
+  }
+
+  function chartMarkersForPatterns(series) {
+    if (!series?.length || !patternMarkers.length) return [];
+    const markers = [];
+    for (const marker of patternMarkers) {
+      const barTime = nearestBarTime(series, Math.floor(marker.t / 1000));
+      if (barTime == null) continue;
+      markers.push({
+        time: barTime,
+        position: 'aboveBar',
+        color: patternMarkerColor(marker.tone),
+        shape: 'square',
+        text: marker.label.slice(0, 12),
+      });
+    }
+    return markers.sort((a, b) => a.time - b.time);
+  }
+
+  function renderPatternContext(ctx) {
+    if (!els.patternContext) return;
+    if (!ctx?.label) {
+      els.patternContext.classList.add('hidden');
+      els.patternContext.textContent = '';
+      els.patternContext.classList.remove('bull', 'bear');
+      patternMarkers = [];
+      return;
+    }
+    els.patternContext.textContent = ctx.label;
+    els.patternContext.classList.remove('hidden', 'bull', 'bear');
+    const tone =
+      ctx.markers?.find((m) => m.tone === 'bull' || m.tone === 'bear')?.tone ??
+      'neutral';
+    if (tone === 'bull' || tone === 'bear') {
+      els.patternContext.classList.add(tone);
+    }
+    patternMarkers = ctx.markers || [];
+    if (activeTab === 'charts' && spotCandlesPayload.length) {
+      flushSpotChart();
+    }
+  }
+
   function chartMarkersForEvents(series) {
-    if (!series?.length || !deckEvents.length) return [];
+    if (!series?.length) return chartMarkersForPatterns(series);
     const barTimes = new Set(series.map((bar) => bar.time));
     const minT = series[0].time;
     const maxT = series[series.length - 1].time;
-    const markers = [];
+    const markers = [...chartMarkersForPatterns(series)];
+    if (!deckEvents.length) return markers;
     for (const event of deckEvents) {
       const sec = Math.floor(event.t / 1000);
       if (sec < minT || sec > maxT || !barTimes.has(sec)) continue;
@@ -1406,6 +1455,7 @@
       spotCandlesPayload = mergeSpotSeriesTail(spotCandlesPayload, tick.spotSeries);
       updateSpotSeries(spotCandlesPayload, null, tick.action);
     }
+    renderPatternContext(tick.patternContext);
   }
 
   function applyLive(data) {
@@ -1462,6 +1512,7 @@
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
     updateSpotSeries(spotCandlesPayload, null, data.action);
+    renderPatternContext(data.patternContext);
     setError('');
   }
 

@@ -119,4 +119,8 @@ export const CONFLUENCE_ENHANCEMENTS = {
   CHART_PATTERN_SCORE_ENABLED: true,
   /** Confidence boost when chart pattern aligns with trade direction */
   ALIGNED_PATTERN_CONFIDENCE_BOOST: 10,
+  /** Confidence boost when primary candlestick aligns with trade direction */
+  ALIGNED_CANDLESTICK_CONFIDENCE_BOOST: 6,
+  /** Extra confidence when primary + 15m candlesticks share direction */
+  MULTI_TF_CANDLESTICK_CONFIDENCE_BOOST: 4,
 } as const;

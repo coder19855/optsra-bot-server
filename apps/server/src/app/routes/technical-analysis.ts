@@ -587,6 +587,9 @@ export default async function technicalAnalysisRoute(fastify: FastifyInstance) {
         confluenceContext: enhancementsEnabled
           ? {
               chartPattern: chartPatternPrimary.pattern,
+              chartPatternStatus: chartPatternPrimary.status,
+              chartPatternDirection: chartPatternPrimary.direction,
+              candlestickPrimary: candlestickPrimary.pattern,
               volatility: volatilityRegime,
               session: sessionBias,
               trendQuality,
