@@ -101,11 +101,11 @@ export function formatCommandsReferenceMessage(
     '<code>/veto on</code> — alias for strict',
   ]);
 
-  const flowBlock = commandBlock('📊 <b>Option flow scoring</b>', [
-    '<code>/flow status</code> — blend vs PA-only',
-    '<code>/flow pa</code> — ignore option score, PA drives conviction',
+  const flowBlock = commandBlock('📊 <b>Flow scoring</b>', [
+    '<code>/flow status</code> — pa / option / blend',
+    '<code>/flow pa</code> — price action only',
+    '<code>/flow option</code> — option flow only',
     '<code>/flow blend</code> — PA + options (default)',
-    '<code>/flow off</code> — alias for PA-only',
     '<code>/flow on</code> — alias for blend',
   ]);
 

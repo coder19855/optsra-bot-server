@@ -791,7 +791,9 @@ export class TelegramCommandPoller {
         blend:
           '✅ <b>Flow mode BLEND</b>\nConviction uses price action + option flow (default).',
         'pa-only':
-          '📊 <b>Flow mode PA ONLY</b>\nOption score ignored for conviction and conflict gates.',
+          '📊 <b>Flow mode PA</b>\nPrice action only — option score ignored.',
+        'option-only':
+          '📈 <b>Flow mode OPTION</b>\nOption flow only — PA ignored for the blend.',
       };
       await this.deps.sendMessage(
         joinTelegramSections(

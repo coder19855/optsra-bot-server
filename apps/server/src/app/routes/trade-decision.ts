@@ -9,7 +9,7 @@ import { OptionMetricsResponse, PriceActionResponse } from '../types';
 import { recordOptionChainSnapshot } from '../telegram-notifications/option-chain-snapshot-store';
 import { parseFlowModeQuery } from '../telegram-notifications/flow-preference';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
-import { isPaOnlyFlow } from '../types/flow-mode';
+import { isOptionOnlyFlow, isPaOnlyFlow } from '../types/flow-mode';
 import { isVetoOff } from '../types/veto-mode';
 
 export default async function tradeDecisionRoute(fastify: FastifyInstance) {
@@ -111,7 +111,9 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
               ? 'Both price action and option flow are showing very low conviction. No strong directional or neutral edge detected.'
               : isPaOnlyFlow(flowMode)
                 ? `PA-only flow mode: conviction ${coreDecision.conviction}% from price action (${coreDecision.priceConviction}%) — option flow ignored. Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`
-                : `Combined conviction ${coreDecision.conviction}% = ${Math.round(scoringConfig.priceActionWeight * 100)}% price action (${coreDecision.priceConviction}%) + ${Math.round(scoringConfig.optionFlowWeight * 100)}% option flow (${coreDecision.optionConviction}%). Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`,
+                : isOptionOnlyFlow(flowMode)
+                  ? `Option-only flow mode: conviction ${coreDecision.conviction}% from option flow (${coreDecision.optionConviction}%) — price action ignored for the blend.`
+                  : `Combined conviction ${coreDecision.conviction}% = ${Math.round(scoringConfig.priceActionWeight * 100)}% price action (${coreDecision.priceConviction}%) + ${Math.round(scoringConfig.optionFlowWeight * 100)}% option flow (${coreDecision.optionConviction}%). Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`,
         },
         {
           field: 'priceActionConviction',

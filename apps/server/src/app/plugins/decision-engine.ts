@@ -7,7 +7,12 @@ import {
   PriceActionResponse,
   TradeDecisionResult,
 } from '../types';
-import { FlowMode, isPaOnlyFlow } from '../types/flow-mode';
+import {
+  FlowMode,
+  isOptionOnlyFlow,
+  isPaOnlyFlow,
+  isSingleSourceFlow,
+} from '../types/flow-mode';
 import { isVetoOff, VetoMode } from '../types/veto-mode';
 
 export interface DecisionEngineOptions {
@@ -37,10 +42,12 @@ export default fp(
         options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
       const vetoOff = isVetoOff(vetoMode);
       const vetoRelaxed = vetoMode === 'relaxed';
-      const paOnlyFlow =
-        options?.flowMode != null
-          ? isPaOnlyFlow(options.flowMode)
-          : Boolean(options?.optionFlowOff);
+      const flowMode: FlowMode =
+        options?.flowMode ??
+        (options?.optionFlowOff ? 'pa-only' : 'blend');
+      const paOnlyFlow = isPaOnlyFlow(flowMode);
+      const optionOnlyFlow = isOptionOnlyFlow(flowMode);
+      const singleSourceFlow = isSingleSourceFlow(flowMode);
       // Use per-TF primary scoring from the evolved PA engine (style-aware)
       // Primary TF score drives conviction for the chosen style.
       // Alignment is now count of TFs agreeing with primary.
@@ -233,10 +240,14 @@ export default fp(
       const { priceActionWeight, optionFlowWeight, convictionThreshold } =
         scoringConfig;
 
+      const tradeDirection = optionOnlyFlow ? optionDirection : priceDirection;
+
       let blended = paOnlyFlow
         ? priceConviction
-        : priceConviction * priceActionWeight +
-          optionConviction * optionFlowWeight;
+        : optionOnlyFlow
+          ? optionConviction
+          : priceConviction * priceActionWeight +
+            optionConviction * optionFlowWeight;
 
       // Alignment & conflict
       let alignment = 0;
@@ -244,6 +255,10 @@ export default fp(
 
       if (paOnlyFlow) {
         alignment = aligned >= 2 ? 3 : aligned === 1 ? 2 : 0;
+      } else if (optionOnlyFlow) {
+        alignment = optionDirection !== 'neutral' ? 3 : 0;
+        if (optionComponentStrength > 0.35) blended += 10;
+        if (optionComponentStrength < -0.35) blended += 10;
       } else if (priceDirection === optionDirection && priceDirection !== 'neutral') {
         alignment = 3;
         blended += 18;
@@ -266,15 +281,17 @@ export default fp(
         blended -= 28;
       }
 
-      if (aligned >= 2) {
-        alignment += 1;
-        blended += 10;
-      } else if (aligned === 0) {
-        blended -= 15;
+      if (!optionOnlyFlow) {
+        if (aligned >= 2) {
+          alignment += 1;
+          blended += 10;
+        } else if (aligned === 0) {
+          blended -= 15;
+        }
+        if (higherTFConfirm) blended += 8;
       }
-      if (higherTFConfirm) blended += 8;
 
-      if (!paOnlyFlow) {
+      if (!singleSourceFlow) {
         if (optionComponentStrength > 0.35 && priceDirection === 'bullish')
           blended += 12;
         if (optionComponentStrength < -0.35 && priceDirection === 'bearish')
@@ -305,7 +322,7 @@ export default fp(
       const strongThreshold = convictionThreshold.strong;
 
       const optionStronglyAgainst =
-        paOnlyFlow || vetoOff
+        singleSourceFlow || vetoOff
           ? false
           : (priceDirection === 'bullish' && optionDirection === 'bearish') ||
             (priceDirection === 'bearish' && optionDirection === 'bullish') ||
@@ -317,22 +334,24 @@ export default fp(
 
       const structuralGatesOk =
         (vetoOff || vetoRelaxed || conflictLevel !== 'HIGH') &&
-        alignedCount > 0 &&
+        (optionOnlyFlow
+          ? optionDirection !== 'neutral'
+          : alignedCount > 0) &&
         !optionStronglyAgainst;
 
       if (
         conviction >= highThreshold &&
-        priceDirection !== 'neutral' &&
+        tradeDirection !== 'neutral' &&
         structuralGatesOk
       ) {
-        action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
+        action = tradeDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
       } else if (
         conviction >= mediumThreshold &&
-        (paOnlyFlow || priceDirection === optionDirection) &&
-        priceDirection !== 'neutral' &&
+        (singleSourceFlow || priceDirection === optionDirection) &&
+        tradeDirection !== 'neutral' &&
         structuralGatesOk
       ) {
-        action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
+        action = tradeDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
       } else if (conflictLevel === 'HIGH' || alignedCount === 0) {
         const hasNeutralOpportunity =
           (ivRegime.includes('Crushed') || ivRegime.includes('Low IV') || isQuiet) &&
@@ -355,19 +374,22 @@ export default fp(
         conviction = Math.max(conviction, 35);
       }
 
-      const hasWeakOverrideSignal =
-        style === TradingStyle.Positional
-          ? optionConviction >= highThreshold && priceConviction > 25
-          : style === TradingStyle.Scalper
-            ? priceConviction >= strongThreshold && optionConviction > 15
-            : priceConviction >= highThreshold && optionConviction > 30;
+      const hasWeakOverrideSignal = optionOnlyFlow
+        ? optionConviction >= highThreshold
+        : paOnlyFlow
+          ? priceConviction >= highThreshold
+          : style === TradingStyle.Positional
+            ? optionConviction >= highThreshold && priceConviction > 25
+            : style === TradingStyle.Scalper
+              ? priceConviction >= strongThreshold && optionConviction > 15
+              : priceConviction >= highThreshold && optionConviction > 30;
 
       if (
         action === 'NO-TRADE' &&
         hasWeakOverrideSignal &&
         structuralGatesOk
       ) {
-        action = priceDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
+        action = tradeDirection === 'bullish' ? 'CE-BUY' : 'PE-BUY';
         conviction = Math.min(mediumThreshold, conviction);
       }
 

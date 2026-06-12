@@ -1770,7 +1770,11 @@
     if (els.optionComponentsNote) {
       if (data.flowMode === 'pa-only') {
         els.optionComponentsNote.textContent =
-          'PA-only mode (/flow pa) — option components shown for reference, not used in conviction';
+          'PA-only (/flow pa) — option components for reference only';
+        els.optionComponentsNote.classList.remove('hidden');
+      } else if (data.flowMode === 'option-only') {
+        els.optionComponentsNote.textContent =
+          'Option-only (/flow option) — PA components for reference only';
         els.optionComponentsNote.classList.remove('hidden');
       } else {
         els.optionComponentsNote.classList.add('hidden');

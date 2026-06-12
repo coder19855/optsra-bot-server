@@ -5,21 +5,23 @@ export function formatFlowStatusMessage(flowMode: FlowMode): string {
   const mode = flowModeLabel(flowMode);
   const detail =
     flowMode === 'pa-only'
-      ? 'Option flow is ignored for conviction, conflict gates, and entry %. Price action alone drives the blend (direction still from PA signal).'
-      : 'Default blend: style-weighted price action + option flow conviction.';
+      ? 'Price action alone drives conviction and direction. Option flow is ignored.'
+      : flowMode === 'option-only'
+        ? 'Option flow alone drives conviction and direction. Price action is ignored for the blend.'
+        : 'Style-weighted blend of price action + option flow (default).';
 
   return joinTelegramSections(
-    '📊 <b>Option flow scoring</b>',
+    '📊 <b>Flow scoring mode</b>',
     joinTelegramLines(`Current: <b>${mode}</b>`, detail, ''),
     joinTelegramLines(
+      '<code>/flow pa</code> — price action only',
+      '<code>/flow option</code> — option flow only',
       '<code>/flow blend</code> — PA + options (default)',
-      '<code>/flow pa</code> — PA only, ignore option score',
       '<code>/flow on</code> — alias for blend',
-      '<code>/flow off</code> — alias for PA only',
       '<code>/flow status</code> — show current mode',
       '',
       '<i>Applies to /now, alerts, and deck live reads.</i>',
-      '<i>Option components still show on the Comp tab for reference.</i>',
+      '<i>Comp tab still shows both breakdowns for reference.</i>',
     ),
   );
 }
@@ -31,22 +33,18 @@ export function parseFlowCommandArgs(text: string): {
   const arg = parts[1];
 
   if (!arg || arg === 'status') return { action: 'status' };
-  if (
-    arg === 'pa' ||
-    arg === 'pa-only' ||
-    arg === 'paflow' ||
-    arg === 'off' ||
-    arg === 'disable'
-  ) {
+  if (arg === 'pa' || arg === 'pa-only' || arg === 'paflow' || arg === 'price') {
     return { action: 'pa-only' };
   }
   if (
-    arg === 'blend' ||
-    arg === 'on' ||
-    arg === 'enable' ||
-    arg === 'both' ||
-    arg === 'options'
+    arg === 'option' ||
+    arg === 'options' ||
+    arg === 'option-only' ||
+    arg === 'optionflow'
   ) {
+    return { action: 'option-only' };
+  }
+  if (arg === 'blend' || arg === 'on' || arg === 'both' || arg === 'enable') {
     return { action: 'blend' };
   }
 

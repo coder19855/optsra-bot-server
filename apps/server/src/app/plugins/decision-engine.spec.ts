@@ -52,6 +52,36 @@ describe('decision-engine plugin', () => {
     await app.close();
   });
 
+  it('allows PE-BUY in option-only mode when price action is bullish', async () => {
+    const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
+      await f.register(momentumDecayPlugin);
+    });
+    const result = app.decisionEngine.computeTradeDecision(
+      samplePriceAction({
+        signal: { action: 'CE-BUY', confidence: 70 },
+        timeframeScores: { '5m': 0.3, '15m': 0.35, '1h': 0.2 },
+      }),
+      sampleOptionMetrics({
+        score: -50,
+        signal: 'BEARISH_TRADE',
+        components: {
+          oi: -0.5,
+          greeks: -0.6,
+          iv: 0,
+          trend: -0.4,
+          pcr: -0.3,
+          skew: -0.2,
+          pain: 0,
+          vix: 0,
+        },
+      }),
+      TradingStyle.Intraday,
+      { flowMode: 'option-only' },
+    );
+    expect(result.action).toBe('PE-BUY');
+    await app.close();
+  });
+
   it('allows CE-BUY in PA-only mode when option flow opposes', async () => {
     const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
       await f.register(momentumDecayPlugin);
