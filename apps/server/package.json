@@ -1,5 +1,5 @@
 {
-  "name": "@opstra-bot/server",
+  "name": "@optra-pulse-bot/server",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -83,15 +83,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@opstra-bot/server:build",
+          "buildTarget": "@optra-pulse-bot/server:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@opstra-bot/server:build:development"
+            "buildTarget": "@optra-pulse-bot/server:build:development"
           },
           "production": {
-            "buildTarget": "@opstra-bot/server:build:production"
+            "buildTarget": "@optra-pulse-bot/server:build:production"
           }
         }
       },

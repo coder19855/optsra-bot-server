@@ -31,7 +31,7 @@ export default async function telegramNotificationsRoute(
     const text =
       message?.trim() ||
       joinTelegramSections(
-        '🟢 <b>Opstra alerts live</b>',
+        '🟢 <b>Optra Pulse alerts live</b>',
         joinTelegramLines(
           '✅ Telegram connected',
           '🔔 Signal-flip alerts enabled',

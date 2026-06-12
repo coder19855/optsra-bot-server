@@ -10,7 +10,7 @@ const swcJestConfig = JSON.parse(
 swcJestConfig.swcrc = false;
 
 module.exports = {
-  displayName: '@opstra-bot/server',
+  displayName: '@optra-pulse-bot/server',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
   transform: {

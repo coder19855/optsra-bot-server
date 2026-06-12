@@ -1,9 +1,9 @@
 {
-  "name": "@opstra-bot-server/source",
+  "name": "@optra-pulse-bot/source",
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "build": "nx build @opstra-bot/server && mkdir -p apps/server/dist/apps/server/src/assets && cp -R apps/server/src/assets/. apps/server/dist/apps/server/src/assets/",
+    "build": "nx build @optra-pulse-bot/server && mkdir -p apps/server/dist/apps/server/src/assets && cp -R apps/server/src/assets/. apps/server/dist/apps/server/src/assets/",
     "start": "node apps/server/dist/main.js"
   },
   "private": true,

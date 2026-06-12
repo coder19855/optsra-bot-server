@@ -1,10 +1,10 @@
 {
-  "name": "@opstra-bot/server-e2e",
+  "name": "@optra-pulse-bot/server-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@opstra-bot/server"
+      "@optra-pulse-bot/server"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@opstra-bot/server:build",
-          "@opstra-bot/server:serve"
+          "@optra-pulse-bot/server:build",
+          "@optra-pulse-bot/server:serve"
         ]
       }
     }

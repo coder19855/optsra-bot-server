@@ -88,7 +88,7 @@ export async function fetchMarketNewsHeadlines(
     const res = await axios.get<string>(rssUrl, {
       timeout: 12_000,
       responseType: 'text',
-      headers: { 'User-Agent': 'opstra-bot/1.0' },
+      headers: { 'User-Agent': 'optra-pulse-bot/1.0' },
     });
 
     const xml = res.data ?? '';
