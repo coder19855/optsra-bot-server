@@ -203,16 +203,39 @@
         <section class="chart-block">
           <div class="chart-title-row">
             <div class="chart-title">
-              Spot <span id="spot-session-label" class="spot-session-label">09:15–15:30 IST</span>
+              Charts <span id="spot-session-label" class="spot-session-label">09:15–15:30 IST</span>
               <span id="spot-scrub-label" class="spot-scrub-label"></span>
             </div>
-            <span id="pattern-context" class="pattern-context hidden"></span>
+            <div class="chart-controls">
+              <span id="pattern-context" class="pattern-context hidden"></span>
+              <button type="button" id="chart-toggle" class="drilldown-toggle" aria-expanded="true">
+                Hide
+              </button>
+            </div>
           </div>
-          <div class="chart-shell">
-            <div id="spot-chart" class="chart"></div>
-            <p id="spot-chart-empty" class="chart-empty hidden">No candle data for this session</p>
-            <p id="spot-chart-error" class="chart-error hidden"></p>
+          <div id="chart-collapsible" class="chart-collapsible">
+            <div class="multi-chart-grid">
+              <div class="chart-container">
+                <div class="chart-label">5 min</div>
+                <div id="spot-chart-5m" class="chart"></div>
+              </div>
+              <div class="chart-container">
+                <div class="chart-label">15 min</div>
+                <div id="spot-chart-15m" class="chart"></div>
+              </div>
+              <div class="chart-container">
+                <div class="chart-label">1 hr</div>
+                <div id="spot-chart-1h" class="chart"></div>
+              </div>
+            </div>
           </div>
+          <p id="spot-chart-empty" class="chart-empty hidden">No candle data for this session</p>
+          <p id="spot-chart-error" class="chart-error hidden"></p>
+        </section>
+
+        <section class="pattern-insights-block" id="pattern-insights-block">
+          <div class="chart-title">Pattern Insights</div>
+          <div id="pattern-insights" class="pattern-insights-list"></div>
         </section>
 
         <section class="chart-block replay-only hidden" id="pnl-section">

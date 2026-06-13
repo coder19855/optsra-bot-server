@@ -38,6 +38,18 @@ import {
   loadOptionChainSnapshotsForSession,
   nearestOptionChainSnapshot,
 } from './option-chain-snapshot-store';
+import {
+  timelineToSpotSeries,
+  timelineToVetoSeries,
+  timelineMarkers,
+  spotSeriesToSyntheticCandles,
+  extractComponentGauges,
+  buildDeckEvents,
+  extractPaDrilldown,
+  extractVetoBreakup,
+  syncLastReplayPointToLive,
+  timelineToConvictionSeries,
+} from './deck-replay-utils';
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
 import { loadFlowPreference } from './flow-preference';
 import { loadVetoPreference, VetoMode } from './veto-preference';
@@ -182,6 +194,15 @@ export interface DeckEvent {
   action?: string;
 }
 
+export interface DeckPatternInsight {
+  timeframe: string;
+  pattern: string;
+  status: string;
+  tone: 'bull' | 'bear' | 'neutral';
+  label: string;
+  type: 'chart' | 'candlestick';
+}
+
 export interface DeckLiveStreamTick {
   type: 'tick';
   asOf: string;
@@ -209,6 +230,7 @@ export interface DeckLiveStreamTick {
   vetoReason?: string;
   structuralAction?: string;
   patternContext?: DeckPatternContext;
+  patternInsights: DeckPatternInsight[];
   marketRegime: DeckMarketRegime;
   managementContext?: PositionManagementContext;
 }
@@ -239,6 +261,9 @@ export interface DeckLivePayload {
   };
   spotSeries: DeckSpotPoint[];
   spotCandles: DeckCandlePoint[];
+  spotCandles5m: DeckCandlePoint[];
+  spotCandles15m: DeckCandlePoint[];
+  spotCandles1h: DeckCandlePoint[];
   convictionSeries: Array<{
     t: number;
     option: number;
@@ -256,6 +281,7 @@ export interface DeckLivePayload {
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   patternContext?: DeckPatternContext;
+  patternInsights: DeckPatternInsight[];
   openPositions: DeckOpenPositionsPayload;
   marketRegime: DeckMarketRegime;
   managementContext?: PositionManagementContext;
@@ -272,6 +298,9 @@ export interface DeckReplayPayload {
   replayPoints: DeckReplayPoint[];
   spotSeries: DeckSpotPoint[];
   spotCandles: DeckCandlePoint[];
+  spotCandles5m: DeckCandlePoint[];
+  spotCandles15m: DeckCandlePoint[];
+  spotCandles1h: DeckCandlePoint[];
   pnlSeries: Array<{ t: number; v: number }>;
   trades: DeckTradeMarker[];
   markers: DeckMarker[];
@@ -283,6 +312,7 @@ export interface DeckReplayPayload {
   flowMode: FlowMode;
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
+  patternInsights: DeckPatternInsight[];
   pnlNote?: string;
   managementContext?: PositionManagementContext;
   openPositions?: DeckOpenPositionsPayload;
@@ -409,351 +439,133 @@ async function fetchTradeDecision(
   return JSON.parse(res.body) as DeckTradeDecision;
 }
 
-function extractPatternContext(
-  decision: DeckTradeDecision,
-  spotSeries: DeckSpotPoint[],
-  anchorMs = Date.now(),
-): DeckPatternContext | undefined {
-  const rawPrice = decision._debug?.rawPrice as PriceActionResponse | undefined;
-  if (!rawPrice) return undefined;
-  return buildDeckPatternContext(rawPrice, spotSeries, anchorMs);
-}
-
-function prependPatternFormingEvent(
-  events: DeckEvent[],
-  patternContext?: DeckPatternContext,
-): DeckEvent[] {
-  if (
-    !patternContext?.chart ||
-    patternContext.chartStatus !== 'forming' ||
-    !patternContext.label
-  ) {
-    return events;
-  }
-
-  const t = patternContext.markers.at(-1)?.t ?? Date.now();
-  if (events.some((e) => e.type === 'signal' && e.label === 'Pattern forming')) {
-    return events;
-  }
-
-  return [
-    {
-      t,
-      type: 'signal',
-      label: 'Pattern forming',
-      detail: patternContext.label,
-    },
-    ...events,
-  ];
-}
-
-function prependPatternBreakoutEvent(
-  events: DeckEvent[],
-  patternContext?: DeckPatternContext,
-): DeckEvent[] {
-  if (
-    !patternContext?.chart ||
-    patternContext.chartStatus !== 'confirmed' ||
-    !patternContext.label
-  ) {
-    return events;
-  }
-
-  const t = patternContext.markers.at(-1)?.t ?? Date.now();
-  const detail = patternContext.label.replace(/^forming /, '');
-  if (events.some((e) => e.type === 'signal' && e.label === 'Pattern breakout')) {
-    return events;
-  }
-
-  return [
-    {
-      t,
-      type: 'signal',
-      label: 'Pattern breakout',
-      detail,
-    },
-    ...events,
-  ];
-}
-
-function prependPatternEvents(
-  events: DeckEvent[],
-  patternContext?: DeckPatternContext,
-): DeckEvent[] {
-  if (patternContext?.chartStatus === 'confirmed') {
-    return prependPatternBreakoutEvent(events, patternContext);
-  }
-  return prependPatternFormingEvent(events, patternContext);
-}
-
-function filterCandlesToIstSession(
-  candles: DeckCandlePoint[],
-  session: { fromMs: number; closeMs: number },
-): DeckCandlePoint[] {
-  const filtered = candles.filter(
-    (c) => c.t >= session.fromMs && c.t <= session.closeMs + 5 * 60 * 1000,
-  );
-  return filtered.length ? filtered : candles;
-}
-
-async function extractStrategyRecommendation(
-  fastify: FastifyInstance,
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  style: TradingStyle,
-  opts?: {
-    replayNote?: string;
-    replayMode?: boolean;
-    marketRegime?: ReturnType<typeof extractMarketRegime>;
-  },
-): Promise<DeckStrategyPayload> {
-  const raw = decision._debug?.rawPrice as PriceActionResponse | undefined;
-  const marketRegime = opts?.marketRegime;
-  const base = extractDeckStrategyPayload(decision, {
-    replayNote: opts?.replayNote,
-  });
-
-  const tradePlanner = await buildDeckTradePlanner(fastify, {
-    symbol: decision.symbol,
-    tradingStyle: style,
-    action: decision.action,
-    conviction: decision.conviction,
-    enterThreshold: decision.convictionThresholds?.enter ?? 60,
-    shouldConsiderTrade: Boolean(decision.tradeGuidance?.shouldConsiderTrade),
-    structuralAction: decision.priceAction.overallSignal.structuralAction,
-    tradeSetup: raw?.tradeSetup ?? null,
-    exactStrike: decision.optionFlow?.exactStrikeRecommendation ?? null,
-    signalConfidence: raw?.signal?.confidence,
-    signalAction: raw?.signal?.action,
-    marketRegime,
-    replayMode: opts?.replayMode,
-  });
-
-  return { ...base, tradePlanner };
-}
-
-function extractMarketRegime(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  style: TradingStyle,
-  prefs?: { flowMode: FlowMode; vetoMode: VetoMode },
-): DeckMarketRegime {
-  const raw = decision._debug?.rawPrice;
-  const regime = resolveDeckMarketRegime({
-    symbol: decision.symbol,
-    tradingStyle: style,
-    mtfScore: raw?.confluence?.mtfScore,
-    aligned: raw?.confluence?.aligned,
-    confluenceContext: raw?.confluenceContext,
-  });
-  const flowMode = prefs?.flowMode ?? decision.flowMode ?? 'blend';
-  const vetoMode = prefs?.vetoMode ?? decision.vetoMode ?? 'strict';
-  return {
-    ...regime,
-    hint: buildDeckRegimeHint({
-      regimeKind: regime.kind,
-      flowMode,
-      vetoMode,
-      tradingStyle: style,
-    }),
-  };
-}
-
-function extractPaDrilldown(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-): PaDrilldown {
-  const primaryTf = primaryTimeframeForStyle(
-    decision.tradingStyle as TradingStyle,
-  );
-  const pa = decision.priceAction;
-  const raw = decision._debug?.rawPrice;
-  const components = pa.components;
-
-  return buildPaDrilldown({
-    primaryTimeframe: (raw?.primaryTimeframe as Timeframe) ?? primaryTf,
-    timeframeScores: raw?.timeframeScores ?? {
-      '5m': components['5m']?.score ?? 0,
-      '15m': components['15m']?.score ?? 0,
-      '1h': components['1h']?.score ?? 0,
-    },
-    mtfScore: raw?.confluence?.mtfScore ?? components.mtfScore?.score,
-    aligned: raw?.confluence?.aligned ?? components.alignment?.score,
-    higherTfSupport:
-      raw?.confluence?.higherTimeframeConfirmation ??
-      components.higherTFConfirmation?.score === 1,
-    levels: pa.levels,
-    atr: pa.atr as PriceActionResponse['atr'],
-    adx: pa.adx as PriceActionResponse['adx'],
-    momentum: pa.momentum as PriceActionResponse['momentum'],
-    structureElements: pa.structureElements,
-    candlestick: raw?.candlestick,
-    confluenceContext: raw?.confluenceContext,
-    confluenceSummary: raw?.confluence?.summary,
-    signal: pa.overallSignal,
-    momentumDecay: raw?.momentumDecay ?? decision.momentumDecay ?? undefined,
-  });
-}
-
-function extractVetoBreakup(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  vetoMode: VetoMode,
-  flowMode: FlowMode = 'blend',
-): DeckVetoBreakupItem[] {
-  const rawDecay = decision._debug?.rawPrice?.momentumDecay;
-  const alignmentField = decision.confluenceAndDecision.find(
-    (row) => row.field === 'alignment',
-  );
-  const conflictField = decision.confluenceAndDecision.find(
-    (row) => row.field === 'conflictLevel',
-  );
-
-  const momentumDecay = decision.momentumDecay ?? rawDecay;
-
-  return buildDeckVetoBreakup({
-    vetoMode,
-    flowMode,
-    action: decision.action,
-    conviction: decision.conviction,
-    priceConviction: decision.priceConviction ?? 0,
-    priceConvictionBeforeDecay: decision.priceConvictionBeforeDecay,
-    optionConviction: decision.optionConviction ?? 0,
-    enterThreshold: decision.convictionThresholds?.enter ?? 60,
-    conflictLevel: String(conflictField?.value ?? 'NONE'),
-    alignment: Number(alignmentField?.value ?? 0),
-    paSignal: decision.priceAction.overallSignal,
-    momentumDecay: momentumDecay
-      ? {
-          decayPercent: momentumDecay.decayPercent,
-          reasons: momentumDecay.reasons ?? [],
-        }
-      : undefined,
-    vetoedByDecay: rawDecay?.vetoedByDecay,
-    minConfidenceAfterDecay: rawDecay?.minConfidenceRequired,
-  });
-}
-
-function extractComponentGauges(decision: Awaited<ReturnType<typeof fetchTradeDecision>>): {
-  optionComponents: DeckComponentGauge[];
-  priceActionComponents: DeckComponentGauge[];
-} {
-  const primaryTf = primaryTimeframeForStyle(
-    decision.tradingStyle as TradingStyle,
-  );
-  const pa = decision.priceAction.components;
-  return {
-    optionComponents: buildOptionComponentGauges(
-      decision.optionFlow?.components ?? [],
-    ),
-    priceActionComponents: buildPriceActionComponentGauges(pa, {
-      primaryTimeframe: primaryTf,
-      timeframeScores: {
-        '5m': pa['5m']?.score ?? 0,
-        '15m': pa['15m']?.score ?? 0,
-        '1h': pa['1h']?.score ?? 0,
-      },
-    }),
-  };
-}
-
-function buildDeckLaneMeta(
-  decision: {
-    conviction: number;
-    weightedBaseConviction?: number;
-    convictionBonuses?: ConvictionBonus[];
-  },
-  gauges: ReturnType<typeof buildDeckGauges>,
-): {
-  weightedBaseConviction: number;
-  convictionBonuses: ConvictionBonus[];
-  lanes: {
-    optionPercent: number;
-    priceActionPercent: number;
-    combinedPercent: number;
-  };
-} {
-  const weightedBaseConviction =
-    decision.weightedBaseConviction ?? decision.conviction;
-  return {
-    weightedBaseConviction,
-    convictionBonuses: decision.convictionBonuses ?? [],
-    lanes: {
-      optionPercent: gauges.option.percent,
-      priceActionPercent: gauges.priceAction.percent,
-      combinedPercent: weightedBaseConviction,
-    },
-  };
-}
-
-function extractConvictions(decision: {
-  priceConviction?: number;
-  optionConviction?: number;
-  confluenceAndDecision: Array<{ field: string; value: number | string }>;
-}): { price: number; option: number } {
-  const confluence = decision.confluenceAndDecision;
-  const price =
-    decision.priceConviction ??
-    Number(confluence.find((c) => c.field === 'priceActionConviction')?.value ?? 0);
-  const option =
-    decision.optionConviction ??
-    Number(confluence.find((c) => c.field === 'optionFlowConviction')?.value ?? 0);
-  return { price, option };
-}
-
 async function fetchTimeline(
   fastify: FastifyInstance,
   symbol: string,
   tradingStyle: TradingStyle,
-  opts?: { sessionOnly?: boolean; to?: string },
-) {
-  const query = new URLSearchParams({
-    symbol,
-    tradingStyle,
-    days: '1',
-    sessionOnly: String(opts?.sessionOnly ?? true),
-  });
-  if (opts?.to) query.set('to', opts.to);
+  options?: { sessionOnly?: boolean; to?: string; days?: number; interval?: number },
+): Promise<any | null> {
+  const params = new URLSearchParams();
+  params.set('symbol', symbol);
+  if (tradingStyle) params.set('tradingStyle', String(tradingStyle));
+  if (options?.sessionOnly !== undefined) params.set('sessionOnly', String(options.sessionOnly));
+  if (options?.to) params.set('to', String(options.to));
+  if (options?.days !== undefined) params.set('days', String(options.days));
+  if (options?.interval !== undefined) params.set('interval', String(options.interval));
 
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/technical-analysis/timeline?${query.toString()}`,
-  });
-  if (res.statusCode !== 200) {
+  try {
+    const res = await fastify.inject({
+      method: 'GET',
+      url: `/api/technical-analysis/timeline?${params.toString()}`,
+    });
+    if (res.statusCode !== 200) {
+      fastify.log.warn({ statusCode: res.statusCode, body: res.body }, 'fetchTimeline failed');
+      return null;
+    }
+    return JSON.parse(res.body);
+  } catch (err) {
+    fastify.log.warn({ err }, 'fetchTimeline request failed');
     return null;
   }
-  return JSON.parse(res.body) as { points: TimelinePoint[] };
+}
 }
 
-function timelineToSpotSeries(points: TimelinePoint[]): DeckSpotPoint[] {
-  return points.map((p) => ({ t: p.asOf, v: p.spot }));
+function extractPatternInsights(decision: DeckTradeDecision): DeckPatternInsight[] {
+  const rawPrice = decision._debug?.rawPrice as PriceActionResponse | undefined;
+  if (!rawPrice) return [];
+
+  const insights: DeckPatternInsight[] = [];
+
+  // Chart patterns
+  const chartPattern = rawPrice.confluenceContext?.chartPattern;
+  if (chartPattern && chartPattern !== 'none') {
+    insights.push({
+      timeframe: rawPrice.primaryTimeframe || '15m',
+      pattern: chartPattern.replace(/_/g, ' '),
+      status: rawPrice.confluenceContext?.chartPatternStatus || 'forming',
+      tone: toneForDirection(rawPrice.confluenceContext?.chartPatternDirection || 'neutral'),
+      label: 'Chart Pattern',
+      type: 'chart',
+    });
+  }
+
+  // Candlestick patterns
+  const candles = rawPrice.candlestick;
+  if (candles) {
+    if (candles['5m'] && candles['5m'] !== 'none') {
+      insights.push({
+        timeframe: '5m',
+        pattern: candles['5m'].replace(/_/g, ' '),
+        status: 'confirmed',
+        tone: toneForCandle(candles['5m']),
+        label: 'Candlestick',
+        type: 'candlestick',
+      });
+    }
+    if (candles['15m'] && candles['15m'] !== 'none') {
+      insights.push({
+        timeframe: '15m',
+        pattern: candles['15m'].replace(/_/g, ' '),
+        status: 'confirmed',
+        tone: toneForCandle(candles['15m']),
+        label: 'Candlestick',
+        type: 'candlestick',
+      });
+    }
+    if (candles['1h'] && candles['1h'] !== 'none') {
+      insights.push({
+        timeframe: '1h',
+        pattern: candles['1h'].replace(/_/g, ' '),
+        status: 'confirmed',
+        tone: toneForCandle(candles['1h']),
+        label: 'Candlestick',
+        type: 'candlestick',
+      });
+    }
+  }
+
+  return insights;
 }
 
-function spotSeriesToSyntheticCandles(
-  points: DeckSpotPoint[],
-): DeckCandlePoint[] {
-  return points.map((p) => ({
-    t: p.t,
-    o: p.v,
-    h: p.v,
-    l: p.v,
-    c: p.v,
-  }));
+function toneForDirection(dir: string): 'bull' | 'bear' | 'neutral' {
+  if (dir === 'bullish') return 'bull';
+  if (dir === 'bearish') return 'bear';
+  return 'neutral';
 }
 
-function candleResolutionForStyle(_style: TradingStyle): string {
-  return '5';
+function toneForCandle(pattern: string): 'bull' | 'bear' | 'neutral' {
+  if (/bull|hammer|morning|soldiers|piercing/i.test(pattern)) return 'bull';
+  if (/bear|shooting|evening|crows|dark_cloud/i.test(pattern)) return 'bear';
+  return 'neutral';
 }
 
-async function fetchSpotCandles(
+async function resolveMultiTimeframeCandles(
   fastify: FastifyInstance,
   symbol: string,
-  tradingStyle: TradingStyle,
+  toMs: number,
+) {
+  const [c5, c15, c1h] = await Promise.all([
+    fetchSpotCandlesWithResolution(fastify, symbol, '5', toMs),
+    fetchSpotCandlesWithResolution(fastify, symbol, '15', toMs),
+    fetchSpotCandlesWithResolution(fastify, symbol, '60', toMs),
+  ]);
+  const session = buildIstChartSession(toMs);
+  return {
+    c5: filterCandlesToIstSession(c5, session),
+    c15: filterCandlesToIstSession(c15, session),
+    c1h: filterCandlesToIstSession(c1h, session),
+  };
+}
+
+async function fetchSpotCandlesWithResolution(
+  fastify: FastifyInstance,
+  symbol: string,
+  resolution: string,
   toMs: number,
 ): Promise<DeckCandlePoint[]> {
   try {
-    const resolution = candleResolutionForStyle(tradingStyle);
     const session = buildIstChartSession(toMs);
-    const fromMs =
-      tradingStyle === TradingStyle.Intraday || tradingStyle === TradingStyle.Scalper
-        ? session.fromMs - 15 * 60 * 1000
-        : toMs - 24 * 60 * 60 * 1000;
+    const fromMs = session.fromMs - 6 * 60 * 60 * 1000; // Extra buffer
     const res = await fastify.fyers.getHistory({
       symbol,
       resolution,
@@ -774,288 +586,6 @@ async function fetchSpotCandles(
   } catch {
     return [];
   }
-}
-
-async function resolveSpotCandles(
-  fastify: FastifyInstance,
-  symbol: string,
-  tradingStyle: TradingStyle,
-  spotSeries: DeckSpotPoint[],
-  toMs: number,
-): Promise<DeckCandlePoint[]> {
-  const candles = await fetchSpotCandles(fastify, symbol, tradingStyle, toMs);
-  const resolved = candles.length
-    ? candles
-    : spotSeriesToSyntheticCandles(spotSeries);
-  if (
-    tradingStyle === TradingStyle.Intraday ||
-    tradingStyle === TradingStyle.Scalper
-  ) {
-    return filterCandlesToIstSession(resolved, buildIstChartSession(toMs));
-  }
-  return resolved;
-}
-
-function computeWhatIfFromGauges(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  gauges: ReturnType<typeof buildDeckGauges>,
-): { action: string; conviction: number } {
-  const paValue = gauges.priceAction.value;
-  let action =
-    decision.priceAction.overallSignal.structuralAction ?? decision.action;
-  if (action === 'NO-TRADE' && Math.abs(paValue) >= 0.1) {
-    action = paValue > 0 ? 'CE-BUY' : 'PE-BUY';
-  }
-  if (action === 'NO-TRADE') {
-    return { action: 'NO-TRADE', conviction: 0 };
-  }
-  const conviction = Math.round(
-    Math.min(90, Math.max(20, Math.abs(paValue) * 100)),
-  );
-  return { action, conviction };
-}
-
-function liveChartVetoed(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  vetoMode: VetoMode,
-): boolean {
-  return (
-    !isVetoOff(vetoMode) &&
-    (decision.priceAction.overallSignal.confidence === 0 ||
-      (decision.action === 'NO-TRADE' &&
-        decision.priceAction.overallSignal.action !== 'NO-TRADE'))
-  );
-}
-
-function buildReplayPointFromLiveDecision(
-  base: DeckReplayPoint,
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  gauges: ReturnType<typeof buildDeckGauges>,
-  vetoMode: VetoMode,
-  liveSpot?: number,
-): DeckReplayPoint {
-  const components = extractComponentGauges(decision);
-  const whatIf = computeWhatIfFromGauges(decision, gauges);
-
-  return {
-    ...base,
-    spot: liveSpot ?? base.spot,
-    optionNeedle: gauges.option.value,
-    paNeedle: gauges.priceAction.value,
-    optionPercent: gauges.option.percent,
-    paPercent: gauges.priceAction.percent,
-    paGhost: gauges.priceAction.ghost,
-    conviction: decision.conviction,
-    weightedBaseConviction:
-      decision.weightedBaseConviction ?? decision.conviction,
-    convictionBonuses: decision.convictionBonuses ?? [],
-    action: decision.action,
-    vetoed: liveChartVetoed(decision, vetoMode),
-    vetoReason: decision.priceAction.overallSignal.vetoReason,
-    structuralAction: decision.priceAction.overallSignal.structuralAction,
-    whatIfAction: whatIf.action,
-    whatIfConviction: whatIf.conviction,
-    paComponents: components.priceActionComponents,
-    paDrilldown: extractPaDrilldown(decision),
-    optionComponents: components.optionComponents,
-    vetoBreakup: extractVetoBreakup(decision, vetoMode),
-    liveSynced: true,
-  };
-}
-
-function syncLastReplayPointToLive(
-  replayPoints: DeckReplayPoint[],
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
-  gauges: ReturnType<typeof buildDeckGauges>,
-  vetoMode: VetoMode,
-  liveSpot?: number,
-): DeckReplayPoint[] {
-  if (!replayPoints.length) return replayPoints;
-  const last = replayPoints.length - 1;
-  return [
-    ...replayPoints.slice(0, last),
-    buildReplayPointFromLiveDecision(
-      replayPoints[last],
-      decision,
-      gauges,
-      vetoMode,
-      liveSpot,
-    ),
-  ];
-}
-
-function computeWhatIfSignal(
-  p: TimelinePoint,
-  primaryTf: '5m' | '15m' | '1h',
-): { action: string; conviction: number } {
-  const primaryScore = p.timeframeScores[primaryTf] ?? p.mtfScore ?? 0;
-  if (
-    p.signal.action !== 'NO-TRADE' &&
-    p.signal.confidence > 0 &&
-    !p.signal.vetoReason
-  ) {
-    return { action: p.signal.action, conviction: p.signal.confidence };
-  }
-
-  let action = p.signal.structuralAction ?? 'NO-TRADE';
-  if (action === 'NO-TRADE' && Math.abs(primaryScore) >= 0.1) {
-    action = primaryScore > 0 ? 'CE-BUY' : 'PE-BUY';
-  }
-  if (action === 'NO-TRADE') {
-    return { action: 'NO-TRADE', conviction: 0 };
-  }
-
-  const conviction = Math.round(
-    Math.min(90, Math.max(20, Math.abs(primaryScore) * 100)),
-  );
-  return { action, conviction };
-}
-
-function timelineToVetoSeries(points: TimelinePoint[]): DeckVetoPoint[] {
-  return points.map((p) => ({
-    t: p.asOf,
-    vetoed: Boolean(
-      p.signal.vetoReason ||
-        (p.signal.action === 'NO-TRADE' &&
-          p.signal.structuralAction &&
-          p.signal.structuralAction !== 'NO-TRADE'),
-    ),
-    action: p.signal.action,
-    structuralAction: p.signal.structuralAction,
-    vetoReason: p.signal.vetoReason,
-  }));
-}
-
-function optionNeedleFromSnapshot(
-  overallScore: number | undefined,
-  fallback: number,
-): number {
-  if (
-    overallScore != null &&
-    Number.isFinite(overallScore) &&
-    Math.abs(overallScore) >= 2
-  ) {
-    return Math.max(-1, Math.min(1, overallScore / 100));
-  }
-  return fallback;
-}
-
-function timelineToConvictionSeries(
-  points: TimelinePoint[],
-  style: TradingStyle,
-  optionSnapshots: Awaited<
-    ReturnType<typeof loadOptionChainSnapshotsForSession>
-  > = [],
-  vetoMode: VetoMode = 'strict',
-): DeckReplayPayload['replayPoints'] {
-  const primaryTf = primaryTimeframeForStyle(style);
-  return points.map((p) => {
-    const primaryScore = p.timeframeScores[primaryTf] ?? p.mtfScore ?? 0;
-    const action = p.signal.action;
-    const nearestSnapshot = nearestOptionChainSnapshot(optionSnapshots, p.asOf);
-    const optionNeedle = optionNeedleFromSnapshot(
-      nearestSnapshot?.overallScore,
-      computeReplayOptionNeedle(p, primaryTf),
-    );
-    const whatIf = computeWhatIfSignal(p, primaryTf);
-    const optionComponents = nearestSnapshot
-      ? buildOptionComponentGauges(nearestSnapshot.components)
-      : undefined;
-    return {
-      t: p.asOf,
-      spot: p.spot,
-      optionNeedle,
-      paNeedle: Math.max(-1, Math.min(1, primaryScore)),
-      conviction: p.signal.confidence,
-      action,
-      vetoed: Boolean(p.signal.vetoReason),
-      vetoReason: p.signal.vetoReason,
-      structuralAction: p.signal.structuralAction,
-      whatIfAction: whatIf.action,
-      whatIfConviction: whatIf.conviction,
-      paComponents: buildReplayPaComponents(
-        p.timeframeScores,
-        p.mtfScore,
-        p.aligned,
-        primaryTf,
-      ),
-      paDrilldown: buildPaDrilldownFromTimelinePoint(p),
-      optionComponents,
-      vetoBreakup: buildReplayVetoBreakup({
-        vetoMode,
-        action: p.signal.action,
-        conviction: p.signal.confidence,
-        vetoed: Boolean(p.signal.vetoReason),
-        vetoReason: p.signal.vetoReason,
-        structuralAction: p.signal.structuralAction,
-      }),
-    };
-  });
-}
-
-function timelineMarkers(points: TimelinePoint[]): DeckMarker[] {
-  const markers: DeckMarker[] = [];
-  let prev: string | null = null;
-  for (const p of points) {
-    const action = p.signal.action;
-    if (prev != null && prev !== action) {
-      markers.push({
-        t: p.asOf,
-        type: 'flip',
-        label: `${prev} → ${action}`,
-        action,
-      });
-    }
-    prev = action;
-  }
-  return markers;
-}
-
-function buildDeckEvents(
-  markers: DeckMarker[],
-  vetoTimeline: DeckVetoPoint[],
-  trades: DeckTradeMarker[] = [],
-): DeckEvent[] {
-  const events: DeckEvent[] = markers.map((m) => ({
-    t: m.t,
-    type: m.type === 'trade' ? 'trade' : m.type === 'flip' ? 'flip' : 'signal',
-    label: m.label,
-    action: m.action,
-  }));
-
-  let prevVetoed = false;
-  for (const point of vetoTimeline) {
-    if (point.vetoed && !prevVetoed) {
-      events.push({
-        t: point.t,
-        type: 'veto',
-        label: 'Chart veto',
-        detail: point.vetoReason,
-        action: point.structuralAction || point.action,
-      });
-    } else if (!point.vetoed && prevVetoed) {
-      events.push({
-        t: point.t,
-        type: 'veto_clear',
-        label: 'Veto cleared',
-        action: point.action,
-      });
-    }
-    prevVetoed = point.vetoed;
-  }
-
-  for (const trade of trades) {
-    const sign = trade.pnlInr >= 0 ? '+' : '';
-    events.push({
-      t: trade.t,
-      type: 'trade',
-      label: trade.label,
-      detail: `${sign}₹${Math.round(trade.pnlInr)} · ${trade.verdict}`,
-      action: trade.verdict,
-    });
-  }
-
-  return events.sort((a, b) => b.t - a.t);
 }
 
 export async function buildDeckLivePayload(
@@ -1116,6 +646,12 @@ export async function buildDeckLivePayload(
   const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
   const laneMeta = buildDeckLaneMeta(decision, gauges);
 
+  const multiCandles = await resolveMultiTimeframeCandles(
+    fastify,
+    indexSymbol,
+    Date.now(),
+  );
+
   return {
     mode: 'live',
     symbol: decision.symbol || params.symbol,
@@ -1137,13 +673,10 @@ export async function buildDeckLivePayload(
     gauges,
     lanes: laneMeta.lanes,
     spotSeries,
-    spotCandles: await resolveSpotCandles(
-      fastify,
-      indexSymbol,
-      style,
-      spotSeries,
-      Date.now(),
-    ),
+    spotCandles: multiCandles.c5.length ? multiCandles.c5 : spotSeriesToSyntheticCandles(spotSeries),
+    spotCandles5m: multiCandles.c5,
+    spotCandles15m: multiCandles.c15,
+    spotCandles1h: multiCandles.c1h,
     convictionSeries: recent.map((p) => ({
       t: p.asOf,
       option:
@@ -1185,6 +718,7 @@ export async function buildDeckLivePayload(
       },
     ),
     patternContext: extractPatternContext(decision, spotSeries),
+    patternInsights: extractPatternInsights(decision),
     openPositions: await buildDeckOpenPositions(fastify, {
       watchedIndexSymbol: indexSymbol,
       ivRegime: decision.optionFlow?.ivRegime,
@@ -1304,6 +838,7 @@ export async function buildDeckLiveStreamTick(
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     patternContext: extractPatternContext(decision, spotSeries),
+    patternInsights: extractPatternInsights(decision),
     marketRegime: extractMarketRegime(decision, style, {
       flowMode: flowState.flowMode,
       vetoMode: vetoState.vetoMode,
@@ -1456,6 +991,14 @@ export async function buildDeckReplayPayload(
     pnlSeries.push({ t: trade.t, v: running });
   }
 
+  const toMs = Date.parse(`${date}T15:30:00+05:30`);
+  const indexSymbol = decision.symbol || params.symbol;
+  const multiCandles = await resolveMultiTimeframeCandles(
+    fastify,
+    indexSymbol,
+    toMs,
+  );
+
   return {
     mode: 'replay',
     symbol: decision.symbol || params.symbol,
@@ -1466,13 +1009,10 @@ export async function buildDeckReplayPayload(
     gauges,
     replayPoints,
     spotSeries: timelineToSpotSeries(points),
-    spotCandles: await resolveSpotCandles(
-      fastify,
-      decision.symbol || params.symbol,
-      style,
-      timelineToSpotSeries(points),
-      Date.parse(`${date}T15:30:00+05:30`),
-    ),
+    spotCandles: multiCandles.c5.length ? multiCandles.c5 : spotSeriesToSyntheticCandles(timelineToSpotSeries(points)),
+    spotCandles5m: multiCandles.c5,
+    spotCandles15m: multiCandles.c15,
+    spotCandles1h: multiCandles.c1h,
     pnlSeries,
     trades,
     markers: timelineMarkers(points),
@@ -1506,6 +1046,7 @@ export async function buildDeckReplayPayload(
         replayMode: true,
       },
     ),
+    patternInsights: extractPatternInsights(decision),
     pnlNote:
       trades.length === 0
         ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'

@@ -35,7 +35,10 @@
     laneOptionPct: document.getElementById('lane-option-pct'),
     lanePaPct: document.getElementById('lane-pa-pct'),
     laneCombinedPct: document.getElementById('lane-combined-pct'),
-    spotChart: document.getElementById('spot-chart'),
+    spotChart5m: document.getElementById('spot-chart-5m'),
+    spotChart15m: document.getElementById('spot-chart-15m'),
+    spotChart1h: document.getElementById('spot-chart-1h'),
+    patternInsights: document.getElementById('pattern-insights'),
     pnlChart: document.getElementById('pnl-chart'),
     pnlSection: document.getElementById('pnl-section'),
     replayDock: document.getElementById('replay-dock'),
@@ -86,11 +89,15 @@
     spotChartError: document.getElementById('spot-chart-error'),
     pnlNote: document.getElementById('pnl-note'),
     loadingOverlay: document.getElementById('loading-overlay'),
+    chartToggle: document.getElementById('chart-toggle'),
+    chartCollapsible: document.getElementById('chart-collapsible'),
   };
 
-  let spotChartApi = null;
-  let spotSeries = null;
-  let spotScrubPriceLine = null;
+  let charts = {
+    '5m': { api: null, series: null, scrubLine: null, container: 'spotChart5m' },
+    '15m': { api: null, series: null, scrubLine: null, container: 'spotChart15m' },
+    '1h': { api: null, series: null, scrubLine: null, container: 'spotChart1h' }
+  };
   let pnlChartApi = null;
   let pnlSeries = null;
   let replayPoints = [];
@@ -108,15 +115,39 @@
   let serverVetoMode = 'strict';
   let serverFlowMode = 'blend';
   let currentMode = mode;
-  let spotCandlesPayload = [];
+  let spotCandlesPayload = { '5m': [], '15m': [], '1h': [] };
   let pendingSpotScrubPoint = null;
   let pendingSpotScrubAction = null;
   let hasDisplayedDeck = false;
   let patternMarkers = [];
   let chartOverlays = [];
   let chartSession = null;
-  let spotOverlayLines = [];
+  let spotOverlayLines = { '5m': [], '15m': [], '1h': [] };
   const SPOT_CHART_HEIGHT = 200;
+  let chartsVisible = true;
+
+  function setChartsVisible(visible) {
+    chartsVisible = visible;
+    if (els.chartCollapsible) {
+      els.chartCollapsible.classList.toggle('collapsed', !visible);
+    }
+    if (els.chartToggle) {
+      els.chartToggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
+      els.chartToggle.textContent = visible ? 'Hide' : 'Show';
+    }
+    if (visible) {
+      requestAnimationFrame(() => {
+        mountSpotChart(true);
+        flushSpotChart();
+      });
+    }
+  }
+
+  if (els.chartToggle) {
+    els.chartToggle.addEventListener('click', () => {
+      setChartsVisible(!chartsVisible);
+    });
+  }
 
   function deckHasRenderableContent(data) {
     if (!data) return false;
@@ -252,7 +283,7 @@
       });
     }
 
-    return events.sort((a, b) => b.t - a.t);
+    return events.sort((a, b) => a.t - b.t);
   }
 
   function replayIndexForTime(ms) {
@@ -446,20 +477,24 @@
   }
 
   function resizeCharts(fitSpot) {
-    if (spotChartApi && els.spotChart) {
-      spotChartApi.applyOptions({
-        height: chartHeight(els.spotChart, SPOT_CHART_HEIGHT),
-      });
-      if (fitSpot && currentMode !== 'live') {
-        try {
-          spotChartApi.timeScale().fitContent();
-        } catch {
-          // Chart may not have data yet.
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      if (chart.api && els[chart.container]) {
+        chart.api.applyOptions({
+          height: chartHeight(els[chart.container], SPOT_CHART_HEIGHT),
+        });
+        if (fitSpot && currentMode !== 'live') {
+          try {
+            chart.api.timeScale().fitContent();
+          } catch {
+            // Chart may not have data yet.
+          }
+        } else if (fitSpot && chartSession && spotDataCache[tf]?.length) {
+          focusIntradaySession(chartSession, spotDataCache[tf], chart.api);
         }
-      } else if (fitSpot && chartSession && spotDataCache.length) {
-        focusIntradaySession(chartSession, spotDataCache);
       }
-    }
+    });
+
     if (pnlChartApi && els.pnlChart) {
       pnlChartApi.applyOptions({ height: chartHeight(els.pnlChart, 120) });
     }
@@ -481,33 +516,40 @@
   }
 
   function spotChartCanvasWidth() {
-    const canvas = els.spotChart?.querySelector('canvas');
+    const firstChart = Object.values(charts)[0];
+    const canvas = els[firstChart.container]?.querySelector('canvas');
     return canvas?.clientWidth ?? 0;
   }
 
   function destroySpotChart() {
     clearSpotOverlays();
-    if (spotChartApi) {
-      spotChartApi.remove();
-      spotChartApi = null;
-      spotSeries = null;
-      spotScrubPriceLine = null;
-    }
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      if (chart.api) {
+        chart.api.remove();
+        chart.api = null;
+        chart.series = null;
+        chart.scrubLine = null;
+      }
+    });
   }
 
   function clearSpotOverlays() {
-    if (!spotSeries) {
-      spotOverlayLines = [];
-      return;
-    }
-    for (const line of spotOverlayLines) {
-      try {
-        spotSeries.removePriceLine(line);
-      } catch {
-        // Line may already be removed.
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      if (!chart.series) {
+        spotOverlayLines[tf] = [];
+        return;
       }
-    }
-    spotOverlayLines = [];
+      for (const line of spotOverlayLines[tf]) {
+        try {
+          chart.series.removePriceLine(line);
+        } catch {
+          // Line may already be removed.
+        }
+      }
+      spotOverlayLines[tf] = [];
+    });
   }
 
   function overlayLineColor(tone) {
@@ -519,24 +561,27 @@
   function applyChartOverlays(overlays) {
     clearSpotOverlays();
     chartOverlays = overlays || [];
-    if (!spotSeries || !chartOverlays.length) return;
-    for (const overlay of chartOverlays) {
-      const line = spotSeries.createPriceLine({
-        price: overlay.price,
-        color: overlayLineColor(overlay.tone),
-        lineWidth: overlay.kind === 'neckline' ? 2 : 1,
-        lineStyle: overlay.dashed
-          ? LightweightCharts.LineStyle.Dashed
-          : LightweightCharts.LineStyle.Solid,
-        axisLabelVisible: true,
-        title: overlay.label,
-      });
-      spotOverlayLines.push(line);
-    }
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      if (!chart.series || !chartOverlays.length) return;
+      for (const overlay of chartOverlays) {
+        const line = chart.series.createPriceLine({
+          price: overlay.price,
+          color: overlayLineColor(overlay.tone),
+          lineWidth: overlay.kind === 'neckline' ? 2 : 1,
+          lineStyle: overlay.dashed
+            ? LightweightCharts.LineStyle.Dashed
+            : LightweightCharts.LineStyle.Solid,
+          axisLabelVisible: true,
+          title: overlay.label,
+        });
+        spotOverlayLines[tf].push(line);
+      }
+    });
   }
 
-  function focusIntradaySession(session, data) {
-    if (!spotChartApi || !session) return;
+  function focusIntradaySession(session, data, api) {
+    if (!api || !session) return;
     const lastSec = data?.length ? data[data.length - 1].time : Math.floor(session.toMs / 1000);
     const fromSec = Math.floor(session.fromMs / 1000);
     const toSec = Math.max(
@@ -544,10 +589,10 @@
       Math.floor(session.closeMs / 1000),
     );
     try {
-      spotChartApi.timeScale().setVisibleRange({ from: fromSec, to: toSec });
+      api.timeScale().setVisibleRange({ from: fromSec, to: toSec });
     } catch {
       try {
-        spotChartApi.timeScale().fitContent();
+        api.timeScale().fitContent();
       } catch {
         // Chart may not be ready yet.
       }
@@ -555,7 +600,6 @@
   }
 
   function mountSpotChart(forceRemount = false) {
-    if (!els.spotChart) return false;
     if (typeof LightweightCharts === 'undefined') {
       setSpotChartMessage({
         empty: false,
@@ -564,64 +608,72 @@
       return false;
     }
 
-    const width = els.spotChart.clientWidth;
-    if (width <= 0) return false;
-
-    if (
-      forceRemount ||
-      (spotChartApi && spotChartCanvasWidth() < 10)
-    ) {
+    if (forceRemount || (charts['5m'].api && spotChartCanvasWidth() < 10)) {
       destroySpotChart();
     }
-    if (spotChartApi) {
-      resizeCharts(false);
-      return true;
-    }
 
-    try {
-      spotChartApi = LightweightCharts.createChart(els.spotChart, {
-        autoSize: true,
-        layout: { background: { color: '#161a20' }, textColor: '#8b95a8' },
-        grid: { vertLines: { color: '#252b36' }, horzLines: { color: '#252b36' } },
-        rightPriceScale: { borderColor: '#252b36' },
-        localization: {
-          timeFormatter: (time) => formatChartAxisTime(time),
-        },
-        timeScale: {
-          borderColor: '#252b36',
-          timeVisible: true,
-          secondsVisible: false,
-          fixLeftEdge: true,
-          fixRightEdge: false,
-          barSpacing: 7,
-          minBarSpacing: 4,
-        },
-        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-        height: chartHeight(els.spotChart, SPOT_CHART_HEIGHT),
-      });
-      spotSeries = spotChartApi.addCandlestickSeries({
-        upColor: '#22c55e',
-        downColor: '#ef4444',
-        borderVisible: false,
-        wickUpColor: '#22c55e',
-        wickDownColor: '#ef4444',
-        priceLineVisible: false,
-        lastValueVisible: true,
-      });
+    let allMounted = true;
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      const container = els[chart.container];
+      if (!container) {
+        allMounted = false;
+        return;
+      }
+
+      if (chart.api) return;
+
+      const width = container.clientWidth;
+      if (width <= 0) {
+        allMounted = false;
+        return;
+      }
+
+      try {
+        chart.api = LightweightCharts.createChart(container, {
+          autoSize: true,
+          layout: { background: { color: '#161a20' }, textColor: '#8b95a8' },
+          grid: { vertLines: { color: '#252b36' }, horzLines: { color: '#252b36' } },
+          rightPriceScale: { borderColor: '#252b36' },
+          localization: {
+            timeFormatter: (time) => formatChartAxisTime(time),
+          },
+          timeScale: {
+            borderColor: '#252b36',
+            timeVisible: true,
+            secondsVisible: false,
+            fixLeftEdge: true,
+            fixRightEdge: false,
+            barSpacing: 7,
+            minBarSpacing: 4,
+          },
+          crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+          height: chartHeight(container, SPOT_CHART_HEIGHT),
+        });
+        chart.series = chart.api.addCandlestickSeries({
+          upColor: '#22c55e',
+          downColor: '#ef4444',
+          borderVisible: false,
+          wickUpColor: '#22c55e',
+          wickDownColor: '#ef4444',
+          priceLineVisible: false,
+          lastValueVisible: true,
+        });
+      } catch (err) {
+        console.error(`Failed to mount ${tf} chart:`, err);
+        allMounted = false;
+      }
+    });
+
+    if (allMounted) {
       setSpotChartMessage({ empty: false, error: null });
-      return true;
-    } catch (err) {
-      destroySpotChart();
-      setSpotChartMessage({
-        empty: false,
-        error: err?.message || 'Unable to initialize chart',
-      });
-      return false;
     }
+    return allMounted;
   }
 
   function flushSpotChart() {
-    if (!spotCandlesPayload.length) {
+    const hasData = Object.values(spotCandlesPayload).some(c => c.length > 0);
+    if (!hasData) {
       setSpotChartMessage({ empty: true, error: null });
       return;
     }
@@ -632,6 +684,53 @@
       pendingSpotScrubAction,
     );
     resizeCharts(false);
+  }
+
+  function renderPatternInsights(insights) {
+    if (!els.patternInsights) return;
+    els.patternInsights.innerHTML = '';
+
+    if (!insights || !insights.length) {
+      els.patternInsights.innerHTML = '<div class="muted" style="font-size:0.72rem">No active patterns detected.</div>';
+      return;
+    }
+
+    for (const insight of insights) {
+      const card = document.createElement('div');
+      card.className = 'pattern-insight-card';
+
+      const left = document.createElement('div');
+      left.className = 'pattern-insight-left';
+
+      const tf = document.createElement('span');
+      tf.className = 'pattern-insight-tf';
+      tf.textContent = insight.timeframe;
+
+      const name = document.createElement('span');
+      name.className = 'pattern-insight-name';
+      name.textContent = insight.pattern;
+
+      const type = document.createElement('span');
+      type.className = 'pattern-insight-type';
+      type.textContent = insight.label;
+
+      left.append(tf, name, type);
+
+      const right = document.createElement('div');
+      right.className = 'pattern-insight-right';
+
+      const status = document.createElement('span');
+      status.className = `pattern-insight-status ${insight.status}`;
+      status.textContent = insight.status;
+
+      const tone = document.createElement('div');
+      tone.className = `pattern-insight-tone ${insight.tone}`;
+
+      right.append(status, tone);
+
+      card.append(left, right);
+      els.patternInsights.appendChild(card);
+    }
   }
 
   function setError(message) {
@@ -1953,34 +2052,10 @@
 
   function normalizeSpotCandles(candles) {
     if (!candles?.length) return [];
-    const sorted = candles
+    return candles
       .map((p) => pointToRawCandle(p))
       .filter(Boolean)
       .sort((a, b) => a.t - b.t);
-    if (!sorted.length) return [];
-
-    const intervalMs = DEFAULT_CANDLE_MS;
-    const anchorMs = spotCandleAnchorMs(sorted[sorted.length - 1].t);
-    const buckets = new Map();
-
-    for (const point of sorted) {
-      const bucketT = bucketStartMs(point.t, intervalMs, anchorMs);
-      const existing = buckets.get(bucketT);
-      if (!existing) {
-        buckets.set(bucketT, {
-          t: bucketT,
-          o: point.o,
-          h: point.h,
-          l: point.l,
-          c: point.c,
-        });
-      } else {
-        existing.h = Math.max(existing.h, point.h);
-        existing.l = Math.min(existing.l, point.l);
-        existing.c = point.c;
-      }
-    }
-    return [...buckets.values()].sort((a, b) => a.t - b.t);
   }
 
   function toChartData(series) {
@@ -2013,20 +2088,22 @@
   }
 
   function resolveSpotCandles(data) {
-    if (data.spotCandles?.length) {
-      return normalizeSpotCandles(data.spotCandles);
-    }
-    return normalizeSpotCandles(spotSeriesToCandles(data.spotSeries));
+    return {
+      '5m': normalizeSpotCandles(data.spotCandles5m?.length ? data.spotCandles5m : spotSeriesToCandles(data.spotSeries)),
+      '15m': normalizeSpotCandles(data.spotCandles15m?.length ? data.spotCandles15m : spotSeriesToCandles(data.spotSeries)),
+      '1h': normalizeSpotCandles(data.spotCandles1h?.length ? data.spotCandles1h : spotSeriesToCandles(data.spotSeries))
+    };
   }
 
-  function spotValueNearTime(ms) {
+  function spotValueNearTime(ms, tf = '5m') {
     const sec = Math.floor(ms / 1000);
-    const exact = spotDataCache.find((p) => p.time === sec);
+    const cache = spotDataCache[tf];
+    if (!cache || !cache.length) return null;
+    const exact = cache.find((p) => p.time === sec);
     if (exact) return exact.close;
-    if (!spotDataCache.length) return null;
-    let best = spotDataCache[0];
+    let best = cache[0];
     let bestDiff = Math.abs(best.time - sec);
-    for (const point of spotDataCache) {
+    for (const point of cache) {
       const diff = Math.abs(point.time - sec);
       if (diff < bestDiff) {
         best = point;
@@ -2037,60 +2114,62 @@
   }
 
   function updateSpotScrub(point, action, data, eventMarkers) {
-    if (!point || !spotSeries) return;
-    const series = data || spotDataCache;
-    const barTime = nearestBarTime(series, Math.floor(point.t / 1000));
-    if (barTime == null) return;
-    const color = spotColorForAction(action);
-    const spot =
-      point.spot != null ? point.spot : spotValueNearTime(point.t);
-    const markers = eventMarkers || chartMarkersForEvents(series);
-    try {
-      spotSeries.setMarkers([
-        ...markers,
-        {
-          time: barTime,
-          position: 'inBar',
+    if (!point) return;
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      const series = data?.[tf] || spotDataCache[tf];
+      if (!chart.series || !series) return;
+
+      const barTime = nearestBarTime(series, Math.floor(point.t / 1000));
+      if (barTime == null) return;
+      const color = spotColorForAction(action);
+      const spot = point.spot != null ? point.spot : spotValueNearTime(point.t, tf);
+      const markers = eventMarkers?.[tf] || chartMarkersForEvents(series);
+
+      try {
+        chart.series.setMarkers([
+          ...markers,
+          {
+            time: barTime,
+            position: 'inBar',
+            color,
+            shape: 'circle',
+            size: 1,
+          },
+        ]);
+      } catch {
+        chart.series.setMarkers(markers);
+      }
+
+      if (chart.scrubLine) {
+        chart.series.removePriceLine(chart.scrubLine);
+        chart.scrubLine = null;
+      }
+      if (spot != null) {
+        chart.scrubLine = chart.series.createPriceLine({
+          price: spot,
           color,
-          shape: 'circle',
-          size: 1,
-        },
-      ]);
-    } catch {
-      spotSeries.setMarkers(markers);
-    }
-    if (spotScrubPriceLine) {
-      spotSeries.removePriceLine(spotScrubPriceLine);
-      spotScrubPriceLine = null;
-    }
-    if (spot != null) {
-      spotScrubPriceLine = spotSeries.createPriceLine({
-        price: spot,
-        color,
-        lineWidth: 1,
-        lineStyle: LightweightCharts.LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: 'scrub',
-      });
-    }
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: 'scrub',
+        });
+      }
+    });
+
     if (els.spotScrubLabel) {
+      const spot = point.spot != null ? point.spot : spotValueNearTime(point.t, '5m');
       els.spotScrubLabel.textContent = `· ${formatIstTime(point.t)} · ${spot?.toLocaleString('en-IN') ?? '—'}`;
-    }
-    try {
-      spotChartApi.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, dataIndexForTime(barTime) - 30),
-        to: dataIndexForTime(barTime) + 10,
-      });
-    } catch {
-      // Chart may not be ready yet.
     }
   }
 
-  let spotDataCache = [];
+  let spotDataCache = { '5m': [], '15m': [], '1h': [] };
 
-  function dataIndexForTime(sec) {
-    const idx = spotDataCache.findIndex((p) => p.time === sec);
-    return idx >= 0 ? idx : spotDataCache.length - 1;
+  function dataIndexForTime(sec, tf = '5m') {
+    const cache = spotDataCache[tf];
+    if (!cache) return 0;
+    const idx = cache.findIndex((p) => p.time === sec);
+    return idx >= 0 ? idx : cache.length - 1;
   }
 
   function patternMarkerColor(tone) {
@@ -2141,7 +2220,7 @@
       patternMarkers = ctx.markers || [];
     }
 
-    if (activeTab === 'charts' && spotCandlesPayload.length) {
+    if (activeTab === 'charts' && Object.values(spotCandlesPayload).some(c => c.length)) {
       flushSpotChart();
     }
   }
@@ -2191,55 +2270,69 @@
     return best;
   }
 
-  function applySpotChartData(candles, scrubPoint, scrubAction) {
-    if (!spotSeries) return;
+  function applySpotChartData(multiCandles, scrubPoint, scrubAction) {
     const session = resolveChartSession(
       { session: chartSession },
-      candles,
+      multiCandles['5m'],
     );
-    const sessionCandles = filterCandlesToSession(
-      normalizeSpotCandles(candles),
-      session,
-    );
-    const data = toCandleChartData(sessionCandles);
-    spotDataCache = data;
-    if (!data.length) {
-      setSpotChartMessage({ empty: true, error: null });
-      return;
+
+    const multiMarkers = {};
+
+    Object.keys(charts).forEach(tf => {
+      const chart = charts[tf];
+      const candles = multiCandles[tf] || [];
+      if (!chart.series) return;
+
+      const sessionCandles = filterCandlesToSession(
+        normalizeSpotCandles(candles),
+        session,
+      );
+      const data = toCandleChartData(sessionCandles);
+      spotDataCache[tf] = data;
+
+      if (!data.length) return;
+
+      try {
+        chart.series.setData(data);
+        const eventMarkers = chartMarkersForEvents(data);
+        multiMarkers[tf] = eventMarkers;
+        if (!scrubPoint) {
+          chart.series.setMarkers(eventMarkers);
+          if (chart.scrubLine) {
+            chart.series.removePriceLine(chart.scrubLine);
+            chart.scrubLine = null;
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to apply data to ${tf} chart:`, err);
+      }
+    });
+
+    applyChartOverlays(chartOverlays);
+
+    if (scrubPoint) {
+      updateSpotScrub(scrubPoint, scrubAction, spotDataCache, multiMarkers);
+    } else {
+      if (els.spotScrubLabel) els.spotScrubLabel.textContent = '';
     }
 
-    setSpotChartMessage({ empty: false, error: null });
-    try {
-      spotSeries.setData(data);
-      applyChartOverlays(chartOverlays);
-      const eventMarkers = chartMarkersForEvents(data);
-      if (scrubPoint) {
-        updateSpotScrub(scrubPoint, scrubAction, data, eventMarkers);
-      } else {
-        spotSeries.setMarkers(eventMarkers);
-        if (spotScrubPriceLine) {
-          spotSeries.removePriceLine(spotScrubPriceLine);
-          spotScrubPriceLine = null;
+    if (currentMode === 'live') {
+      Object.keys(charts).forEach(tf => {
+        const chart = charts[tf];
+        if (chart.api && spotDataCache[tf]?.length) {
+          focusIntradaySession(session, spotDataCache[tf], chart.api);
         }
-        if (els.spotScrubLabel) els.spotScrubLabel.textContent = '';
-      }
-      if (currentMode === 'live') {
-        focusIntradaySession(session, data);
-      }
-    } catch (err) {
-      setSpotChartMessage({
-        empty: false,
-        error: err?.message || 'Unable to render chart data',
       });
     }
   }
 
-  function updateSpotSeries(candles, scrubPoint, scrubAction) {
-    spotCandlesPayload = candles || [];
+  function updateSpotSeries(multiCandles, scrubPoint, scrubAction) {
+    spotCandlesPayload = multiCandles || { '5m': [], '15m': [], '1h': [] };
     pendingSpotScrubPoint = scrubPoint ?? null;
     pendingSpotScrubAction = scrubAction ?? null;
 
-    if (!spotCandlesPayload.length) {
+    const hasData = Object.values(spotCandlesPayload).some(c => c.length > 0);
+    if (!hasData) {
       setSpotChartMessage({ empty: true, error: null });
       return;
     }
@@ -2274,36 +2367,45 @@
     pnlSeries.setData(toChartData(series));
   }
 
-  function updateFormingSpotCandle(candles, price, atMs) {
-    if (!candles?.length || price == null || !atMs) return candles || [];
+  function updateFormingSpotCandle(multiCandles, price, atMs) {
+    if (!multiCandles || price == null || !atMs) return multiCandles;
+    
     const anchorMs = spotCandleAnchorMs(atMs);
-    const bucketT = bucketStartMs(atMs, DEFAULT_CANDLE_MS, anchorMs);
-    const next = candles.map((c) => ({ ...c }));
-    const last = next[next.length - 1];
+    const resolutions = {
+      '5m': 5 * 60 * 1000,
+      '15m': 15 * 60 * 1000,
+      '1h': 60 * 60 * 1000
+    };
 
-    if (last.t === bucketT) {
-      next[next.length - 1] = {
-        ...last,
-        h: Math.max(last.h, price),
-        l: Math.min(last.l, price),
-        c: price,
-      };
-      return next;
-    }
-    if (last.t < bucketT) {
-      next.push({
-        t: bucketT,
-        o: price,
-        h: price,
-        l: price,
-        c: price,
-      });
-      return next;
-    }
-    return normalizeSpotCandles([
-      ...next,
-      { t: atMs, o: price, h: price, l: price, c: price },
-    ]);
+    const nextMulti = { ...multiCandles };
+
+    Object.keys(resolutions).forEach(tf => {
+      const intervalMs = resolutions[tf];
+      const bucketT = bucketStartMs(atMs, intervalMs, anchorMs);
+      const candles = [...(multiCandles[tf] || [])];
+      if (!candles.length) return;
+
+      const last = candles[candles.length - 1];
+      if (last.t === bucketT) {
+        candles[candles.length - 1] = {
+          ...last,
+          h: Math.max(last.h, price),
+          l: Math.min(last.l, price),
+          c: price,
+        };
+      } else if (last.t < bucketT) {
+        candles.push({
+          t: bucketT,
+          o: price,
+          h: price,
+          l: price,
+          c: price,
+        });
+      }
+      nextMulti[tf] = candles;
+    });
+
+    return nextMulti;
   }
 
   function applyDeckTick(tick) {
@@ -2355,7 +2457,8 @@
       buildFlowVetoContext(tick),
     );
 
-    if (tick.lastPrice != null && spotCandlesPayload.length) {
+    const hasData = Object.values(spotCandlesPayload).some(c => c.length > 0);
+    if (tick.lastPrice != null && hasData) {
       const atMs = tick.asOf ? new Date(tick.asOf).getTime() : Date.now();
       spotCandlesPayload = updateFormingSpotCandle(
         spotCandlesPayload,
@@ -2372,6 +2475,7 @@
         session: chartSession ?? buildIstSessionBounds(),
       },
     );
+    renderPatternInsights(tick.patternInsights);
   }
 
   function applyLive(data) {
@@ -2461,7 +2565,8 @@
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
-    if (data.lastPrice != null && spotCandlesPayload.length) {
+    const hasData = Object.values(spotCandlesPayload).some(c => c.length > 0);
+    if (data.lastPrice != null && hasData) {
       const atMs = data.asOf ? new Date(data.asOf).getTime() : Date.now();
       spotCandlesPayload = updateFormingSpotCandle(
         spotCandlesPayload,
@@ -2478,6 +2583,7 @@
         session: buildIstSessionBounds(),
       },
     );
+    renderPatternInsights(data.patternInsights);
     setError('');
   }
 
@@ -2770,6 +2876,7 @@
     spotCandlesPayload = resolveSpotCandles(data);
     updateSpotSeries(spotCandlesPayload);
     updatePnlSeries(data.pnlSeries);
+    renderPatternInsights(data.patternInsights);
     applyReplayIndex(replayPoints.length - 1);
     setError('');
   }
