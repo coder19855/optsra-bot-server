@@ -9,7 +9,9 @@ function cloneChainResponse(
     data: {
       ...response.data,
       optionsChain: response.data.optionsChain.map((row) => ({ ...row })),
-      indiavixData: { ...response.data.indiavixData },
+      indiavixData: response.data.indiavixData
+        ? { ...response.data.indiavixData }
+        : ({} as FyersAPI.IndiaVixData),
       expiryData: [...response.data.expiryData],
     },
   };

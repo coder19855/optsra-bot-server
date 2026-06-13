@@ -9,6 +9,7 @@ import { OptionMetricsResponse, PriceActionResponse } from '../types';
 import { recordOptionChainSnapshot } from '../telegram-notifications/option-chain-snapshot-store';
 import { parseFlowModeQuery } from '../telegram-notifications/flow-preference';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
+import { toManagementDecisionPayload } from '../telegram-notifications/management-decision-mapper';
 import {
   computeManagementAdvice,
   getOpenPositionContext,
@@ -45,6 +46,13 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'symbol is required' });
     }
 
+    const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
+    if (!sessionReady) {
+      return reply.code(503).send({
+        error: 'Fyers session expired — log in again to compute trade decisions.',
+      });
+    }
+
     // Parse trading style
     const styleStr = (styleQuery || 'INTRADAY').toUpperCase();
     let activeStyle = TradingStyle.Intraday;
@@ -75,10 +83,24 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       ]);
 
       if (priceRes.statusCode !== 200 || optionRes.statusCode !== 200) {
+        const parseUpstreamError = (body: string): string | undefined => {
+          try {
+            const parsed = JSON.parse(body) as { error?: unknown };
+            if (parsed.error == null) return undefined;
+            return typeof parsed.error === 'string'
+              ? parsed.error
+              : JSON.stringify(parsed.error);
+          } catch {
+            return undefined;
+          }
+        };
+
         return reply.code(502).send({
           error: 'Failed to fetch analysis from one or both sources',
           priceStatus: priceRes.statusCode,
           optionStatus: optionRes.statusCode,
+          priceError: parseUpstreamError(priceRes.body),
+          optionError: parseUpstreamError(optionRes.body),
         });
       }
 
@@ -424,13 +446,16 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
                 : `You currently hold a ${posCtx.heldDirection} position on this index. The engine read above is for reference, scaling, or management — not a fresh entry solicitation.`,
           };
 
-          // Compute rich management advice using the live position + current decision
-          managementAdvice = computeManagementAdvice(posCtx, {
-            ...coreDecision,
-            lastPrice: priceData.lastPrice,
-            priceAction: { action: priceData.signal?.action as any },
-            tradeGuidance: { shouldConsiderTrade: false },
-          } as any, priceData, activeStyle);
+          managementAdvice = computeManagementAdvice(
+            posCtx,
+            toManagementDecisionPayload({
+              action: coreDecision.action,
+              conviction: coreDecision.conviction,
+              overallSignal: priceData.signal,
+            }),
+            priceData,
+            activeStyle,
+          );
         } else if (posCtx && !posCtx.fetchSucceeded) {
           positionContext = { hasOpenPosition: false, fetchError: posCtx.fetchError || 'position fetch failed' };
         }

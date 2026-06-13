@@ -12,6 +12,7 @@ import {
   TradeStructureContext,
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
+import { normalizePriceActionSignal } from './management-decision-mapper';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
 import {
   PollMarketDataContext,
@@ -106,24 +107,20 @@ export async function fetchTradeDecisionAlert(
   const optionFlow = body.optionFlow as Record<string, unknown> | undefined;
   const strategies = (body.recommendedStrategies as Array<Record<string, unknown>>) || [];
 
-  let paAction = (overallSignal?.action as string) || 'NO-TRADE';
-  let paConfidence = Number(overallSignal?.confidence ?? 0);
-  const structuralAction = overallSignal?.structuralAction as string | undefined;
-  const vetoReason = overallSignal?.vetoReason
-    ? String(overallSignal.vetoReason)
-    : undefined;
-  const confidenceBeforeDecay =
-    overallSignal?.confidenceBeforeDecay != null
-      ? Number(overallSignal.confidenceBeforeDecay)
-      : undefined;
-
-  // Chart veto: avoid showing "PE-BUY · 0%" when momentum decay zeroed confidence.
-  if (
-    paConfidence === 0 &&
-    (paAction === 'CE-BUY' || paAction === 'PE-BUY')
-  ) {
-    paAction = 'NO-TRADE';
-  }
+  const normalizedPa = normalizePriceActionSignal(
+    overallSignal as {
+      action?: string;
+      confidence?: number;
+      structuralAction?: string;
+      vetoReason?: string;
+      confidenceBeforeDecay?: number;
+    },
+  );
+  const paAction = normalizedPa.action;
+  const paConfidence = normalizedPa.confidence;
+  const structuralAction = normalizedPa.structuralAction;
+  const vetoReason = normalizedPa.vetoReason;
+  const confidenceBeforeDecay = normalizedPa.confidenceBeforeDecay;
 
   let action = (body.action as DecisionAction) || 'NO-TRADE';
   if (!body.action) {

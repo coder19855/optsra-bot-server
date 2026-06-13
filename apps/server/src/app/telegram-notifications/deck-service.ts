@@ -3,9 +3,7 @@ import { ResponseStatus } from '../types/common';
 import { getStyleScoringConfig } from '../trading-style';
 import { TradingStyle } from '../types/trading-style';
 import {
-  ConfluenceContext,
   PriceActionResponse,
-  TimelineMomentumDecay,
   TimelinePoint,
   Timeframe,
 } from '../types/technical-analysis';
@@ -45,6 +43,11 @@ import { loadFlowPreference } from './flow-preference';
 import { loadVetoPreference, VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
 import { ConvictionBonus } from '../types/trade-decision';
+import {
+  formatTradeDecisionError,
+  toManagementDecisionPayload,
+  toManagementPriceData,
+} from './management-decision-mapper';
 import { isVetoOff } from '../types/veto-mode';
 import {
   buildDeckOpenPositions,
@@ -285,23 +288,7 @@ export interface DeckReplayPayload {
   openPositions?: DeckOpenPositionsPayload;
 }
 
-async function fetchTradeDecision(
-  fastify: FastifyInstance,
-  symbol: string,
-  tradingStyle: TradingStyle,
-  vetoMode: VetoMode = 'strict',
-  flowMode: FlowMode = 'blend',
-) {
-  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
-  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
-  });
-  if (res.statusCode !== 200) {
-    throw new Error(`trade-decision failed (${res.statusCode})`);
-  }
-  return JSON.parse(res.body) as {
+type DeckTradeDecision = {
     symbol: string;
     lastPrice: number;
     tradingStyle: string;
@@ -384,26 +371,47 @@ async function fetchTradeDecision(
     };
     confluenceAndDecision: Array<{ field: string; value: number | string }>;
     _debug?: {
-      rawPrice?: {
-        primaryTimeframe?: string;
-        timeframeScores?: Record<Timeframe, number>;
-        confluence?: {
-          mtfScore?: number;
-          aligned?: number;
-          higherTimeframeConfirmation?: boolean;
-          summary?: string;
-        };
-        confluenceContext?: ConfluenceContext;
-        candlestick?: Record<string, string>;
-        momentumDecay?: TimelineMomentumDecay;
-        signal?: { vetoedByDecay?: boolean };
-      };
+      rawPrice?: PriceActionResponse;
+      rawOption?: unknown;
     };
-  };
+};
+
+function resolveManagementPriceData(decision: DeckTradeDecision): PriceActionResponse {
+  const rawPrice = decision._debug?.rawPrice;
+  if (rawPrice) {
+    return toManagementPriceData({
+      ...rawPrice,
+      lastPrice: decision.lastPrice,
+      momentumDecay: rawPrice.momentumDecay ?? decision.momentumDecay,
+    });
+  }
+  return {
+    lastPrice: decision.lastPrice,
+    momentumDecay: decision.momentumDecay,
+  } as PriceActionResponse;
+}
+
+async function fetchTradeDecision(
+  fastify: FastifyInstance,
+  symbol: string,
+  tradingStyle: TradingStyle,
+  vetoMode: VetoMode = 'strict',
+  flowMode: FlowMode = 'blend',
+): Promise<DeckTradeDecision> {
+  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
+  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
+  const res = await fastify.inject({
+    method: 'GET',
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
+  });
+  if (res.statusCode !== 200) {
+    throw new Error(formatTradeDecisionError(res.statusCode, res.body));
+  }
+  return JSON.parse(res.body) as DeckTradeDecision;
 }
 
 function extractPatternContext(
-  decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
+  decision: DeckTradeDecision,
   spotSeries: DeckSpotPoint[],
   anchorMs = Date.now(),
 ): DeckPatternContext | undefined {
@@ -1056,6 +1064,13 @@ export async function buildDeckLivePayload(
   fastify: FastifyInstance,
   params: { symbol: string; tradingStyle?: string },
 ): Promise<DeckLivePayload> {
+  const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
+  if (!sessionReady) {
+    throw new Error(
+      'Fyers session expired — log in again to load live deck data.',
+    );
+  }
+
   const style = parseTradingStyle(params.tradingStyle);
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
   const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
@@ -1193,15 +1208,16 @@ export async function buildDeckLivePayload(
         };
 
         if (ctx.count > 0) {
-          // Build a minimal PriceActionResponse-like object from decision + last known price
-          const priceForMgmt = {
-            lastPrice: (decision as any).lastPrice ?? 0,
-            momentumDecay: (decision as any).momentumDecay,
-            tradeSetup: (decision as any).tradeSetup,
-            levels: (decision as any).priceAction?.levels ?? {},
-          } as any;
-
-          const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
+          const advice = computeManagementAdvice(
+            ctx,
+            toManagementDecisionPayload({
+              action: decision.action,
+              conviction: decision.conviction,
+              overallSignal: decision.priceAction.overallSignal,
+            }),
+            resolveManagementPriceData(decision),
+            style,
+          );
           const context: PositionManagementContext = {
             hasOpenPosition: true,
             heldDirection: ctx.heldDirection,
@@ -1299,8 +1315,19 @@ export async function buildDeckLiveStreamTick(
       try {
         const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
         if (ctx.count > 0) {
-          const priceForMgmt = { lastPrice: liveLastPrice, momentumDecay: (decision as any).momentumDecayPercent ?? (decision as any).momentumDecay ?? 0 } as any;
-          const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
+          const advice = computeManagementAdvice(
+            ctx,
+            toManagementDecisionPayload({
+              action: decision.action,
+              conviction: decision.conviction,
+              overallSignal: decision.priceAction.overallSignal,
+            }),
+            {
+              ...resolveManagementPriceData(decision),
+              lastPrice: liveLastPrice,
+            },
+            style,
+          );
           const context: PositionManagementContext = {
             hasOpenPosition: true,
             heldDirection: ctx.heldDirection,

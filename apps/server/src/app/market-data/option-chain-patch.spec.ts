@@ -55,6 +55,14 @@ describe('option-chain-patch', () => {
     resetQuoteCacheForTests();
   });
 
+  it('patches chain rows when indiavix data is missing', () => {
+    const chain = sampleChain();
+    delete (chain.data as { indiavixData?: unknown }).indiavixData;
+
+    expect(() => patchOptionChainWithLiveQuotes(chain)).not.toThrow();
+    expect(patchOptionChainWithLiveQuotes(chain).data.optionsChain).toHaveLength(2);
+  });
+
   it('patches chain rows from quote cache', () => {
     const chain = sampleChain();
     seedQuotesFromOptionChain(chain);

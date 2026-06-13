@@ -2477,10 +2477,6 @@
       },
     );
     setError('');
-
-    // NEW: Render management brain context (health, advice) when user is holding a position.
-    // This closes the gap where backend sends rich management data but frontend ignored it.
-    renderManagementContext(data.managementContext || data.management || null);
   }
 
   function renderManagementContext(mgmt) {

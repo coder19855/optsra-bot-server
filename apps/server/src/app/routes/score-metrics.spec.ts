@@ -41,6 +41,37 @@ describe('GET /api/score-metrics', () => {
     await app.close();
   });
 
+  it('returns score metrics when indiavix data is missing', async () => {
+    const chain = sampleOptionChain(25000);
+    const fyers = createMockFyers({
+      getOptionChain: jest.fn().mockResolvedValue({
+        s: ResponseStatus.ok,
+        data: {
+          optionsChain: [
+            {
+              ltp: 25000,
+              symbol: 'NSE:NIFTY50-INDEX',
+              ltpch: 10,
+              ltpchp: 0.04,
+            },
+            ...chain,
+          ],
+        },
+      }),
+    });
+    const app = await buildRouteApp(scoreMetricsRoute, async (f) => {
+      decorateFyers(f, fyers);
+      await registerScorePlugins(f);
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/score-metrics?symbol=NSE:NIFTY50-INDEX&tradingStyle=INTRADAY',
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().components.vix).toEqual(expect.any(Number));
+    await app.close();
+  });
+
   it('returns score metrics for a valid option chain', async () => {
     const chain = sampleOptionChain(25000);
     const fyers = createMockFyers({

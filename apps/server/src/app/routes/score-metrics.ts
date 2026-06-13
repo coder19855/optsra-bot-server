@@ -33,7 +33,13 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
       });
 
       if (response.s === ResponseStatus.ok) {
-        const { optionsChain, indiavixData } = response.data;
+        const { optionsChain = [], indiavixData } = response.data ?? {};
+        if (!optionsChain.length) {
+          return reply.code(HttpStatusCode.BadRequest).send({
+            error: 'Option chain returned no rows',
+          });
+        }
+        const vixLtp = indiavixData?.ltp ?? 0;
         const [spotData, ...optionChainWithoutSpot] = optionsChain;
 
         const {
@@ -82,9 +88,7 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
             filteredChain,
             spotLtp || 0,
           ),
-          vix: fastify.metricCalculationPlugin.calcVixScore(
-            indiavixData.ltp || 0,
-          ),
+          vix: fastify.metricCalculationPlugin.calcVixScore(vixLtp),
           trend: fastify.metricCalculationPlugin.calcTrendConfirmationScore(
             trendSource,
             spotLtpChangePercent || 0,
@@ -96,7 +100,7 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
         const { bias, strategies } =
           fastify.strategyMapperPlugin.mapStrategiesWithVix(
             score,
-            indiavixData.ltp || 0,
+            vixLtp,
             components,
             activeStyle,
           );
@@ -106,7 +110,7 @@ export default async function scoreboardRoutes(fastify: FastifyInstance) {
         );
         const explanations = fastify.explanationPlugin.buildExplanations(
           components,
-          indiavixData.ltp || 0,
+          vixLtp,
         );
         const confidence = fastify.utilsPlugin.computeConfidence(
           explanations,

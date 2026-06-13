@@ -7,9 +7,17 @@ import {
 import decisionEnginePlugin from '../plugins/decision-engine';
 import momentumDecayPlugin from '../plugins/momentum-decay';
 
+function decorateTradeDecisionTestDeps(fastify: import('fastify').FastifyInstance) {
+  fastify.decorate(
+    'ensureFyersSession',
+    jest.fn().mockResolvedValue(true),
+  );
+}
+
 describe('GET /api/trade-decision', () => {
   it('returns 400 when symbol is missing', async () => {
     const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      decorateTradeDecisionTestDeps(f);
       await f.register(momentumDecayPlugin);
       await f.register(decisionEnginePlugin);
     });
@@ -22,8 +30,23 @@ describe('GET /api/trade-decision', () => {
     await app.close();
   });
 
+  it('returns 503 when Fyers session is unavailable', async () => {
+    const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      f.decorate('ensureFyersSession', jest.fn().mockResolvedValue(false));
+      await f.register(momentumDecayPlugin);
+      await f.register(decisionEnginePlugin);
+    });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/trade-decision?symbol=NSE:NIFTY50-INDEX',
+    });
+    expect(res.statusCode).toBe(503);
+    await app.close();
+  });
+
   it('returns 502 when upstream analysis routes fail', async () => {
     const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      decorateTradeDecisionTestDeps(f);
       await f.register(momentumDecayPlugin);
       await f.register(decisionEnginePlugin);
       const originalInject = f.inject.bind(f);
@@ -46,6 +69,7 @@ describe('GET /api/trade-decision', () => {
     const price = priceFixture();
     const option = optionFixture();
     const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      decorateTradeDecisionTestDeps(f);
       await f.register(momentumDecayPlugin);
       await f.register(decisionEnginePlugin);
       const originalInject = f.inject.bind(f);
@@ -85,6 +109,7 @@ describe('GET /api/trade-decision', () => {
     const price = priceFixture();
     const option = optionFixture();
     const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      decorateTradeDecisionTestDeps(f);
       await f.register(momentumDecayPlugin);
       await f.register(decisionEnginePlugin);
       const originalInject = f.inject.bind(f);
