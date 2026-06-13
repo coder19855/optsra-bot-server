@@ -422,6 +422,7 @@ export default fp(
         try {
           await saveAlertWhyContext(fastify, {
             ...payload.whyContext,
+            adaptiveConviction: payload.adaptiveConviction,
             alertedAt: polledAt.toISOString(),
             source: 'poll',
             wasNotified: false,
@@ -469,6 +470,7 @@ export default fp(
           try {
             await saveAlertWhyContext(fastify, {
               ...payload.whyContext,
+              adaptiveConviction: payload.adaptiveConviction,
               alertedAt: notifiedAt.toISOString(),
               source: 'alert',
               wasNotified: true,

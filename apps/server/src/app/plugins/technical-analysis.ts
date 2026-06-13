@@ -29,6 +29,12 @@ export default fp(
       computeMomentumDecay,
       applyMomentumDecay,
     } = fastify.momentumDecayPlugin;
+    /**
+     * Detects swing highs and lows in a series of candles.
+     * 
+     * @param {FyersAPI.Candle[]} candles - Array of candles.
+     * @returns {Swing} Object containing arrays of identified swing highs and lows.
+     */
     const getSwings = (candles: FyersAPI.Candle[]): Swing => {
       const rawHighs: { index: number; price: number }[] = [];
       const rawLows: { index: number; price: number }[] = [];

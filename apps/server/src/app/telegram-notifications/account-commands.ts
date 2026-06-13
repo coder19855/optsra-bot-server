@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { PriceActionResponse, TradeAction } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
 import { DecisionAction } from '../types/trade-decision';
+import { TradeDecisionAlertPayload } from '../types/telegram-notifications';
 import {
   parseSymbolStyleCommandArgs,
   shortIndexLabel,
@@ -12,7 +13,7 @@ import {
   formatScenarioBanner,
   scenarioForAction,
 } from './telegram-palette';
-import { resolveTelegramPositionSizing } from './position-sizing-context';
+import { fetchTradeDecisionAlert } from './trade-decision-fetch';
 
 function escapeHtml(text: string): string {
   return text
@@ -27,17 +28,52 @@ function mapSignalToDecisionAction(action: TradeAction): DecisionAction {
   return 'NO-TRADE';
 }
 
-async function fetchLivePriceAction(
+function payloadToPriceActionView(
+  payload: TradeDecisionAlertPayload,
+): PriceActionResponse {
+  const rawPrice = payload._decisionBody?._debug as
+    | { rawPrice?: PriceActionResponse }
+    | undefined;
+  if (rawPrice?.rawPrice) {
+    return rawPrice.rawPrice;
+  }
+
+  return {
+    symbol: payload.symbol,
+    lastPrice: payload.lastPrice,
+    signal: {
+      action: payload.priceAction.action,
+      confidence: payload.priceAction.confidence,
+      vetoReason: payload.priceAction.vetoReason,
+    },
+    tradeSetup: payload.tradeSetup ?? undefined,
+  } as PriceActionResponse;
+}
+
+async function fetchTradeDecisionForCommand(
   fastify: FastifyInstance,
   symbol: string,
   tradingStyle: TradingStyle,
-): Promise<PriceActionResponse | null> {
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/technical-analysis?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}`,
+  enrichment: {
+    skipPositionSizing?: boolean;
+    skipAdaptiveConviction?: boolean;
+    verifyWithApi?: boolean;
+  } = {},
+): Promise<TradeDecisionAlertPayload | null> {
+  const sessionReady = await fastify.ensureFyersSession(
+    enrichment.verifyWithApi ? { verifyWithApi: true } : undefined,
+  );
+  if (!sessionReady) {
+    return null;
+  }
+
+  return fetchTradeDecisionAlert(fastify, symbol, tradingStyle, {
+    vetoMode: fastify.telegramNotifications.getVetoMode(),
+    flowMode: fastify.telegramNotifications.getFlowMode(),
+    sessionVerified: true,
+    skipPositionSizing: enrichment.skipPositionSizing,
+    skipAdaptiveConviction: enrichment.skipAdaptiveConviction,
   });
-  if (res.statusCode !== 200) return null;
-  return JSON.parse(res.body) as PriceActionResponse;
 }
 
 export function formatRiskRewardTelegramMessage(params: {
@@ -94,8 +130,11 @@ export async function buildRiskRewardTelegramMessage(
     style: params.defaultStyle,
   });
 
-  const sessionReady = await fastify.ensureFyersSession();
-  if (!sessionReady) {
+  const payload = await fetchTradeDecisionForCommand(fastify, symbol, style, {
+    skipPositionSizing: true,
+    skipAdaptiveConviction: true,
+  });
+  if (!payload) {
     return {
       message: '',
       error:
@@ -103,17 +142,9 @@ export async function buildRiskRewardTelegramMessage(
     };
   }
 
-  const priceData = await fetchLivePriceAction(fastify, symbol, style);
-  if (!priceData) {
-    return {
-      message: '',
-      error: `Could not load technical analysis for ${shortIndexLabel(symbol)}.`,
-    };
-  }
-
   return {
     message: formatRiskRewardTelegramMessage({
-      priceData,
+      priceData: payloadToPriceActionView(payload),
       symbol,
       tradingStyle: style,
     }),
@@ -133,8 +164,11 @@ export async function buildPositionSizingTelegramMessage(
     style: params.defaultStyle,
   });
 
-  const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
-  if (!sessionReady) {
+  const payload = await fetchTradeDecisionForCommand(fastify, symbol, style, {
+    skipAdaptiveConviction: true,
+    verifyWithApi: true,
+  });
+  if (!payload) {
     return {
       message: '',
       error:
@@ -142,29 +176,10 @@ export async function buildPositionSizingTelegramMessage(
     };
   }
 
-  const priceData = await fetchLivePriceAction(fastify, symbol, style);
-  if (!priceData) {
-    return {
-      message: '',
-      error: `Could not load trade setup for ${shortIndexLabel(symbol)}.`,
-    };
-  }
-
-  const action = mapSignalToDecisionAction(priceData.signal.action);
-  const sizing = await resolveTelegramPositionSizing(fastify, {
-    symbol,
-    tradingStyle: style,
-    action,
-    signalConfidence: priceData.signal.confidence,
-    signalAction: priceData.signal.action,
-    tradeSetup: priceData.tradeSetup ?? null,
-  });
-
   const label = shortIndexLabel(symbol);
-  const sizingBlock = formatPositionSizingTelegramSection(sizing);
-  const setup = priceData.tradeSetup;
-
-  const actionScenario = scenarioForAction(action);
+  const sizingBlock = formatPositionSizingTelegramSection(payload.positionSizing);
+  const setup = payload.tradeSetup;
+  const actionScenario = scenarioForAction(payload.action);
   const setupLine =
     setup && setup.risk > 0
       ? `🎯 ${setup.entry.toLocaleString('en-IN')} · 🛑 ${setup.stopLoss.toLocaleString('en-IN')} (${setup.risk.toFixed(1)}pts)`
@@ -173,7 +188,7 @@ export async function buildPositionSizingTelegramMessage(
   return {
     message: joinTelegramSections(
       formatScenarioBanner(actionScenario, `Size · ${escapeHtml(label)} · ${style}`),
-      `${priceData.signal.action} ${priceData.signal.confidence}%`,
+      `${payload.priceAction.action} ${payload.priceAction.confidence}%`,
       setupLine,
       sizingBlock ?? '⚠️ Sizing unavailable.',
     ),

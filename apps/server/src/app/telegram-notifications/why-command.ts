@@ -80,6 +80,7 @@ export async function resolveWhyContext(
   why: AlertWhyContext | null;
   exactStrike?: ExactStrikeRecommendation;
   structureContext?: TradeStructureContext;
+  adaptiveConviction?: import('../types/adaptive-conviction').AdaptiveConvictionInsight;
   error?: string;
 }> {
   const args = parseWhyArgs(params.text, {
@@ -99,11 +100,15 @@ export async function resolveWhyContext(
         stored.symbol,
         stored.tradingStyle,
       );
-      return { why: stored, exactStrike };
+      return {
+        why: stored,
+        exactStrike,
+        adaptiveConviction: stored.adaptiveConviction,
+      };
     }
   }
 
-  const sessionReady = await fastify.ensureFyersSession();
+  const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
   if (!sessionReady) {
     return {
       why: null,
@@ -120,6 +125,8 @@ export async function resolveWhyContext(
       {
         vetoMode: fastify.telegramNotifications.getVetoMode(),
         flowMode: fastify.telegramNotifications.getFlowMode(),
+        forceFresh: args.forceLive,
+        sessionVerified: true,
       },
     );
     if (!payload?.whyContext) {
@@ -135,6 +142,7 @@ export async function resolveWhyContext(
       },
       exactStrike: payload.exactStrikeRecommendation,
       structureContext: payload.structureContext,
+      adaptiveConviction: payload.adaptiveConviction,
     };
   } catch (err) {
     return {

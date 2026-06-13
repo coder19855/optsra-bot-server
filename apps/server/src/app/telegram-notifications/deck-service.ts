@@ -46,10 +46,10 @@ import { loadVetoPreference, VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
 import { ConvictionBonus } from '../types/trade-decision';
 import {
-  formatTradeDecisionError,
   toManagementDecisionPayload,
   toManagementPriceData,
 } from './management-decision-mapper';
+import { fetchTradeDecisionAlert } from './trade-decision-fetch';
 import { isVetoOff } from '../types/veto-mode';
 import {
   buildDeckOpenPositions,
@@ -93,6 +93,13 @@ function shortSymbol(symbol: string): string {
   return part.replace('-INDEX', '');
 }
 
+/**
+ * Merges timeline spot series with live stream series based on timestamp.
+ * 
+ * @param {DeckSpotPoint[]} timelineSeries - The historical timeline spot series.
+ * @param {DeckSpotPoint[]} streamSeries - The live stream spot series.
+ * @returns {DeckSpotPoint[]} Merged spot series.
+ */
 function mergeSpotSeriesWithStream(
   timelineSeries: DeckSpotPoint[],
   streamSeries: DeckSpotPoint[],
@@ -480,23 +487,26 @@ function extractMarketRegime(decision: DeckTradeDecision, style: TradingStyle, _
   }
 }
 
-async function fetchTradeDecision(
+async function fetchDeckTradeDecision(
   fastify: FastifyInstance,
   symbol: string,
   tradingStyle: TradingStyle,
   vetoMode: VetoMode = 'strict',
   flowMode: FlowMode = 'blend',
+  options?: { sessionVerified?: boolean },
 ): Promise<DeckTradeDecision> {
-  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
-  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
+  const payload = await fetchTradeDecisionAlert(fastify, symbol, tradingStyle, {
+    vetoMode,
+    flowMode,
+    skipPositionSizing: true,
+    skipAdaptiveConviction: true,
+    sessionVerified: options?.sessionVerified,
   });
-  if (res.statusCode !== 200) {
-    throw new Error(formatTradeDecisionError(res.statusCode, res.body));
+  if (!payload?._decisionBody) {
+    throw new Error('Trade decision response missing body');
   }
-  return JSON.parse(res.body) as DeckTradeDecision;
+  const body = payload._decisionBody;
+  return body as DeckTradeDecision;
 }
 
 async function fetchTimeline(
@@ -661,12 +671,13 @@ export async function buildDeckLivePayload(
   const style = parseTradingStyle(params.tradingStyle);
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
   const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
-  const decision = await fetchTradeDecision(
+  const decision = await fetchDeckTradeDecision(
     fastify,
     params.symbol,
     style,
     vetoState.vetoMode,
     flowState.flowMode,
+    { sessionVerified: true },
   );
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
@@ -835,7 +846,7 @@ export async function buildDeckLiveStreamTick(
   const style = parseTradingStyle(params.tradingStyle);
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
   const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
-  const decision = await fetchTradeDecision(
+  const decision = await fetchDeckTradeDecision(
     fastify,
     params.symbol,
     style,
@@ -951,7 +962,7 @@ export async function buildDeckReplayPayload(
 
   const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
   const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
-  const decision = await fetchTradeDecision(
+  const decision = await fetchDeckTradeDecision(
     fastify,
     params.symbol,
     style,

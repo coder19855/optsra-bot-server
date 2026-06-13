@@ -173,6 +173,8 @@ export interface TradeDecisionAlertPayload {
     timeframe?: Timeframe;
   };
   aiAnalysis?: import('./ai-agent').AIAnalysisResponse;
+  /** Ephemeral raw trade-decision JSON for command reuse (not persisted). */
+  _decisionBody?: Record<string, unknown>;
 }
 
 export type TpAlertKind =

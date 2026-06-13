@@ -82,8 +82,8 @@ export function formatCommandsReferenceMessage(
   ]);
 
   const nowBlock = commandBlock('📡 <b>Live market read</b>', [
-    '<code>/now</code> — current recommendation (all on watch)',
-    `<i>Try:</i> <code>/now ${sym} ${style}</code>`,
+    '<code>/now</code> — current recommendation (reuses last poll for ~30s)',
+    `<i>Try:</i> <code>/now live</code> · <code>/now ${sym} ${style}</code>`,
   ]);
 
   const styleBlock = commandBlock('🎯 <b>Trading style</b>', [

@@ -17,24 +17,50 @@ import {
 import { alertPayloadToManagementPriceData } from './management-decision-mapper';
 import { computeManagementAdvice, getOpenPositionContext, ManagementAdvice, PositionManagementContext } from './position-monitor';
 
+function parseNowCommandArgs(
+  text: string,
+  defaults: { symbol: string; style: TradingStyle },
+): { symbol: string; style: TradingStyle; forceLive: boolean } {
+  const parts = text.trim().toLowerCase().split(/\s+/);
+  if (parts[1] === 'live') {
+    const tail = text.replace(/^\/now\s+live\s*/i, '/now ');
+    const { symbol, style } = parseSymbolStyleCommandArgs(tail, defaults);
+    return { symbol, style, forceLive: true };
+  }
+
+  const { symbol, style } = parseSymbolStyleCommandArgs(text, defaults);
+  return { symbol, style, forceLive: false };
+}
+
 function resolveWatchList(
   text: string,
   watchedSymbols: string[],
   watchedStyles: TradingStyle[],
   defaults: { symbol: string; style: TradingStyle },
-): Array<{ symbol: string; tradingStyle: TradingStyle }> {
+  forceLive: boolean,
+): Array<{ symbol: string; tradingStyle: TradingStyle; forceLive: boolean }> {
   const parts = text.split(/\s+/).filter(Boolean);
-  const hasArgs = parts.length > 1;
+  const hasArgs = parts.length > 1 && !(parts.length === 2 && parts[1].toLowerCase() === 'live');
 
-  if (hasArgs) {
-    const { symbol, style } = parseSymbolStyleCommandArgs(text, defaults);
-    return [{ symbol, tradingStyle: style }];
+  if (hasArgs || (parts[1]?.toLowerCase() === 'live' && parts.length >= 3)) {
+    const parsed = parseNowCommandArgs(text, defaults);
+    return [{ symbol: parsed.symbol, tradingStyle: parsed.style, forceLive: parsed.forceLive }];
   }
 
-  const items: Array<{ symbol: string; tradingStyle: TradingStyle }> = [];
+  if (parts[1]?.toLowerCase() === 'live') {
+    const items: Array<{ symbol: string; tradingStyle: TradingStyle; forceLive: boolean }> = [];
+    for (const symbol of watchedSymbols) {
+      for (const tradingStyle of watchedStyles) {
+        items.push({ symbol, tradingStyle, forceLive: true });
+      }
+    }
+    return items;
+  }
+
+  const items: Array<{ symbol: string; tradingStyle: TradingStyle; forceLive: boolean }> = [];
   for (const symbol of watchedSymbols) {
     for (const tradingStyle of watchedStyles) {
-      items.push({ symbol, tradingStyle });
+      items.push({ symbol, tradingStyle, forceLive });
     }
   }
   return items;
@@ -102,11 +128,16 @@ export async function buildNowTelegramMessage(
     fetchedAt: now,
   };
 
+  const parsedNow = parseNowCommandArgs(params.text, {
+    symbol: defaultSymbol,
+    style: defaultStyle,
+  });
   const watchList = resolveWatchList(
     params.text,
     params.watchedSymbols,
     params.watchedStyles,
     { symbol: defaultSymbol, style: defaultStyle },
+    parsedNow.forceLive,
   );
 
   const items: TradeDecisionAlertPayload[] = [];
@@ -125,6 +156,8 @@ export async function buildNowTelegramMessage(
         {
           vetoMode: fastify.telegramNotifications.getVetoMode(),
           flowMode: fastify.telegramNotifications.getFlowMode(),
+          forceFresh: watch.forceLive,
+          sessionVerified: true,
         },
       );
       if (payload) items.push(payload);

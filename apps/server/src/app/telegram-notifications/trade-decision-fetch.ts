@@ -1,6 +1,11 @@
 import { FastifyInstance } from 'fastify';
 import { computeAdaptiveConviction } from './adaptive-conviction';
 import { buildAlertWhyContext } from './why-context-builder';
+import {
+  commandTradeCacheKey,
+  getRecentCommandTradeDecision,
+  rememberCommandTradeDecision,
+} from './command-trade-cache';
 import { GreeksStrikeInsight } from '../types/greeks-strike-insight';
 import { ExactStrikeRecommendation } from '../types/exact-strike-recommendation';
 import { AdaptiveConvictionInsight } from '../types/adaptive-conviction';
@@ -22,6 +27,22 @@ import {
   pollPriceActionCacheKey,
   pollTradeDecisionCacheKey,
 } from '../market-data/poll-market-data-context';
+
+export interface FetchTradeDecisionOptions {
+  vetoMode?: import('../types/veto-mode').VetoMode;
+  /** @deprecated use vetoMode */
+  vetoOff?: boolean;
+  flowMode?: import('../types/flow-mode').FlowMode;
+  pollContext?: PollMarketDataContext;
+  /** Bypass the 30s command cache and always recompute. */
+  forceFresh?: boolean;
+  /** Caller already verified Fyers via API — skip duplicate get_profile in trade-decision. */
+  sessionVerified?: boolean;
+  /** Skip funds/ATM sizing enrichment (e.g. /rr). */
+  skipPositionSizing?: boolean;
+  /** Skip Mongo adaptive conviction lookup. */
+  skipAdaptiveConviction?: boolean;
+}
 
 function buildStructureContext(
   body: Record<string, unknown>,
@@ -62,121 +83,75 @@ function parseTradingStyle(value: string): TradingStyle {
   return TradingStyle.Intraday;
 }
 
-export async function fetchTradeDecisionAlert(
-  fastify: FastifyInstance,
+type PriceActionOverallSignal = {
+  action?: string;
+  confidence?: number;
+  structuralAction?: string;
+  vetoReason?: string;
+  confidenceBeforeDecay?: number;
+};
+
+function readOverallSignal(
+  body: Record<string, unknown>,
+): PriceActionOverallSignal | undefined {
+  return (body.priceAction as { overallSignal?: PriceActionOverallSignal } | undefined)
+    ?.overallSignal;
+}
+
+function deriveTradeDecisionAction(
+  body: Record<string, unknown>,
+  normalizedPa: ReturnType<typeof normalizePriceActionSignal>,
+): DecisionAction {
+  if (body.action) {
+    return body.action as DecisionAction;
+  }
+  if (normalizedPa.action === 'CE-BUY' || normalizedPa.action === 'PE-BUY') {
+    return normalizedPa.action;
+  }
+  if (String(body.bias).includes('Neutral')) {
+    return 'NEUTRAL';
+  }
+  return 'NO-TRADE';
+}
+
+function extractTradeDecisionSignals(body: Record<string, unknown>) {
+  const debug = body._debug as { rawPrice?: PriceActionResponse } | undefined;
+  const rawPrice = debug?.rawPrice;
+  const tradeSetup = rawPrice?.tradeSetup ?? null;
+  const normalizedPa = normalizePriceActionSignal(readOverallSignal(body));
+  const action = deriveTradeDecisionAction(body, normalizedPa);
+  const signalConfidence = Number(
+    rawPrice?.signal?.confidence ?? normalizedPa.confidence,
+  );
+  const signalAction = String(rawPrice?.signal?.action ?? normalizedPa.action);
+  return { debug, rawPrice, tradeSetup, normalizedPa, action, signalConfidence, signalAction };
+}
+
+export function mapTradeDecisionBodyToPayload(
+  body: Record<string, unknown>,
   symbol: string,
   tradingStyle: TradingStyle,
-  options?: {
-    vetoMode?: import('../types/veto-mode').VetoMode;
-    /** @deprecated use vetoMode */
-    vetoOff?: boolean;
-    flowMode?: import('../types/flow-mode').FlowMode;
-    pollContext?: PollMarketDataContext;
+  enrichment?: {
+    positionSizing?: TradeDecisionAlertPayload['positionSizing'];
+    adaptiveConviction?: AdaptiveConvictionInsight;
   },
-): Promise<TradeDecisionAlertPayload | null> {
-  const vetoMode =
-    options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
-  const flowMode = options?.flowMode ?? 'blend';
-  const cacheKey = pollTradeDecisionCacheKey(
-    symbol,
-    tradingStyle,
-    vetoMode,
-    flowMode,
-  );
-  const cached = options?.pollContext?.tradeDecisionCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-
-  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
-  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
-  });
-
-  if (res.statusCode !== 200) {
-    throw new Error(
-      `${formatTradeDecisionError(res.statusCode, res.body)} [${symbol}/${tradingStyle}]`,
-    );
-  }
-
-  const body = JSON.parse(res.body) as Record<string, unknown>;
-  const priceAction = body.priceAction as Record<string, unknown> | undefined;
-  const overallSignal = priceAction?.overallSignal as
-    | Record<string, unknown>
-    | undefined;
+): TradeDecisionAlertPayload {
   const tradeGuidance = body.tradeGuidance as Record<string, unknown> | undefined;
   const optionFlow = body.optionFlow as Record<string, unknown> | undefined;
-  const strategies = (body.recommendedStrategies as Array<Record<string, unknown>>) || [];
+  const strategies =
+    (body.recommendedStrategies as Array<Record<string, unknown>>) || [];
 
-  const normalizedPa = normalizePriceActionSignal(
-    overallSignal as {
-      action?: string;
-      confidence?: number;
-      structuralAction?: string;
-      vetoReason?: string;
-      confidenceBeforeDecay?: number;
-    },
-  );
+  const { rawPrice, normalizedPa, action } = extractTradeDecisionSignals(body);
   const paAction = normalizedPa.action;
   const paConfidence = normalizedPa.confidence;
   const structuralAction = normalizedPa.structuralAction;
   const vetoReason = normalizedPa.vetoReason;
   const confidenceBeforeDecay = normalizedPa.confidenceBeforeDecay;
-
-  let action = (body.action as DecisionAction) || 'NO-TRADE';
-  if (!body.action) {
-    if (paAction === 'CE-BUY' || paAction === 'PE-BUY') {
-      action = paAction;
-    } else if (String(body.bias).includes('Neutral')) {
-      action = 'NEUTRAL';
-    }
-  }
-
-  const debug = body._debug as { rawPrice?: PriceActionResponse } | undefined;
-  const rawPrice = debug?.rawPrice;
   const tradeSetup = rawPrice?.tradeSetup ?? null;
-  const signalConfidence = Number(
-    rawPrice?.signal?.confidence ?? paConfidence,
-  );
-  const signalAction = String(rawPrice?.signal?.action ?? paAction);
-
-  let positionSizing: TradeDecisionAlertPayload['positionSizing'];
-  try {
-    positionSizing = await resolveTelegramPositionSizing(fastify, {
-      symbol: String(body.symbol || symbol),
-      tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
-      action,
-      signalConfidence,
-      signalAction,
-      tradeSetup,
-    });
-  } catch (err) {
-    fastify.log.warn(
-      { err, symbol, tradingStyle },
-      'Telegram position sizing lookup failed — alert will omit account sizing',
-    );
-  }
-
   const whyContext: AlertWhyContext = buildAlertWhyContext(body);
   const exactStrikeRecommendation =
     (optionFlow?.exactStrikeRecommendation as ExactStrikeRecommendation | null) ??
     undefined;
-
-  let adaptiveConviction: AdaptiveConvictionInsight | undefined;
-  if (action === 'CE-BUY' || action === 'PE-BUY') {
-    try {
-      adaptiveConviction = await computeAdaptiveConviction(fastify, {
-        symbol: String(body.symbol || symbol),
-        tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
-        action,
-      });
-    } catch (err) {
-      fastify.log.warn({ err }, 'Adaptive conviction lookup failed');
-    }
-  }
-
   const structureContext = buildStructureContext(body, tradingStyle);
   const confluence = rawPrice?.confluenceContext;
   const chartPattern =
@@ -190,7 +165,7 @@ export async function fetchTradeDecisionAlert(
         }
       : undefined;
 
-  const payload: TradeDecisionAlertPayload = {
+  return {
     symbol: String(body.symbol || symbol),
     tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
     lastPrice: Number(body.lastPrice ?? 0),
@@ -228,7 +203,7 @@ export async function fetchTradeDecisionAlert(
       : undefined,
     exactStrikeRecommendation,
     whyContext,
-    adaptiveConviction,
+    adaptiveConviction: enrichment?.adaptiveConviction,
     recommendedStrategies: strategies.map((s) => ({
       strategy: String(s.strategy ?? ''),
       risk: s.risk ? String(s.risk) : undefined,
@@ -237,13 +212,111 @@ export async function fetchTradeDecisionAlert(
       reason: s.reason ? String(s.reason) : undefined,
       executionHint: s.executionHint ? String(s.executionHint) : undefined,
     })),
-    positionSizing,
+    positionSizing: enrichment?.positionSizing,
     tradeSetup,
     momentumDecayPercent: rawPrice?.momentumDecay?.decayPercent ?? null,
     chartPattern,
     aiAnalysis: body.aiAnalysis as import('../types/ai-agent').AIAnalysisResponse | undefined,
+    _decisionBody: body,
   };
+}
 
+export async function fetchTradeDecisionAlert(
+  fastify: FastifyInstance,
+  symbol: string,
+  tradingStyle: TradingStyle,
+  options?: FetchTradeDecisionOptions,
+): Promise<TradeDecisionAlertPayload | null> {
+  const vetoMode =
+    options?.vetoMode ?? (options?.vetoOff ? 'off' : 'strict');
+  const flowMode = options?.flowMode ?? 'blend';
+  const cacheKey = pollTradeDecisionCacheKey(
+    symbol,
+    tradingStyle,
+    vetoMode,
+    flowMode,
+  );
+
+  const pollCached = options?.pollContext?.tradeDecisionCache.get(cacheKey);
+  if (pollCached) {
+    rememberCommandTradeDecision(
+      commandTradeCacheKey(symbol, tradingStyle, vetoMode, flowMode),
+      pollCached,
+    );
+    return pollCached;
+  }
+
+  if (!options?.forceFresh) {
+    const recent = getRecentCommandTradeDecision(
+      commandTradeCacheKey(symbol, tradingStyle, vetoMode, flowMode),
+    );
+    if (recent) {
+      return recent;
+    }
+  }
+
+  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
+  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
+  const sessionQuery = options?.sessionVerified ? '&sessionVerified=1' : '';
+  const res = await fastify.inject({
+    method: 'GET',
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}${sessionQuery}`,
+  });
+
+  if (res.statusCode !== 200) {
+    throw new Error(
+      `${formatTradeDecisionError(res.statusCode, res.body)} [${symbol}/${tradingStyle}]`,
+    );
+  }
+
+  const body = JSON.parse(res.body) as Record<string, unknown>;
+  const { rawPrice, tradeSetup, action, signalConfidence, signalAction } =
+    extractTradeDecisionSignals(body);
+
+  let positionSizing: TradeDecisionAlertPayload['positionSizing'];
+  if (!options?.skipPositionSizing) {
+    try {
+      positionSizing = await resolveTelegramPositionSizing(fastify, {
+        symbol: String(body.symbol || symbol),
+        tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
+        action,
+        signalConfidence,
+        signalAction,
+        tradeSetup,
+      });
+    } catch (err) {
+      fastify.log.warn(
+        { err, symbol, tradingStyle },
+        'Telegram position sizing lookup failed — alert will omit account sizing',
+      );
+    }
+  }
+
+  let adaptiveConviction: AdaptiveConvictionInsight | undefined;
+  if (
+    !options?.skipAdaptiveConviction &&
+    (action === 'CE-BUY' || action === 'PE-BUY')
+  ) {
+    try {
+      adaptiveConviction = await computeAdaptiveConviction(fastify, {
+        symbol: String(body.symbol || symbol),
+        tradingStyle: parseTradingStyle(String(body.tradingStyle || tradingStyle)),
+        action,
+      });
+    } catch (err) {
+      fastify.log.warn({ err }, 'Adaptive conviction lookup failed');
+    }
+  }
+
+  const payload = mapTradeDecisionBodyToPayload(body, symbol, tradingStyle, {
+    positionSizing,
+    adaptiveConviction,
+  });
+
+  rememberCommandTradeDecision(
+    commandTradeCacheKey(symbol, tradingStyle, vetoMode, flowMode),
+    payload,
+  );
   options?.pollContext?.tradeDecisionCache.set(cacheKey, payload);
   if (rawPrice && options?.pollContext) {
     options.pollContext.priceActionCache.set(

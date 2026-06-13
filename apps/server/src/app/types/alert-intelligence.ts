@@ -29,6 +29,7 @@ export interface AlertWhyContext {
   vetoOrCaution: string[];
   tradeGuidanceNotes: string | null;
   humanSummary: string;
+  adaptiveConviction?: AdaptiveConvictionInsight;
 }
 
 export interface SignalOutcomeRecord {

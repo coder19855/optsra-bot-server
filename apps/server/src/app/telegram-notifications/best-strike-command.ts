@@ -22,6 +22,7 @@ import {
   formatEnginePickCallout,
   formatGammaBlastCallout,
 } from './strike-callouts';
+import { fetchTradeDecisionAlert } from './trade-decision-fetch';
 
 function escapeHtml(text: string): string {
   return text
@@ -32,41 +33,6 @@ function escapeHtml(text: string): string {
 
 function formatInr(value: number): string {
   return value.toLocaleString('en-IN');
-}
-
-interface TradeDecisionPayload {
-  symbol: string;
-  lastPrice: number;
-  tradingStyle: TradingStyle;
-  action: DecisionAction;
-  conviction: number;
-  optionFlow?: {
-    ivRegime?: string;
-    greeksStrikeInsight?: GreeksStrikeInsight | null;
-    exactStrikeRecommendation?: ExactStrikeRecommendation | null;
-  };
-  convictionThresholds?: { enter?: number };
-  _debug?: {
-    rawOption?: OptionMetricsResponse;
-  };
-}
-
-async function fetchTradeDecisionPayload(
-  fastify: FastifyInstance,
-  symbol: string,
-  tradingStyle: TradingStyle,
-): Promise<TradeDecisionPayload | null> {
-  const vetoMode = fastify.telegramNotifications?.getVetoMode?.() ?? 'strict';
-  const flowMode = fastify.telegramNotifications?.getFlowMode?.() ?? 'blend';
-  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
-  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
-  const res = await fastify.inject({
-    method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
-  });
-
-  if (res.statusCode !== 200) return null;
-  return JSON.parse(res.body) as TradeDecisionPayload;
 }
 
 function resolveActiveSide(
@@ -130,7 +96,13 @@ export async function buildBestStrikeTelegramMessage(
     };
   }
 
-  const payload = await fetchTradeDecisionPayload(fastify, symbol, style);
+  const payload = await fetchTradeDecisionAlert(fastify, symbol, style, {
+    vetoMode: fastify.telegramNotifications.getVetoMode(),
+    flowMode: fastify.telegramNotifications.getFlowMode(),
+    sessionVerified: true,
+    skipPositionSizing: true,
+    skipAdaptiveConviction: true,
+  });
   if (!payload) {
     return {
       message: '',
@@ -139,12 +111,16 @@ export async function buildBestStrikeTelegramMessage(
   }
 
   const label = shortIndexLabel(payload.symbol || symbol);
-  const rawOption = payload._debug?.rawOption;
+  const rawOption = (payload._decisionBody?._debug as { rawOption?: OptionMetricsResponse } | undefined)
+    ?.rawOption;
   const greeksPair = rawOption?.greeksStrikeInsights ?? {
     CE: null,
     PE: null,
   };
-  const enterThreshold = payload.convictionThresholds?.enter ?? 55;
+  const thresholds = payload._decisionBody?.convictionThresholds as
+    | { enter?: number }
+    | undefined;
+  const enterThreshold = thresholds?.enter ?? 55;
   const belowThreshold = payload.conviction < enterThreshold;
 
   let exactStrikes: {
@@ -152,13 +128,13 @@ export async function buildBestStrikeTelegramMessage(
     PE: ExactStrikeRecommendation | null;
   } = { CE: null, PE: null };
 
-  if (payload.action === 'CE-BUY' && payload.optionFlow?.exactStrikeRecommendation) {
-    exactStrikes.CE = payload.optionFlow.exactStrikeRecommendation;
+  if (payload.action === 'CE-BUY' && payload.exactStrikeRecommendation) {
+    exactStrikes.CE = payload.exactStrikeRecommendation;
   } else if (
     payload.action === 'PE-BUY' &&
-    payload.optionFlow?.exactStrikeRecommendation
+    payload.exactStrikeRecommendation
   ) {
-    exactStrikes.PE = payload.optionFlow.exactStrikeRecommendation;
+    exactStrikes.PE = payload.exactStrikeRecommendation;
   } else if (rawOption?.optionChainNearby?.length) {
     exactStrikes = buildExactStrikeRecommendationPair(
       rawOption.optionChainNearby,

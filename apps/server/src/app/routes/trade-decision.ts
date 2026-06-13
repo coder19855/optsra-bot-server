@@ -28,6 +28,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       vetoMode: vetoModeQuery,
       flowMode: flowModeQuery,
       optionFlowOff: optionFlowOffQuery,
+      sessionVerified: sessionVerifiedQuery,
     } = request.query as {
       symbol: string;
       tradingStyle?: string;
@@ -36,6 +37,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       vetoMode?: string;
       flowMode?: string;
       optionFlowOff?: string;
+      sessionVerified?: string;
     };
 
     const vetoMode = parseVetoModeQuery(vetoModeQuery, vetoOffQuery);
@@ -46,7 +48,11 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
       return reply.code(400).send({ error: 'symbol is required' });
     }
 
-    const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
+    const sessionAlreadyVerified =
+      sessionVerifiedQuery === '1' || sessionVerifiedQuery === 'true';
+    const sessionReady = await fastify.ensureFyersSession(
+      sessionAlreadyVerified ? undefined : { verifyWithApi: true },
+    );
     if (!sessionReady) {
       return reply.code(503).send({
         error: 'Fyers session expired — log in again to compute trade decisions.',

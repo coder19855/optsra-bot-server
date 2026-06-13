@@ -566,10 +566,11 @@ export class TelegramCommandPoller {
       return;
     }
 
-    let adaptive: AdaptiveConvictionInsight | undefined;
+    let adaptive: AdaptiveConvictionInsight | undefined =
+      resolved.adaptiveConviction;
     if (
-      resolved.why.action === 'CE-BUY' ||
-      resolved.why.action === 'PE-BUY'
+      !adaptive &&
+      (resolved.why.action === 'CE-BUY' || resolved.why.action === 'PE-BUY')
     ) {
       adaptive = await computeAdaptiveConviction(this.fastify, {
         symbol: resolved.why.symbol,

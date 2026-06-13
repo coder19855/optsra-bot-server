@@ -32,6 +32,15 @@ export default fp(
       countDirectionalStructure,
     } = fastify.momentumDecayPlugin;
     // Core brain logic moved here for maintainability
+    /**
+     * Computes the confluent decision based on technical analysis and option flow metrics.
+     * 
+     * @param {PriceActionResponse} price - The price action response containing signals and timeframe scores.
+     * @param {OptionMetricsResponse} option - The option metrics including Greeks and OI data.
+     * @param {TradingStyle} style - The active trading style governing the weighting of timeframes.
+     * @param {DecisionEngineOptions} [options] - Optional configuration for veto and flow modes.
+     * @returns {TradeDecisionResult} The calculated decision, conviction score, and reason.
+     */
     function computeConfluentDecision(
       price: PriceActionResponse,
       option: OptionMetricsResponse,
