@@ -1,4 +1,3 @@
-import { FastifyInstance } from 'fastify';
 // Use plain types (avoid circular import with deck-service)
 type DeckSpotPoint = any;
 type DeckCandlePoint = any;
@@ -7,10 +6,10 @@ type DeckVetoPoint = any;
 type DeckTradeMarker = any;
 type DeckEvent = any;
 type DeckReplayPoint = any;
-import { DeckVetoBreakupItem, buildDeckVetoBreakup, buildReplayVetoBreakup } from './deck-veto-breakup';
+import { buildDeckVetoBreakup, buildReplayVetoBreakup } from './deck-veto-breakup';
 import { buildOptionComponentGauges, buildPriceActionComponentGauges, buildReplayPaComponents } from './deck-components';
 import { buildPaDrilldown, buildPaDrilldownFromTimelinePoint } from './deck-pa-drilldown';
-import { computeReplayOptionNeedle, computePaNeedleFromConviction, buildDeckGauges } from './deck-gauge';
+import { computeReplayOptionNeedle, computePaNeedleFromConviction } from './deck-gauge';
 import { TradingStyle } from '../types/trading-style';
 import { VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';

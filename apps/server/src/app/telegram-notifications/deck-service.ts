@@ -4,39 +4,29 @@ import { getStyleScoringConfig } from '../trading-style';
 import { TradingStyle } from '../types/trading-style';
 import {
   PriceActionResponse,
-  TimelinePoint,
-  Timeframe,
 } from '../types/technical-analysis';
 import {
-  buildOptionComponentGauges,
-  buildPriceActionComponentGauges,
-  buildReplayPaComponents,
   DeckComponentGauge,
 } from './deck-components';
 import {
-  buildDeckVetoBreakup,
-  buildReplayVetoBreakup,
   DeckVetoBreakupItem,
 } from './deck-veto-breakup';
 import {
-  buildPaDrilldown,
-  buildPaDrilldownFromTimelinePoint,
   PaDrilldown,
 } from './deck-pa-drilldown';
 import {
   buildDeckPatternContext,
   buildIstChartSession,
   DeckPatternContext,
+  DeckChartSession,
 } from './deck-pattern-context';
 import {
   DeckStrategyPayload,
   extractDeckStrategyPayload,
 } from './deck-strategy';
-import { buildDeckTradePlanner } from './deck-trade-planner';
-import { buildDeckGauges, computeReplayOptionNeedle } from './deck-gauge';
+import { buildDeckGauges } from './deck-gauge';
 import {
   loadOptionChainSnapshotsForSession,
-  nearestOptionChainSnapshot,
 } from './option-chain-snapshot-store';
 import {
   timelineToSpotSeries,
@@ -67,7 +57,6 @@ import {
 } from './deck-open-positions';
 import { computeManagementAdvice, getOpenPositionContext, PositionManagementContext } from './position-monitor';
 import {
-  buildDeckRegimeHint,
   DeckMarketRegime,
   resolveDeckMarketRegime,
 } from './market-regime';
@@ -420,6 +409,77 @@ function resolveManagementPriceData(decision: DeckTradeDecision): PriceActionRes
   } as PriceActionResponse;
 }
 
+// Helpers missing after refactor — provide lightweight implementations used by deck UI
+function filterCandlesToIstSession(candles: DeckCandlePoint[], session: DeckChartSession): DeckCandlePoint[] {
+  return (candles || []).filter((c) => c.t >= session.fromMs && c.t <= session.toMs);
+}
+
+function extractConvictions(decision: DeckTradeDecision) {
+  return {
+    price: decision.priceConviction ?? 0,
+    option: decision.optionConviction ?? 0,
+  };
+}
+
+function liveChartVetoed(decision: DeckTradeDecision, _vetoMode: VetoMode): boolean {
+  return Boolean(decision.priceAction?.overallSignal?.vetoReason);
+}
+
+function buildDeckLaneMeta(decision: DeckTradeDecision, gauges: any) {
+  const optionPercent = gauges?.option?.percent ?? 0;
+  const priceActionPercent = gauges?.priceAction?.percent ?? 0;
+  const combinedPercent = Math.round((optionPercent + priceActionPercent) / 2);
+  return {
+    lanes: {
+      optionPercent,
+      priceActionPercent,
+      combinedPercent,
+    },
+    weightedBaseConviction: decision.weightedBaseConviction ?? Math.round(decision.conviction ?? 0),
+    convictionBonuses: decision.convictionBonuses ?? [],
+  };
+}
+
+function prependPatternEvents(events: DeckEvent[], ctx?: DeckPatternContext): DeckEvent[] {
+  if (!ctx || !ctx.markers || !ctx.markers.length) return events;
+  const patternEvents = ctx.markers.map((m) => ({ t: m.t, type: 'flip' as any, label: m.label }));
+  return [...patternEvents, ...events];
+}
+
+function extractPatternContext(decision: DeckTradeDecision, spotSeriesTail: Array<{ t: number }>): DeckPatternContext | undefined {
+  const raw = decision._debug?.rawPrice ?? undefined;
+  try {
+    const price = raw ?? resolveManagementPriceData(decision);
+    return buildDeckPatternContext(price, spotSeriesTail as any);
+  } catch {
+    return undefined;
+  }
+}
+
+async function extractStrategyRecommendation(
+  _fastify: FastifyInstance,
+  decision: DeckTradeDecision,
+  _style: TradingStyle,
+  opts?: { replayNote?: string; replayMode?: boolean; marketRegime?: any },
+): Promise<DeckStrategyPayload> {
+  // For now reuse deck-strategy extractor — more advanced logic may use fastify for quotes
+  return extractDeckStrategyPayload(decision as any, { replayNote: opts?.replayNote });
+}
+
+function extractMarketRegime(decision: DeckTradeDecision, style: TradingStyle, _opts?: { flowMode?: FlowMode; vetoMode?: VetoMode }) {
+  try {
+    return resolveDeckMarketRegime({
+      symbol: decision.symbol,
+      tradingStyle: style,
+      mtfScore: (decision.priceAction as any)?.mtfScore,
+      aligned: (decision.priceAction as any)?.confluence?.aligned,
+      confluenceContext: (decision.priceAction as any)?.confluence,
+    });
+  } catch {
+    return resolveDeckMarketRegime({ symbol: decision.symbol, tradingStyle: style });
+  }
+}
+
 async function fetchTradeDecision(
   fastify: FastifyInstance,
   symbol: string,
@@ -467,7 +527,6 @@ async function fetchTimeline(
     fastify.log.warn({ err }, 'fetchTimeline request failed');
     return null;
   }
-}
 }
 
 function extractPatternInsights(decision: DeckTradeDecision): DeckPatternInsight[] {
@@ -677,7 +736,7 @@ export async function buildDeckLivePayload(
     spotCandles5m: multiCandles.c5,
     spotCandles15m: multiCandles.c15,
     spotCandles1h: multiCandles.c1h,
-    convictionSeries: recent.map((p) => ({
+    convictionSeries: recent.map((p: any) => ({
       t: p.asOf,
       option:
         p.signal.action === 'CE-BUY'

@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import Groq from 'groq-sdk';
+
 import OpenAI from 'openai';
 import { AIAnalysisRequest, AIAnalysisResponse, AIProvider } from '../types/ai-agent';
 
@@ -66,6 +66,18 @@ export default fp(
     const callGroq = async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
       const apiKey = process.env.GROQ_API_KEY;
       if (!apiKey) throw new Error('GROQ_API_KEY not configured');
+
+      // Dynamically import groq-sdk to avoid hard build-time dependency when not installed.
+      let GroqModule: any = null;
+      try {
+        // Use require guarded with ts-ignore to avoid build-time type dependency when package absent
+        // @ts-ignore
+        GroqModule = require('groq-sdk');
+      } catch (e) {
+        GroqModule = null;
+      }
+      if (!GroqModule) throw new Error('groq-sdk not available');
+      const Groq = (GroqModule as any).default ?? GroqModule;
 
       const groq = new Groq({ apiKey });
       const prompt = `
