@@ -68,6 +68,8 @@
     positionsCount: document.getElementById('positions-count'),
     positionsNote: document.getElementById('positions-note'),
     positionsTabBadge: document.getElementById('positions-tab-badge'),
+    adjustmentsPanel: document.getElementById('tab-adjustments'),
+    adjustmentsList: document.getElementById('adjustments-list'),
     marketRegime: document.getElementById('market-regime'),
     marketRegimeArrow: document.getElementById('market-regime-arrow'),
     marketRegimeLabel: document.getElementById('market-regime-label'),
@@ -2508,6 +2510,88 @@
     }
     banner.innerHTML = html;
     banner.classList.remove('hidden');
+
+    // Apply suggested stop overlay on chart if provided
+    try {
+      const stopAdj = advice?.suggestedStopAdjustment;
+      if (stopAdj && stopAdj.newStop != null && Number.isFinite(Number(stopAdj.newStop))) {
+        const overlay = {
+          price: Number(stopAdj.newStop),
+          tone: 'bear',
+          kind: 'stop',
+          dashed: true,
+          label: stopAdj.reason ? `Stop: ${stopAdj.reason}` : 'Suggested stop',
+        };
+        applyChartOverlays([...(chartOverlays || []), overlay]);
+      }
+    } catch (err) {
+      // non-fatal
+    }
+
+    // Render adjustments tab content for more detailed view
+    if (els.adjustmentsList) {
+      els.adjustmentsList.innerHTML = '';
+      const header = document.createElement('div');
+      header.className = 'panel-head';
+      const title = document.createElement('span');
+      title.textContent = 'Adjustments';
+      header.appendChild(title);
+      els.adjustmentsList.appendChild(header);
+
+      const body = document.createElement('div');
+      body.className = 'adjustments-body';
+
+      if (h) {
+        const healthRow = document.createElement('div');
+        healthRow.className = 'adjustment-row';
+        healthRow.innerHTML = `<strong>Health</strong> · ${h.score}/100 · ${h.label}`;
+        body.appendChild(healthRow);
+      }
+
+      if (advice?.riskAdjustment) {
+        const ra = document.createElement('div');
+        ra.className = 'adjustment-row';
+        ra.innerHTML = `<strong>Risk</strong> · ${advice.riskAdjustment.suggestedAction} · ${advice.riskAdjustment.notes?.join(' · ') || ''}`;
+        body.appendChild(ra);
+      }
+
+      if (advice?.recommendedActions?.length) {
+        for (const a of advice.recommendedActions) {
+          const item = document.createElement('div');
+          item.className = 'adjustment-action';
+          const head = document.createElement('div');
+          head.className = 'adjustment-action-head';
+          head.textContent = a.action.replace(/_/g, ' ');
+          const detail = document.createElement('div');
+          detail.className = 'adjustment-action-detail';
+          detail.textContent = a.detail || '';
+          item.appendChild(head);
+          item.appendChild(detail);
+          if (a.rrTarget) {
+            const rr = document.createElement('div');
+            rr.className = 'adjustment-action-meta';
+            rr.textContent = `Target: ${a.rrTarget}`;
+            item.appendChild(rr);
+          }
+          body.appendChild(item);
+        }
+      } else {
+        const none = document.createElement('div');
+        none.className = 'muted';
+        none.textContent = 'No adjustment recommendations at this time.';
+        body.appendChild(none);
+      }
+
+      if (advice?.suggestedStopAdjustment) {
+        const s = advice.suggestedStopAdjustment;
+        const stopRow = document.createElement('div');
+        stopRow.className = 'adjustment-row';
+        stopRow.innerHTML = `<strong>Suggested stop</strong> · ${s.newStop} · ${s.reason || ''} <div style="font-size:0.8rem; opacity:0.9">${s.improvement || ''}</div>`;
+        body.appendChild(stopRow);
+      }
+
+      els.adjustmentsList.appendChild(body);
+    }
   }
 
   function resolveReplayDisplay(point) {
