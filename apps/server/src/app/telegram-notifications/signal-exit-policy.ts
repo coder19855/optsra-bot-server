@@ -11,12 +11,11 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import {
-  fetchOpenIndexOptionPositions,
   getOpenPositionContext,
   HeldDirection,
 } from './position-monitor';
 
-export { HeldDirection } from './position-monitor';
+export type { HeldDirection } from './position-monitor';
 
 export interface SignalEngagementContext {
   engaged: boolean;

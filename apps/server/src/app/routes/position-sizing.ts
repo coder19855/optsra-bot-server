@@ -201,23 +201,25 @@ export default async function positionSizingRoute(fastify: FastifyInstance) {
       // Management brain awareness: if user already holds a position on this index,
       // reframe the sizing response as "adjustment" guidance rather than new entry size.
       try {
-        const posCtx = await getOpenPositionContext(fastify, [symbol]);
-        if (posCtx.count > 0) {
-          const mgmt = computeManagementAdvice(posCtx, {
-            action: 'NO-TRADE',
-            conviction: 0,
-            priceAction: { action: 'NO-TRADE' as any },
-            tradeGuidance: { shouldConsiderTrade: false },
-          } as any, priceData as any, activeStyle);
+        if (symbol) {
+          const posCtx = await getOpenPositionContext(fastify, [symbol]);
+          if (posCtx.count > 0) {
+            const mgmt = computeManagementAdvice(posCtx, {
+              action: 'NO-TRADE',
+              conviction: 0,
+              priceAction: { action: 'NO-TRADE' as any },
+              tradeGuidance: { shouldConsiderTrade: false },
+            } as any, priceData as any, activeStyle);
 
-          response.managementContext = {
-            hasOpenPosition: true,
-            heldDirection: posCtx.heldDirection,
-            advice: mgmt,
-          };
-          response.notes.unshift(
-            `You are already holding on this index. The numbers below are for *adjusting risk* on your existing position, not for a new entry.`
-          );
+            response.managementContext = {
+              hasOpenPosition: true,
+              heldDirection: posCtx.heldDirection,
+              advice: mgmt,
+            };
+            response.notes.unshift(
+              `You are already holding on this index. The numbers below are for *adjusting risk* on your existing position, not for a new entry.`
+            );
+          }
         }
       } catch {}
 

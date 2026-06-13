@@ -207,6 +207,7 @@ export interface DeckLiveStreamTick {
   structuralAction?: string;
   patternContext?: DeckPatternContext;
   marketRegime: DeckMarketRegime;
+  managementContext?: any;
 }
 
 export interface DeckLivePayload {
@@ -254,6 +255,7 @@ export interface DeckLivePayload {
   patternContext?: DeckPatternContext;
   openPositions: DeckOpenPositionsPayload;
   marketRegime: DeckMarketRegime;
+  managementContext?: any;
 }
 
 export interface DeckReplayPayload {
@@ -279,6 +281,8 @@ export interface DeckReplayPayload {
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   pnlNote?: string;
+  managementContext?: any;
+  openPositions?: DeckOpenPositionsPayload;
 }
 
 async function fetchTradeDecision(
@@ -1291,7 +1295,7 @@ export async function buildDeckLiveStreamTick(
       try {
         const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
         if (ctx.count > 0) {
-          const priceForMgmt = { lastPrice: liveLastPrice, momentumDecay: decision.momentumDecayPercent } as any;
+          const priceForMgmt = { lastPrice: liveLastPrice, momentumDecay: (decision as any).momentumDecayPercent ?? (decision as any).momentumDecay ?? 0 } as any;
           const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
           return {
             hasOpenPosition: true,

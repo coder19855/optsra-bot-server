@@ -185,6 +185,7 @@ export type TpHoldAdvice = 'hold' | 'partial' | 'trail' | 'exit';
 export type TpTrackReason =
   | 'entry_alert'
   | 'live_aligned'
+  | 'live_position'
   | 'already_tracked'
   | null;
 
@@ -268,6 +269,12 @@ export interface TelegramNotificationStatus {
   openPositionsMonitored: number;
   openPositionsTracked: number;
   lastTpAlertAt: string | null;
+  currentOpenPositions?: Array<{
+    symbol: string;
+    count: number;
+    directions: string[];
+    isMixed?: boolean;
+  }>;
   tpSnapshots: Array<{
     positionSymbol: string;
     isTracked: boolean;

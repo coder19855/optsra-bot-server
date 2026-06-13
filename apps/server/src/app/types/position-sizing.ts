@@ -50,4 +50,5 @@ export interface PositionSizingResponse {
   };
   tiers: PositionSizingTier[];
   notes: string[];
+  managementContext?: any;
 }

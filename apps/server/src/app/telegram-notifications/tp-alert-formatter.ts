@@ -58,14 +58,6 @@ export function formatTelegramTpAlertMessage(params: {
   const { position } = evaluation;
   const pnlSign = position.unrealizedPnl >= 0 ? '+' : '';
   const tpScenario = scenarioForTpKinds(kinds);
-
-  // If the Management Brain produced advice, use it to make the alert much more useful
-  const mgmt = (evaluation as any).managementAdvice;
-  if (mgmt) {
-    // Prepend strong management framing
-    const mgmtLine = `🧠 ${mgmt.headline}`;
-    // We will append the rich actions at the end
-  }
   const holdScenario = scenarioForHoldAdvice(evaluation.holdAdvice);
   const pnlScenario = scenarioForPnl(position.unrealizedPnl);
 

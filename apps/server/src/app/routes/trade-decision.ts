@@ -12,7 +12,6 @@ import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
 import {
   computeManagementAdvice,
   getOpenPositionContext,
-  HeldDirection,
   ManagementAdvice,
 } from '../telegram-notifications/position-monitor';
 import { isOptionOnlyFlow, isPaOnlyFlow } from '../types/flow-mode';

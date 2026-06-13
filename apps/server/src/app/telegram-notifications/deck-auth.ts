@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { FastifyRequest } from 'fastify';
 
 const MAX_AUTH_AGE_SEC = 86_400;
 

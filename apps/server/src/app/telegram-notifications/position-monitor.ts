@@ -14,6 +14,7 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
+import { isIndexStopBreached } from './signal-exit-policy';
 
 export type HeldDirection = 'CE-BUY' | 'PE-BUY';
 
@@ -379,7 +380,7 @@ export function computePositionHealthScore(
   }
 
   const stopBreached = tradeSetup?.stopLoss
-    ? isIndexStopBreached(heldDirection, priceData.lastPrice, tradeSetup)
+    ? isIndexStopBreached(heldDirection!, priceData.lastPrice, tradeSetup)
     : false;
 
   const breakdown: PositionHealth['breakdown'] = [];
@@ -508,7 +509,7 @@ export function computeManagementAdvice(
   priceData: PriceActionResponse,
   tradingStyle: TradingStyle,
 ): ManagementAdvice {
-  const { positions, heldDirection, isMixedDirections, count } = positionContext;
+  const { heldDirection, isMixedDirections, count } = positionContext;
 
   if (count === 0 || !heldDirection) {
     return {
@@ -526,10 +527,15 @@ export function computeManagementAdvice(
       holdSuitability: 50,
       riskAdjustment: { suggestedAction: 'MAINTAIN', notes: [] },
       source: 'live_position',
+      positionHealth: {
+        score: 50,
+        label: 'Fair',
+        trend: 'unknown',
+        breakdown: [{ factor: 'No position', contribution: 0, note: 'No open leg detected' }],
+      },
     };
   }
 
-  const primaryPosition = positions[0]; // for single-leg cases we focus on primary
   const tradeSetup = priceData.tradeSetup;
 
   // Base calculations (reuse existing helpers where possible)
@@ -570,7 +576,7 @@ export function computeManagementAdvice(
 
   // Stop breach check using current structure (better than static)
   const currentStopBreached = tradeSetup?.stopLoss
-    ? isIndexStopBreached(heldDirection, priceData.lastPrice, tradeSetup)
+    ? isIndexStopBreached(heldDirection!, priceData.lastPrice, tradeSetup)
     : false;
 
   if (currentStopBreached) holdSuitability = Math.min(holdSuitability, 15);

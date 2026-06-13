@@ -53,6 +53,9 @@ export async function buildNowTelegramMessage(
   error?: string;
   deckSymbol?: string;
   deckStyle?: string;
+  openPositionNote?: string | null;
+  hasOpenPosition?: boolean;
+  managementAdvice?: any;
 }> {
   const voice =
     params.voice ??
