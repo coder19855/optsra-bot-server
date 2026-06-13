@@ -172,6 +172,7 @@ export interface TradeDecisionAlertPayload {
     neckline?: number;
     timeframe?: Timeframe;
   };
+  aiAnalysis?: import('./ai-agent').AIAnalysisResponse;
 }
 
 export type TpAlertKind =

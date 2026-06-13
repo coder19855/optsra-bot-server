@@ -128,6 +128,7 @@ export function formatCommandsReferenceMessage(
     '<code>/stop</code> — pause signal + pre-session pings (TP still on)',
     '<code>/start</code> — resume alerts (needs live Fyers session)',
     '<code>/status</code> — bot health (polls, TP, Fyers token)',
+    '<code>/beta status</code> — toggle AI agent and providers',
   ]);
 
   const fyersBlock = commandBlock('🔐 <b>Fyers session</b>', [
@@ -195,6 +196,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'alert', description: 'Full vs compact signal pings' },
   { command: 'style', description: 'Intraday / scalper / positional' },
   { command: 'veto', description: 'Chart veto what-if mode' },
+  { command: 'beta', description: 'AI Agent & Beta features' },
   { command: 'flow', description: 'PA-only vs blend scoring' },
   { command: 'status', description: 'Bot & alert status' },
   { command: 'why', description: 'Why did this alert fire?' },

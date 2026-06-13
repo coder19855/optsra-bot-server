@@ -241,6 +241,7 @@ export async function fetchTradeDecisionAlert(
     tradeSetup,
     momentumDecayPercent: rawPrice?.momentumDecay?.decayPercent ?? null,
     chartPattern,
+    aiAnalysis: body.aiAnalysis as import('../types/ai-agent').AIAnalysisResponse | undefined,
   };
 
   options?.pollContext?.tradeDecisionCache.set(cacheKey, payload);

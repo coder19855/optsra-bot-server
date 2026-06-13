@@ -512,6 +512,58 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         })),
       });
 
+      // AI Beta Integration
+      const aiBeta = fastify.telegramNotifications.getAiBeta();
+      if (aiBeta.enabled && coreDecision.action !== 'NO-TRADE') {
+        try {
+          const aiRequest = {
+            symbol,
+            tradingStyle: activeStyle,
+            action: coreDecision.action,
+            conviction: coreDecision.conviction,
+            bias: coreDecision.bias,
+            priceAction: {
+              primaryTF,
+              primaryScore,
+              levels: priceData.levels,
+              momentum: priceData.momentum,
+              structure: priceData.structureElements || {},
+            },
+            optionFlow: {
+              overallScore: optionData.score,
+              ivRegime: optionData.ivRegime || 'Normal',
+              topComponents: optionFlowComponents.slice(0, 3).map((c: any) => ({
+                name: c.name,
+                score: c.score,
+                interpretation: c.interpretation,
+              })),
+            },
+          };
+
+          const aiResult = await fastify.aiAgent.analyze(aiRequest);
+          coreDecision.aiAnalysis = aiResult;
+
+          if (!aiBeta.shadowMode && aiResult.confidenceAdjustment !== 0) {
+            coreDecision.conviction = Math.min(
+              95,
+              Math.max(0, coreDecision.conviction + aiResult.confidenceAdjustment),
+            );
+            coreDecision.convictionBonuses.push({
+              label: `AI Beta adjustment (${aiResult.provider})`,
+              points: aiResult.confidenceAdjustment,
+            });
+            // Update confluenceAndDecision for visibility in /why
+            confluenceAndDecision.push({
+              field: 'aiBetaAdjustment',
+              value: aiResult.confidenceAdjustment,
+              explanation: `AI Beta (${aiResult.provider}) adjusted conviction by ${aiResult.confidenceAdjustment} points. Verdict: ${aiResult.verdict}.`,
+            });
+          }
+        } catch (err) {
+          fastify.log.warn({ err }, 'AI Beta analysis integration failed');
+        }
+      }
+
       reply.send({
         symbol: optionData.spotSymbol || priceData.symbol,
         lastPrice: priceData.lastPrice,
@@ -529,6 +581,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         optionConviction: coreDecision.optionConviction,
         priceConvictionBeforeDecay: coreDecision.priceConvictionBeforeDecay,
         momentumDecay: coreDecision.momentumDecay,
+        aiAnalysis: coreDecision.aiAnalysis,
         vetoMode,
         vetoOff: isVetoOff(vetoMode),
         scoringWeights: {

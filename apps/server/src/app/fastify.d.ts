@@ -431,9 +431,16 @@ declare module 'fastify' {
       setNewsFeed: (
         feedId: import('./types/market-news-feed').MarketNewsFeedId,
       ) => Promise<import('./types/market-news-feed').MarketNewsFeedId>;
+      getAiBeta: () => import('./telegram-notifications/ai-beta-preference').AiBetaPreferenceState;
+      setAiBeta: (
+        update: Partial<import('./telegram-notifications/ai-beta-preference').AiBetaPreferenceState>,
+      ) => Promise<import('./telegram-notifications/ai-beta-preference').AiBetaPreferenceState>;
       resumeAlertsAfterLogin: () => Promise<boolean>;
       startPolling: () => void;
       stopPolling: () => void;
+    };
+    aiAgent: {
+      analyze: (request: import('./types/ai-agent').AIAnalysisRequest) => Promise<import('./types/ai-agent').AIAnalysisResponse>;
     };
   }
 }

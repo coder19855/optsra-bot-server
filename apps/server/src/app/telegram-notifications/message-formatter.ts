@@ -266,6 +266,18 @@ function formatExactStrikeSection(
   return formatEnginePickCallout(strike, signalStrikeTitle(action, voice));
 }
 
+function formatAiBetaSection(
+  ai: TradeDecisionAlertPayload['aiAnalysis'],
+): string | null {
+  if (!ai || !ai.betaNote) return null;
+
+  const emoji = ai.verdict === 'AGREE' ? '✅' : ai.verdict === 'DISAGREE' ? '❌' : '⚠️';
+  return joinTelegramLines(
+    `🧪 <b>AI BETA: ${ai.verdict} (${ai.provider})</b>`,
+    `${emoji} <i>${escapeHtml(ai.betaNote)}</i>`,
+  );
+}
+
 function formatAdaptiveConvictionLine(
   adaptive: TradeDecisionAlertPayload['adaptiveConviction'],
   conviction: number,
@@ -385,6 +397,7 @@ function formatCompactTelegramAlertMessage(params: {
     payload.action,
     voice,
   );
+  const aiBeta = formatAiBetaSection(payload.aiAnalysis);
 
   const chartVetoed =
     pa.confidence === 0 ||
@@ -407,6 +420,7 @@ function formatCompactTelegramAlertMessage(params: {
     identityBlock,
     vetoOneLiner,
     exactStrike,
+    aiBeta,
     change,
     COMPACT_DECK_HINT,
   );
@@ -459,6 +473,7 @@ export function formatTelegramAlertMessage(params: {
     payload.action,
     voice,
   );
+  const aiBeta = formatAiBetaSection(payload.aiAnalysis);
   const adaptiveLine = formatAdaptiveConvictionLine(
     payload.adaptiveConviction,
     payload.conviction,
@@ -513,6 +528,7 @@ export function formatTelegramAlertMessage(params: {
     vetoSection ? null : priceActionLine(pa, payload.action, voice),
     signalOptionRead(payload.optionFlow?.bias, payload.action, voice),
     iv ? `🌡 IV: ${escapeHtml(iv)}` : null,
+    aiBeta,
   );
 
   const enterBlock = joinTelegramLines(

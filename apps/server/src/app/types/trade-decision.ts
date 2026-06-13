@@ -41,4 +41,5 @@ export interface TradeDecisionResult {
     neutral: string[];
   };
   recommendedStrategies: Array<Record<string, unknown>>;
+  aiAnalysis?: import('./ai-agent').AIAnalysisResponse;
 }

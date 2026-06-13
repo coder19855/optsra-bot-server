@@ -75,6 +75,11 @@ import {
   formatAlertStatusMessage,
   parseAlertCommandArgs,
 } from './alert-command';
+import {
+  formatBetaStatusMessage,
+  parseBetaCommandArgs,
+} from './beta-command';
+import { AIProvider } from '../types/ai-agent';
 
 interface TelegramUpdate {
   update_id: number;
@@ -302,6 +307,8 @@ export class TelegramCommandPoller {
         await this.handleStyle(text, replyChatId);
       } else if (command === '/alert') {
         await this.handleAlert(text, replyChatId);
+      } else if (command === '/beta') {
+        await this.handleBeta(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -949,6 +956,55 @@ export class TelegramCommandPoller {
 
     await this.deps.sendMessage(
       formatVoiceStatusMessage(this.fastify.telegramNotifications.getVoice()),
+      this.replyOptions(replyChatId),
+    );
+  }
+
+  private async handleBeta(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseBetaCommandArgs(text);
+    const state = this.fastify.telegramNotifications.getAiBeta();
+
+    if (parsed.action === 'toggle' && parsed.value) {
+      const enabled = parsed.value === 'on';
+      await this.fastify.telegramNotifications.setAiBeta({ enabled });
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>AI Beta → ${enabled ? 'Enabled' : 'Disabled'}</b>`,
+          `<i>AI analysis is now ${enabled ? 'active' : 'off'}.</i>`,
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    if (parsed.action === 'provider' && parsed.value) {
+      const provider = parsed.value.toUpperCase() as AIProvider;
+      await this.fastify.telegramNotifications.setAiBeta({ provider });
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>AI Provider → ${provider}</b>`,
+          `<i>Model switched to ${provider}.</i>`,
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    if (parsed.action === 'shadow' && parsed.value) {
+      const shadowMode = parsed.value === 'on';
+      await this.fastify.telegramNotifications.setAiBeta({ shadowMode });
+      await this.deps.sendMessage(
+        joinTelegramSections(
+          `✅ <b>AI Shadow Mode → ${shadowMode ? 'On' : 'Off'}</b>`,
+          `<i>${shadowMode ? 'Opinion only mode enabled.' : 'AI will now influence the conviction score.'}</i>`,
+        ),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    await this.deps.sendMessage(
+      formatBetaStatusMessage(state),
       this.replyOptions(replyChatId),
     );
   }

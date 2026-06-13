@@ -104,6 +104,12 @@ import {
   saveAlertFormatPreference,
   AlertFormatPreferenceState,
 } from '../telegram-notifications/alert-format-preference';
+import {
+  defaultAiBetaPreferenceState,
+  loadAiBetaPreference,
+  saveAiBetaPreference,
+  AiBetaPreferenceState,
+} from '../telegram-notifications/ai-beta-preference';
 import { mergeDeckKeyboard } from '../telegram-notifications/deck-keyboard';
 import { DEFAULT_TELEGRAM_VOICE, TelegramVoice } from '../types/telegram-voice';
 import {
@@ -195,6 +201,8 @@ export default fp(
     };
     let alertFormatPreferenceState: AlertFormatPreferenceState =
       defaultAlertFormatPreferenceState();
+    let aiBetaPreferenceState: AiBetaPreferenceState =
+      defaultAiBetaPreferenceState();
 
     function syncActiveWatchedStyles(tradingStyle: TradingStyle): void {
       activeWatchedStyles.length = 0;
@@ -1229,6 +1237,19 @@ export default fp(
       setTradingStyle,
       getNewsFeed,
       setNewsFeed,
+      getAiBeta: () => aiBetaPreferenceState,
+      setAiBeta: async (update: Partial<AiBetaPreferenceState>) => {
+        aiBetaPreferenceState = await saveAiBetaPreference(
+          fastify,
+          aiBetaPreferenceState,
+          update,
+        );
+        fastify.log.info(
+          { aiBeta: aiBetaPreferenceState },
+          'Telegram AI Beta preference updated',
+        );
+        return aiBetaPreferenceState;
+      },
       resumeAlertsAfterLogin,
       startPolling,
       stopPolling,
@@ -1271,6 +1292,10 @@ export default fp(
         alertFormatPreferenceState = await loadAlertFormatPreference(
           fastify,
           alertFormatPreferenceState,
+        );
+        aiBetaPreferenceState = await loadAiBetaPreference(
+          fastify,
+          aiBetaPreferenceState,
         );
         syncActiveWatchedStyles(stylePreferenceState.tradingStyle);
         if (pollingPauseState.alertsPaused) {

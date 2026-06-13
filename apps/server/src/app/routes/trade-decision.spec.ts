@@ -12,6 +12,19 @@ function decorateTradeDecisionTestDeps(fastify: import('fastify').FastifyInstanc
     'ensureFyersSession',
     jest.fn().mockResolvedValue(true),
   );
+  fastify.decorate('telegramNotifications', {
+    getAiBeta: jest.fn().mockReturnValue({ enabled: false, provider: 'GEMINI', shadowMode: true }),
+  });
+  fastify.decorate('aiAgent', {
+    analyze: jest.fn().mockResolvedValue({
+      provider: 'GEMINI',
+      model: 'test-model',
+      verdict: 'AGREE',
+      confidenceAdjustment: 0,
+      betaNote: 'Test AI Note',
+      timestamp: Date.now(),
+    }),
+  });
 }
 
 describe('GET /api/trade-decision', () => {
@@ -136,6 +149,42 @@ describe('GET /api/trade-decision', () => {
       priceAction: expect.any(Number),
       optionFlow: expect.any(Number),
     });
+    await app.close();
+  });
+
+  it('includes AI analysis when AI beta is enabled', async () => {
+    const price = priceFixture();
+    const option = optionFixture();
+    const app = await buildRouteApp(tradeDecisionRoute, async (f) => {
+      decorateTradeDecisionTestDeps(f);
+      f.telegramNotifications.getAiBeta = jest.fn().mockReturnValue({
+        enabled: true,
+        provider: 'GROQ',
+        shadowMode: true,
+      });
+      await f.register(momentumDecayPlugin);
+      await f.register(decisionEnginePlugin);
+      const originalInject = f.inject.bind(f);
+      f.inject = jest.fn(async (opts) => {
+        const url = String(opts.url);
+        if (url.includes('technical-analysis')) {
+          return { statusCode: 200, body: JSON.stringify(price) };
+        }
+        if (url.includes('score-metrics')) {
+          return { statusCode: 200, body: JSON.stringify(option) };
+        }
+        return originalInject(opts);
+      }) as typeof f.inject;
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/trade-decision?symbol=NSE:NIFTY50-INDEX&tradingStyle=INTRADAY',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.aiAnalysis).toBeDefined();
+    expect(body.aiAnalysis.betaNote).toBe('Test AI Note');
     await app.close();
   });
 });
