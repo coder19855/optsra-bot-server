@@ -76,9 +76,9 @@ import {
   parseAlertCommandArgs,
 } from './alert-command';
 import {
-  formatBetaStatusMessage,
-  parseBetaCommandArgs,
-} from './beta-command';
+  formatAiStatusMessage,
+  parseAiCommandArgs,
+} from './ai-command';
 import { AIProvider } from '../types/ai-agent';
 
 interface TelegramUpdate {
@@ -307,8 +307,8 @@ export class TelegramCommandPoller {
         await this.handleStyle(text, replyChatId);
       } else if (command === '/alert') {
         await this.handleAlert(text, replyChatId);
-      } else if (command === '/beta') {
-        await this.handleBeta(text, replyChatId);
+      } else if (command === '/ai') {
+        await this.handleAi(text, replyChatId);
       }
     } catch (err) {
       this.fastify.log.warn({ err, command }, 'Telegram command failed');
@@ -960,8 +960,8 @@ export class TelegramCommandPoller {
     );
   }
 
-  private async handleBeta(text: string, replyChatId?: number): Promise<void> {
-    const parsed = parseBetaCommandArgs(text);
+  private async handleAi(text: string, replyChatId?: number): Promise<void> {
+    const parsed = parseAiCommandArgs(text);
     const state = this.fastify.telegramNotifications.getAiBeta();
 
     if (parsed.action === 'toggle' && parsed.value) {
@@ -969,7 +969,7 @@ export class TelegramCommandPoller {
       await this.fastify.telegramNotifications.setAiBeta({ enabled });
       await this.deps.sendMessage(
         joinTelegramSections(
-          `✅ <b>AI Beta → ${enabled ? 'Enabled' : 'Disabled'}</b>`,
+          `✅ <b>AI Agent → ${enabled ? 'Enabled' : 'Disabled'}</b>`,
           `<i>AI analysis is now ${enabled ? 'active' : 'off'}.</i>`,
         ),
         this.replyOptions(replyChatId),
@@ -1004,7 +1004,7 @@ export class TelegramCommandPoller {
     }
 
     await this.deps.sendMessage(
-      formatBetaStatusMessage(state),
+      formatAiStatusMessage(state),
       this.replyOptions(replyChatId),
     );
   }

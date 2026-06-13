@@ -1,7 +1,7 @@
 import { AiBetaPreferenceState } from './ai-beta-preference';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 
-export function parseBetaCommandArgs(text: string): {
+export function parseAiCommandArgs(text: string): {
   action: 'status' | 'toggle' | 'provider' | 'shadow';
   value?: string;
 } {
@@ -10,19 +10,19 @@ export function parseBetaCommandArgs(text: string): {
   const value = parts[2];
 
   if (!arg || arg === 'status') return { action: 'status' };
-  if (arg === 'ai') return { action: 'toggle', value };
+  if (arg === 'on' || arg === 'off') return { action: 'toggle', value: arg };
   if (arg === 'provider' || arg === 'model') return { action: 'provider', value };
   if (arg === 'shadow') return { action: 'shadow', value };
 
   return { action: 'status' };
 }
 
-export function formatBetaStatusMessage(state: AiBetaPreferenceState): string {
+export function formatAiStatusMessage(state: AiBetaPreferenceState): string {
   const status = state.enabled ? '🟢 Enabled' : '🔴 Disabled';
   const shadowStatus = state.shadowMode ? '👥 Shadow (Opinion Only)' : '⚔️ Active (Influences Score)';
 
   return joinTelegramSections(
-    '🧪 <b>Beta Features</b>',
+    '🤖 <b>AI Agent Settings</b>',
     joinTelegramLines(
       `AI Agent: <b>${status}</b>`,
       `Provider: <b>${state.provider}</b>`,
@@ -30,10 +30,10 @@ export function formatBetaStatusMessage(state: AiBetaPreferenceState): string {
       '',
     ),
     joinTelegramLines(
-      '<code>/beta ai on|off</code> — toggle AI agent',
-      '<code>/beta provider GEMINI|GROQ</code> — switch AI model',
-      '<code>/beta shadow on|off</code> — opinion vs influencing score',
-      '<code>/beta status</code> — show current beta config',
+      '<code>/ai on|off</code> — toggle AI agent',
+      '<code>/ai provider GEMINI|GROQ</code> — switch AI model',
+      '<code>/ai shadow on|off</code> — opinion vs influencing score',
+      '<code>/ai status</code> — show current AI config',
       '',
       '<i>Shadow mode adds "AI Beta Note" to alerts without changing math.</i>',
     ),
