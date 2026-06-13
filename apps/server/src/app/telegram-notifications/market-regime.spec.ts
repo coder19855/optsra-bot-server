@@ -1,5 +1,6 @@
 import { TradingStyle } from '../types/trading-style';
 import {
+  buildDeckRegimeHint,
   resetMarketRegimeStore,
   resolveDeckMarketRegime,
 } from './market-regime';
@@ -63,6 +64,30 @@ function sidewaysContext() {
     chartPattern: 'none' as const,
   };
 }
+
+describe('buildDeckRegimeHint', () => {
+  it('shows blend weights and relaxed veto instead of PA-led copy', () => {
+    expect(
+      buildDeckRegimeHint({
+        regimeKind: 'trending',
+        flowMode: 'blend',
+        vetoMode: 'relaxed',
+        tradingStyle: TradingStyle.Intraday,
+      }),
+    ).toBe('Blend 65/35 · relaxed veto · directional tape');
+  });
+
+  it('shows PA-only when flow mode is pa-only', () => {
+    expect(
+      buildDeckRegimeHint({
+        regimeKind: 'sideways',
+        flowMode: 'pa-only',
+        vetoMode: 'strict',
+        tradingStyle: TradingStyle.Intraday,
+      }),
+    ).toBe('PA-only · strict veto · range-bound tape');
+  });
+});
 
 describe('resolveDeckMarketRegime', () => {
   beforeEach(() => {

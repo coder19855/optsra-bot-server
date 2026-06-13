@@ -5,6 +5,43 @@ import { buildPluginApp } from '../testing/fastify-test-harness';
 import { sampleOptionMetrics, samplePriceAction } from '../testing/fixtures';
 
 describe('decision-engine plugin', () => {
+  it('exposes weighted base below entry conviction when alignment bonuses apply', async () => {
+    const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
+      await f.register(momentumDecayPlugin);
+    });
+    const result = app.decisionEngine.computeTradeDecision(
+      samplePriceAction({
+        signal: { action: 'CE-BUY', confidence: 84 },
+        timeframeScores: { '5m': 0.3, '15m': 0.35, '1h': 0.2 },
+        confluence: {
+          mtfScore: 0.3,
+          aligned: 3,
+          higherTimeframeConfirmation: true,
+        },
+        adx: { '5m': 25, '15m': 22, '1h': 18 },
+      }),
+      sampleOptionMetrics({
+        score: 34,
+        signal: 'BULLISH_TRADE',
+        bias: 'Bullish',
+        components: {
+          oi: 0.4,
+          greeks: 0.4,
+          iv: 0,
+          trend: 0.3,
+          pcr: 0.2,
+          skew: 0.1,
+          pain: 0,
+          vix: 0,
+        },
+      }),
+      TradingStyle.Intraday,
+    );
+    expect(result.weightedBaseConviction).toBeLessThan(result.conviction);
+    expect(result.convictionBonuses.some((b) => b.points > 0)).toBe(true);
+    await app.close();
+  });
+
   it('returns PE-BUY for aligned bearish intraday inputs', async () => {
     const app = await buildPluginApp(decisionEnginePlugin, async (f) => {
       await f.register(momentumDecayPlugin);

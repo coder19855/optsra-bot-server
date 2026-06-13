@@ -10,9 +10,13 @@ import {
   SignalSnapshot,
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
-import { fetchOpenIndexOptionPositions } from './position-monitor';
+import {
+  fetchOpenIndexOptionPositions,
+  getOpenPositionContext,
+  HeldDirection,
+} from './position-monitor';
 
-export type HeldDirection = 'CE-BUY' | 'PE-BUY';
+export { HeldDirection } from './position-monitor';
 
 export interface SignalEngagementContext {
   engaged: boolean;
@@ -248,18 +252,19 @@ export function resolveHeldDirectionFromOpenPositions(
   return null;
 }
 
+/**
+ * Uses the robust getOpenPositionContext.
+ * Returns heldDirection only on clean single-direction case.
+ * Callers that want to know about mixed / fetch problems should use getOpenPositionContext directly.
+ */
 export async function resolveEngagedHeldDirection(
   fastify: FastifyInstance,
   params: {
     indexSymbol: string;
   },
 ): Promise<HeldDirection | null> {
-  const positions = await fetchOpenIndexOptionPositions(fastify, [
-    params.indexSymbol,
-  ]);
-  const openDirs = positions
-    .filter((p) => p.indexSymbol === params.indexSymbol)
-    .map((p) => p.direction);
-
-  return resolveHeldDirectionFromOpenPositions(openDirs);
+  const ctx = await getOpenPositionContext(fastify, [params.indexSymbol]);
+  if (!ctx.fetchSucceeded || ctx.count === 0) return null;
+  if (ctx.isMixedDirections) return null;
+  return ctx.heldDirection;
 }

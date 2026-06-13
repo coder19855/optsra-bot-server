@@ -14,6 +14,17 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
+
+export type HeldDirection = 'CE-BUY' | 'PE-BUY';
+
+export interface OpenPositionContext {
+  positions: OpenPositionMonitorContext[];
+  heldDirection: HeldDirection | null;
+  isMixedDirections: boolean;
+  count: number;
+  fetchSucceeded: boolean;
+  fetchError?: string;
+}
 import {
   RrLabel,
   TradeAction,
@@ -266,32 +277,95 @@ export async function fetchOpenIndexOptionPositions(
   fastify: FastifyInstance,
   watchedIndexSymbols: string[],
 ): Promise<OpenPositionMonitorContext[]> {
-  const res = await fastify.fyers.get_positions();
-  if (res.s !== ResponseStatus.ok || !res.netPositions?.length) return [];
+  try {
+    const res = await fastify.fyers.get_positions();
+    if (res.s !== ResponseStatus.ok || !res.netPositions?.length) return [];
 
-  const watched = new Set(watchedIndexSymbols);
-  const positions: OpenPositionMonitorContext[] = [];
+    const watched = new Set(watchedIndexSymbols);
+    const positions: OpenPositionMonitorContext[] = [];
 
-  for (const row of res.netPositions) {
-    const netQty = Number(row.netQty ?? row.qty ?? 0);
-    if (netQty <= 0) continue;
+    for (const row of res.netPositions) {
+      const netQty = Number(row.netQty ?? row.qty ?? 0);
+      if (netQty <= 0) continue;
 
-    const meta = resolveOptionMeta(row.symbol);
-    if (!meta || !watched.has(meta.indexSymbol)) continue;
+      const meta = resolveOptionMeta(row.symbol);
+      if (!meta || !watched.has(meta.indexSymbol)) continue;
 
-    positions.push({
-      symbol: row.symbol,
-      optionLabel: optionLabel(row.symbol),
-      indexSymbol: meta.indexSymbol,
-      indexLabel: shortIndexLabel(meta.indexSymbol),
-      direction: positionDirection(meta.optionType),
-      netQty,
-      buyAvg: Number(row.buyAvg ?? 0),
-      unrealizedPnl: Number(row.unrealized_profit ?? row.pl ?? 0),
-    });
+      positions.push({
+        symbol: row.symbol,
+        optionLabel: optionLabel(row.symbol),
+        indexSymbol: meta.indexSymbol,
+        indexLabel: shortIndexLabel(meta.indexSymbol),
+        direction: positionDirection(meta.optionType),
+        netQty,
+        buyAvg: Number(row.buyAvg ?? 0),
+        unrealizedPnl: Number(row.unrealized_profit ?? row.pl ?? 0),
+      });
+    }
+
+    return positions;
+  } catch (err) {
+    fastify.log?.warn?.({ err, watched: watchedIndexSymbols }, 'fetchOpenIndexOptionPositions failed');
+    return [];
   }
+}
 
-  return positions;
+/**
+ * Robust wrapper around position fetching.
+ * Always returns a context object even on errors.
+ * Computes heldDirection only when there is exactly one unique direction.
+ * Exposes isMixedDirections and fetch status for callers to decide how to degrade.
+ */
+export async function getOpenPositionContext(
+  fastify: FastifyInstance,
+  indexSymbols: string[],
+): Promise<OpenPositionContext> {
+  const empty: OpenPositionContext = {
+    positions: [],
+    heldDirection: null,
+    isMixedDirections: false,
+    count: 0,
+    fetchSucceeded: false,
+  };
+
+  try {
+    const positions = await fetchOpenIndexOptionPositions(fastify, indexSymbols);
+    const count = positions.length;
+
+    if (count === 0) {
+      return { ...empty, fetchSucceeded: true, count: 0 };
+    }
+
+    const directions = positions.map((p) => p.direction);
+    const unique = [...new Set(directions)];
+    const isMixed = unique.length > 1;
+    const held = isMixed ? null : (unique[0] as HeldDirection);
+
+    return {
+      positions,
+      heldDirection: held,
+      isMixedDirections: isMixed,
+      count,
+      fetchSucceeded: true,
+    };
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    fastify.log?.warn?.({ err, symbols: indexSymbols }, 'getOpenPositionContext failed to fetch positions');
+    return { ...empty, fetchError: msg };
+  }
+}
+
+/** Convenience: true if there is at least one open leg for the index (regardless of mixed or tracking). */
+export async function hasLiveOpenPosition(
+  fastify: FastifyInstance,
+  indexSymbol: string,
+): Promise<boolean> {
+  try {
+    const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
+    return ctx.fetchSucceeded && ctx.count > 0;
+  } catch {
+    return false;
+  }
 }
 
 async function fetchPriceAction(
@@ -422,6 +496,20 @@ async function resolveTrackingEligibility(
 
   if (hasIntent) {
     return { isTracked: true, trackReason: 'entry_alert' };
+  }
+
+  // NEW: Robust live position awareness.
+  // If Fyers actually shows a net long leg for this exact option, we should manage it
+  // (TP levels, stop breach, alignment) even if the user entered manually or the
+  // intent window expired or the current index decision is flat.
+  const liveCtx = await getOpenPositionContext(fastify, [params.position.indexSymbol]);
+  const hasLiveMatchingLeg = liveCtx.fetchSucceeded &&
+    liveCtx.positions.some(
+      (p) => p.symbol === params.position.symbol && p.direction === params.position.direction
+    );
+
+  if (hasLiveMatchingLeg) {
+    return { isTracked: true, trackReason: 'live_position' };
   }
 
   const aligned = signalSupportsPosition(

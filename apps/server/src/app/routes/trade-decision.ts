@@ -9,6 +9,7 @@ import { OptionMetricsResponse, PriceActionResponse } from '../types';
 import { recordOptionChainSnapshot } from '../telegram-notifications/option-chain-snapshot-store';
 import { parseFlowModeQuery } from '../telegram-notifications/flow-preference';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
+import { getOpenPositionContext, HeldDirection } from '../telegram-notifications/position-monitor';
 import { isOptionOnlyFlow, isPaOnlyFlow } from '../types/flow-mode';
 import { isVetoOff } from '../types/veto-mode';
 
@@ -113,7 +114,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
                 ? `PA-only flow mode: conviction ${coreDecision.conviction}% from price action (${coreDecision.priceConviction}%) — option flow ignored. Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`
                 : isOptionOnlyFlow(flowMode)
                   ? `Option-only flow mode: conviction ${coreDecision.conviction}% from option flow (${coreDecision.optionConviction}%) — price action ignored for the blend.`
-                  : `Combined conviction ${coreDecision.conviction}% = ${Math.round(scoringConfig.priceActionWeight * 100)}% price action (${coreDecision.priceConviction}%) + ${Math.round(scoringConfig.optionFlowWeight * 100)}% option flow (${coreDecision.optionConviction}%). Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`,
+                  : `Entry conviction ${coreDecision.conviction}% = weighted base ${coreDecision.weightedBaseConviction}% (${Math.round(scoringConfig.priceActionWeight * 100)}% PA ${coreDecision.priceConviction}% + ${Math.round(scoringConfig.optionFlowWeight * 100)}% option ${coreDecision.optionConviction}%) plus alignment bonuses. Primary ${primaryTF} score ${primaryScore.toFixed(2)}.`,
         },
         {
           field: 'priceActionConviction',
@@ -394,6 +395,34 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         greeksStrikeInsight = greeksInsights?.PE ?? null;
       }
 
+      // Robust open position context (best-effort, never throws the whole request)
+      let positionContext: any = null;
+      try {
+        const posCtx = await getOpenPositionContext(fastify, [symbol]);
+        if (posCtx && posCtx.count > 0) {
+          positionContext = {
+            hasOpenPosition: true,
+            heldDirection: posCtx.heldDirection,
+            isMixedDirections: posCtx.isMixedDirections,
+            count: posCtx.count,
+            positions: posCtx.positions.map((p: any) => ({
+              symbol: p.symbol,
+              direction: p.direction,
+              netQty: p.netQty,
+              unrealizedPnl: p.unrealizedPnl,
+            })),
+            managementNote:
+              posCtx.isMixedDirections
+                ? 'Multiple directions open for this index. Exercise caution with new directional ideas.'
+                : `You currently hold a ${posCtx.heldDirection} position on this index. The engine read above is for reference, scaling, or management — not a fresh entry solicitation.`,
+          };
+        } else if (posCtx && !posCtx.fetchSucceeded) {
+          positionContext = { hasOpenPosition: false, fetchError: posCtx.fetchError || 'position fetch failed' };
+        }
+      } catch (e) {
+        // never break the decision response
+      }
+
       if (
         greeksStrikeInsight &&
         coreDecision.conviction < scoringConfig.convictionThreshold.enter
@@ -451,9 +480,11 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         risk: coreDecision.risk,
         recommendation: coreDecision.recommendation,
         conviction: coreDecision.conviction,
+        weightedBaseConviction: coreDecision.weightedBaseConviction,
+        convictionBonuses: coreDecision.convictionBonuses,
         priceConviction: coreDecision.priceConviction,
-        priceConvictionBeforeDecay: coreDecision.priceConvictionBeforeDecay,
         optionConviction: coreDecision.optionConviction,
+        priceConvictionBeforeDecay: coreDecision.priceConvictionBeforeDecay,
         momentumDecay: coreDecision.momentumDecay,
         vetoMode,
         vetoOff: isVetoOff(vetoMode),
@@ -498,6 +529,10 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
 
         // 4. Final Strategies with confidence
         recommendedStrategies: finalStrategies,
+
+        // Position awareness (robust, best-effort). When present, callers (Deck, alerts, users)
+        // should treat the directional recommendation as reference only.
+        positionContext,
 
         // Keep for advanced debugging
         _debug: {

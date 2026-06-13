@@ -180,6 +180,47 @@ export function detectSignalChange(
     minOppositePolls?: number;
   },
 ): SignalChangeResult {
+  const liveEngaged = !!options?.engagement?.engaged && !!options?.telemetry;
+
+  if (liveEngaged) {
+    // Use live Fyers open leg as the source of truth for "we are managing, not entering".
+    // Do NOT require a previous snapshot — this fixes restarts / first-seen-while-holding cases.
+    const engaged = evaluateEngagedExitDecision({
+      previous: previous || current, // fall back to current snapshot if none; the policy mainly looks at current + held
+      current,
+      engagement: options!.engagement!,
+      telemetry: options!.telemetry!,
+      minExitPolls:
+        options!.minNoTradeStreakForExit ??
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_EXIT_CONFIRM_POLLS,
+      minOppositePolls:
+        options!.minOppositePolls ??
+        TELEGRAM_NOTIFICATION_DEFAULTS.SIGNAL_OPPOSITE_CONFIRM_POLLS,
+    });
+
+    if (engaged) {
+      return {
+        shouldNotify: engaged.notify && engaged.kinds.length > 0,
+        kinds: engaged.kinds,
+        previous: previous || current,
+        current,
+        alertTone: engaged.alertTone,
+        exitReason: engaged.exitReason,
+        engagedFlags: {
+          awaitingHardExitConfirmation: engaged.awaitingHardExitConfirmation,
+          awaitingOppositeExitConfirmation:
+            engaged.awaitingOppositeExitConfirmation,
+          lastEdgeFadeFingerprint: engaged.lastEdgeFadeFingerprint,
+        },
+      };
+    }
+
+    // Open leg on book — only qualified exit-policy alerts may fire.
+    // This prevents "buy again" or "NO-TRADE / stop trading" spam while holding.
+    return { shouldNotify: false, kinds: [], previous: previous || current, current };
+  }
+
+  // Legacy path (no live engagement detected)
   if (previous && options?.engagement?.engaged && options.telemetry) {
     const engaged = evaluateEngagedExitDecision({
       previous,

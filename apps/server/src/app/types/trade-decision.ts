@@ -11,10 +11,18 @@ export type ConflictLevel = 'NONE' | 'LOW' | 'MEDIUM' | 'HIGH';
 
 export type DecisionAction = 'CE-BUY' | 'PE-BUY' | 'NEUTRAL' | 'NO-TRADE';
 
+export interface ConvictionBonus {
+  label: string;
+  points: number;
+}
+
 export interface TradeDecisionResult {
   bias: TradeBias;
   action: DecisionAction;
   conviction: number;
+  /** Style-weighted PA + option mix before alignment bonuses. */
+  weightedBaseConviction: number;
+  convictionBonuses: ConvictionBonus[];
   recommendation: string;
   humanSummary: string;
   priceConviction: number;

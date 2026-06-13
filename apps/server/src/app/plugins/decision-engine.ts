@@ -248,6 +248,16 @@ export default fp(
           ? optionConviction
           : priceConviction * priceActionWeight +
             optionConviction * optionFlowWeight;
+      const weightedBaseConviction = Math.min(
+        95,
+        Math.max(0, Math.round(blended)),
+      );
+      const convictionBonuses: Array<{ label: string; points: number }> = [];
+      const pushBonus = (label: string, points: number) => {
+        if (points === 0) return;
+        blended += points;
+        convictionBonuses.push({ label, points });
+      };
 
       // Alignment & conflict
       let alignment = 0;
@@ -257,65 +267,74 @@ export default fp(
         alignment = aligned >= 2 ? 3 : aligned === 1 ? 2 : 0;
       } else if (optionOnlyFlow) {
         alignment = optionDirection !== 'neutral' ? 3 : 0;
-        if (optionComponentStrength > 0.35) blended += 10;
-        if (optionComponentStrength < -0.35) blended += 10;
+        if (optionComponentStrength > 0.35) pushBonus('Strong option flow', 10);
+        if (optionComponentStrength < -0.35) pushBonus('Strong option flow', 10);
       } else if (priceDirection === optionDirection && priceDirection !== 'neutral') {
         alignment = 3;
-        blended += 18;
+        pushBonus('PA + option same direction', 18);
       } else if (
         priceDirection === 'neutral' ||
         optionDirection === 'neutral'
       ) {
         alignment = 1;
-        blended -= 8;
+        pushBonus('Neutral side on PA or option', -8);
       } else if (vetoOff) {
         alignment = 1;
-        blended -= 8;
+        pushBonus('Veto-off conflict ease', -8);
       } else if (vetoRelaxed) {
         alignment = 0;
         conflictLevel = 'MEDIUM';
-        blended -= 16;
+        pushBonus('PA vs option conflict (relaxed)', -16);
       } else {
         alignment = 0;
         conflictLevel = 'HIGH';
-        blended -= 28;
+        pushBonus('PA vs option conflict', -28);
       }
 
       if (!optionOnlyFlow) {
         if (aligned >= 2) {
           alignment += 1;
-          blended += 10;
+          pushBonus('Multi-timeframe alignment', 10);
         } else if (aligned === 0) {
-          blended -= 15;
+          pushBonus('No TF alignment', -15);
         }
-        if (higherTFConfirm) blended += 8;
+        if (higherTFConfirm) pushBonus('Higher TF confirms', 8);
       }
 
       if (!singleSourceFlow) {
         if (optionComponentStrength > 0.35 && priceDirection === 'bullish')
-          blended += 12;
+          pushBonus('Bullish flow strength', 12);
         if (optionComponentStrength < -0.35 && priceDirection === 'bearish')
-          blended += 12;
+          pushBonus('Bearish flow strength', 12);
       }
 
       // ADX for trend strength (benefits all styles, especially when structure is present)
       const priceAdx = (price as any).adx || {};
       if (priceAdx['5m'] > 20 || priceAdx['15m'] > 20 || priceAdx['1h'] > 20) {
-        blended += 5; // trend strength bonus
+        pushBonus('Trend strength (ADX)', 5);
       }
 
       // Regime adjustments
       if (ivRegime.includes('Expanded') || ivRegime.includes('High IV')) {
         const penalty = style === TradingStyle.Positional ? 12 : 6;
-        blended -= penalty;
+        pushBonus('High IV regime', -penalty);
       }
       if (ivRegime.includes('Crushed') && style !== TradingStyle.Scalper) {
-        blended -= 5;
+        pushBonus('Crushed IV regime', -5);
       }
+
+      const bonusTotal = convictionBonuses.reduce((sum, b) => sum + b.points, 0);
+      const uncappedConviction = weightedBaseConviction + bonusTotal;
 
       // Final decision driven by style-weighted blended conviction
       let action: 'CE-BUY' | 'PE-BUY' | 'NEUTRAL' | 'NO-TRADE' = 'NO-TRADE';
       let conviction = Math.min(95, Math.max(0, Math.round(blended)));
+      if (uncappedConviction > 95 && conviction === 95) {
+        convictionBonuses.push({
+          label: '95% entry cap',
+          points: 95 - uncappedConviction,
+        });
+      }
 
       const highThreshold = convictionThreshold.enter;
       const mediumThreshold = convictionThreshold.medium;
@@ -606,6 +625,8 @@ export default fp(
         bias,
         action,  // legacy - still used internally for strategy selection path (will be removed later)
         conviction,
+        weightedBaseConviction,
+        convictionBonuses,
         recommendation,
         humanSummary,
         priceConviction,

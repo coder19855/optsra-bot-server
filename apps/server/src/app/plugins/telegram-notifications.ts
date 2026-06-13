@@ -392,6 +392,10 @@ export default fp(
 
       const patternBreakout = detectChartPatternBreakout(previous, current);
 
+      // When we have a live open position, suppress pattern breakout pings too.
+      // They can feel like new "structure / trade" advice while the user is in management mode.
+      const shouldSuppressPattern = engagement.engaged || (heldDirection != null);
+
       if (engagement.engaged && heldDirection && change.engagedFlags) {
         current.awaitingHardExitConfirmation =
           change.engagedFlags.awaitingHardExitConfirmation;
@@ -484,9 +488,11 @@ export default fp(
                 payload.priceAction.action === 'PE-BUY'
               ? payload.priceAction.action
               : null;
+        const isLiveHolding = engagement.engaged || (heldDirection != null);
         if (
           entryDirection &&
-          payload.tradeGuidance.shouldConsiderTrade
+          payload.tradeGuidance.shouldConsiderTrade &&
+          !isLiveHolding
         ) {
           try {
             await recordTradeEntryIntent(fastify, {
@@ -500,7 +506,7 @@ export default fp(
         }
       }
 
-      if (patternBreakout.shouldNotify && patternBreakout.breakoutKey) {
+      if (patternBreakout.shouldNotify && patternBreakout.breakoutKey && !shouldSuppressPattern) {
         const patternMessage = formatPatternBreakoutTelegramMessage({
           payload,
           alertFormat: alertFormatPreferenceState.alertFormat,

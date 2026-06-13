@@ -14,6 +14,7 @@ import {
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
 } from './signal-tracker';
+import { getOpenPositionContext } from './position-monitor';
 
 function resolveWatchList(
   text: string,
@@ -140,11 +141,28 @@ export async function buildNowTelegramMessage(
   }
 
   const primaryItem = items[0];
+
+  // Best-effort open position awareness for /now so the user sees context
+  let openPositionNote: string | null = null;
+  try {
+    const primarySymbol = primaryItem?.symbol ?? watchList[0]?.symbol ?? defaultSymbol;
+    const posCtx = await getOpenPositionContext(fastify, [primarySymbol]);
+    if (posCtx.count > 0) {
+      if (posCtx.isMixedDirections) {
+        openPositionNote = 'Open positions detected (mixed directions on index) — current engine read is for management context only.';
+      } else if (posCtx.heldDirection) {
+        openPositionNote = `You hold ${posCtx.heldDirection} on ${primarySymbol}. This /now is the live engine read (for scaling/TP reference), not a new buy signal.`;
+      }
+    }
+  } catch {}
+
   return {
     message: formatNowTelegramMessage({ context, items, errors, voice }),
     deckSymbol: primaryItem?.symbol ?? watchList[0]?.symbol,
     deckStyle: String(
       primaryItem?.tradingStyle ?? watchList[0]?.tradingStyle ?? defaultStyle,
     ),
+    openPositionNote,
+    hasOpenPosition: !!openPositionNote,
   };
 }

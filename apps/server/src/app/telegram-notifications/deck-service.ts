@@ -44,12 +44,15 @@ import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
 import { loadFlowPreference } from './flow-preference';
 import { loadVetoPreference, VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
+import { ConvictionBonus } from '../types/trade-decision';
 import { isVetoOff } from '../types/veto-mode';
 import {
   buildDeckOpenPositions,
   DeckOpenPositionsPayload,
 } from './deck-open-positions';
+import { getOpenPositionContext } from './position-monitor';
 import {
+  buildDeckRegimeHint,
   DeckMarketRegime,
   resolveDeckMarketRegime,
 } from './market-regime';
@@ -136,6 +139,8 @@ export interface DeckReplayPoint {
   paPercent?: number;
   paGhost?: number | null;
   conviction: number;
+  weightedBaseConviction?: number;
+  convictionBonuses?: ConvictionBonus[];
   action: string;
   vetoed: boolean;
   vetoReason?: string;
@@ -181,6 +186,8 @@ export interface DeckLiveStreamTick {
   action: string;
   bias: string;
   conviction: number;
+  weightedBaseConviction: number;
+  convictionBonuses: ConvictionBonus[];
   entryThreshold: number;
   lastPrice: number;
   chartVetoed: boolean;
@@ -212,6 +219,8 @@ export interface DeckLivePayload {
   action: string;
   bias: string;
   conviction: number;
+  weightedBaseConviction: number;
+  convictionBonuses: ConvictionBonus[];
   entryThreshold: number;
   lastPrice: number;
   chartVetoed: boolean;
@@ -295,10 +304,14 @@ async function fetchTradeDecision(
     action: string;
     bias: string;
     conviction: number;
+    weightedBaseConviction?: number;
+    convictionBonuses?: ConvictionBonus[];
     priceConviction?: number;
     priceConvictionBeforeDecay?: number;
     optionConviction?: number;
     momentumDecay?: { decayPercent: number; reasons?: string[] };
+    flowMode?: FlowMode;
+    vetoMode?: VetoMode;
     convictionThresholds?: { enter: number };
     priceAction: {
       components: Record<string, { score: number }>;
@@ -510,15 +523,27 @@ async function extractStrategyRecommendation(
 function extractMarketRegime(
   decision: Awaited<ReturnType<typeof fetchTradeDecision>>,
   style: TradingStyle,
+  prefs?: { flowMode: FlowMode; vetoMode: VetoMode },
 ): DeckMarketRegime {
   const raw = decision._debug?.rawPrice;
-  return resolveDeckMarketRegime({
+  const regime = resolveDeckMarketRegime({
     symbol: decision.symbol,
     tradingStyle: style,
     mtfScore: raw?.confluence?.mtfScore,
     aligned: raw?.confluence?.aligned,
     confluenceContext: raw?.confluenceContext,
   });
+  const flowMode = prefs?.flowMode ?? decision.flowMode ?? 'blend';
+  const vetoMode = prefs?.vetoMode ?? decision.vetoMode ?? 'strict';
+  return {
+    ...regime,
+    hint: buildDeckRegimeHint({
+      regimeKind: regime.kind,
+      flowMode,
+      vetoMode,
+      tradingStyle: style,
+    }),
+  };
 }
 
 function extractPaDrilldown(
@@ -615,6 +640,35 @@ function extractComponentGauges(decision: Awaited<ReturnType<typeof fetchTradeDe
         '1h': pa['1h']?.score ?? 0,
       },
     }),
+  };
+}
+
+function buildDeckLaneMeta(
+  decision: {
+    conviction: number;
+    weightedBaseConviction?: number;
+    convictionBonuses?: ConvictionBonus[];
+  },
+  gauges: ReturnType<typeof buildDeckGauges>,
+): {
+  weightedBaseConviction: number;
+  convictionBonuses: ConvictionBonus[];
+  lanes: {
+    optionPercent: number;
+    priceActionPercent: number;
+    combinedPercent: number;
+  };
+} {
+  const weightedBaseConviction =
+    decision.weightedBaseConviction ?? decision.conviction;
+  return {
+    weightedBaseConviction,
+    convictionBonuses: decision.convictionBonuses ?? [],
+    lanes: {
+      optionPercent: gauges.option.percent,
+      priceActionPercent: gauges.priceAction.percent,
+      combinedPercent: weightedBaseConviction,
+    },
   };
 }
 
@@ -782,6 +836,9 @@ function buildReplayPointFromLiveDecision(
     paPercent: gauges.priceAction.percent,
     paGhost: gauges.priceAction.ghost,
     conviction: decision.conviction,
+    weightedBaseConviction:
+      decision.weightedBaseConviction ?? decision.conviction,
+    convictionBonuses: decision.convictionBonuses ?? [],
     action: decision.action,
     vetoed: liveChartVetoed(decision, vetoMode),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
@@ -1040,6 +1097,7 @@ export async function buildDeckLivePayload(
   );
 
   const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
+  const laneMeta = buildDeckLaneMeta(decision, gauges);
 
   return {
     mode: 'live',
@@ -1051,6 +1109,8 @@ export async function buildDeckLivePayload(
     action: decision.action,
     bias: decision.bias,
     conviction: decision.conviction,
+    weightedBaseConviction: laneMeta.weightedBaseConviction,
+    convictionBonuses: laneMeta.convictionBonuses,
     entryThreshold: resolveEntryThreshold(decision, style),
     lastPrice: liveLastPrice,
     chartVetoed,
@@ -1058,11 +1118,7 @@ export async function buildDeckLivePayload(
     vetoOff: isVetoOff(vetoState.vetoMode),
     flowMode: flowState.flowMode,
     gauges,
-    lanes: {
-      optionPercent: option,
-      priceActionPercent: price,
-      combinedPercent: decision.conviction,
-    },
+    lanes: laneMeta.lanes,
     spotSeries,
     spotCandles: await resolveSpotCandles(
       fastify,
@@ -1104,14 +1160,43 @@ export async function buildDeckLivePayload(
       fastify,
       decision,
       style,
-      { marketRegime: extractMarketRegime(decision, style) },
+      {
+        marketRegime: extractMarketRegime(decision, style, {
+          flowMode: flowState.flowMode,
+          vetoMode: vetoState.vetoMode,
+        }),
+      },
     ),
     patternContext: extractPatternContext(decision, spotSeries),
     openPositions: await buildDeckOpenPositions(fastify, {
       watchedIndexSymbol: indexSymbol,
       ivRegime: decision.optionFlow?.ivRegime,
     }),
-    marketRegime: extractMarketRegime(decision, style),
+    marketRegime: extractMarketRegime(decision, style, {
+      flowMode: flowState.flowMode,
+      vetoMode: vetoState.vetoMode,
+    }),
+    // Robust live position context surfaced alongside recommendations.
+    // Frontend / users should prefer management actions (TP, trail, exit) when present.
+    managementContext: await (async () => {
+      try {
+        const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
+        if (ctx.count > 0) {
+          return {
+            hasOpenPosition: true,
+            heldDirection: ctx.heldDirection,
+            isMixedDirections: ctx.isMixedDirections,
+            count: ctx.count,
+            note: ctx.isMixedDirections
+              ? 'Mixed open legs on this index.'
+              : `Holding ${ctx.heldDirection} — treat engine signals as reference for management only.`,
+          };
+        }
+        return { hasOpenPosition: false };
+      } catch {
+        return { hasOpenPosition: false, fetchError: true };
+      }
+    })(),
   };
 }
 
@@ -1156,6 +1241,7 @@ export async function buildDeckLiveStreamTick(
     fastify.fyersMarketStream?.getSpotSeries(indexSymbol) ?? [];
 
   const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
+  const laneMeta = buildDeckLaneMeta(decision, gauges);
 
   return {
     type: 'tick',
@@ -1164,15 +1250,13 @@ export async function buildDeckLiveStreamTick(
     action: decision.action,
     bias: decision.bias,
     conviction: decision.conviction,
+    weightedBaseConviction: laneMeta.weightedBaseConviction,
+    convictionBonuses: laneMeta.convictionBonuses,
     entryThreshold: resolveEntryThreshold(decision, style),
     lastPrice: liveLastPrice,
     chartVetoed,
     gauges,
-    lanes: {
-      optionPercent: option,
-      priceActionPercent: price,
-      combinedPercent: decision.conviction,
-    },
+    lanes: laneMeta.lanes,
     spotSeries,
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
@@ -1185,7 +1269,21 @@ export async function buildDeckLiveStreamTick(
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     patternContext: extractPatternContext(decision, spotSeries),
-    marketRegime: extractMarketRegime(decision, style),
+    marketRegime: extractMarketRegime(decision, style, {
+      flowMode: flowState.flowMode,
+      vetoMode: vetoState.vetoMode,
+    }),
+    // Live tick also carries management context so the UI can de-emphasize new-entry CTAs.
+    managementContext: await (async () => {
+      try {
+        const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
+        return ctx.count > 0
+          ? { hasOpenPosition: true, heldDirection: ctx.heldDirection, isMixed: ctx.isMixedDirections }
+          : { hasOpenPosition: false };
+      } catch {
+        return { hasOpenPosition: false };
+      }
+    })(),
   };
 }
 

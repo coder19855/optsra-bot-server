@@ -60,6 +60,7 @@
     signalVetoNotice: document.getElementById('signal-veto-notice'),
     signalFlowNote: document.getElementById('signal-flow-note'),
     laneCombinedLabel: document.getElementById('lane-combined-label'),
+    convictionBonuses: document.getElementById('conviction-bonuses'),
     componentsVetoNotice: document.getElementById('components-veto-notice'),
     strategyContent: document.getElementById('strategy-content'),
     strategyReplayNote: document.getElementById('strategy-replay-note'),
@@ -392,7 +393,7 @@
           ? 'PA entry'
           : serverFlowMode === 'option-only'
             ? 'Option entry'
-            : 'Combined';
+            : 'Weighted';
     }
 
     const signalNote =
@@ -1836,6 +1837,45 @@
     return '#8b95a8';
   }
 
+  function combinedLanePercent(data, gauges) {
+    if (data?.lanes?.combinedPercent != null) {
+      return Number(data.lanes.combinedPercent) || 0;
+    }
+    if (data?.weightedBaseConviction != null) {
+      return Number(data.weightedBaseConviction) || 0;
+    }
+    return Number(gauges?.priceAction?.percent) || 0;
+  }
+
+  function renderConvictionBonuses(bonuses, entryConviction, weightedBase) {
+    if (!els.convictionBonuses) return;
+    const list = Array.isArray(bonuses) ? bonuses : [];
+    if (!list.length || serverFlowMode !== 'blend') {
+      els.convictionBonuses.classList.add('hidden');
+      els.convictionBonuses.innerHTML = '';
+      return;
+    }
+    const entry = Number(entryConviction) || 0;
+    const base = Number(weightedBase) || 0;
+    const chips = list
+      .map((bonus) => {
+        const points = Number(bonus.points) || 0;
+        const sign = points > 0 ? '+' : '';
+        const tone = points > 0 ? 'positive' : points < 0 ? 'negative' : '';
+        const label = bonus.label || 'Bonus';
+        return `<span class="bonus-chip ${tone}">${label} ${sign}${points}</span>`;
+      })
+      .join('');
+    els.convictionBonuses.innerHTML = `
+      <div class="bonus-head">
+        <span>Entry bonuses</span>
+        <span>${base}% base → ${entry}% entry</span>
+      </div>
+      <div class="bonus-list">${chips}</div>
+    `;
+    els.convictionBonuses.classList.remove('hidden');
+  }
+
   function applyGauges(gauges, combinedPercent, action = 'NO-TRADE') {
     const option = gauges.option;
     const pa = gauges.priceAction;
@@ -2293,7 +2333,16 @@
       els.status.textContent = tick.bias;
     }
 
-    applyGauges(tick.gauges, tickDisplay.conviction, tickDisplay.action);
+    applyGauges(
+      tick.gauges,
+      combinedLanePercent(tick, tick.gauges),
+      tickDisplay.action,
+    );
+    renderConvictionBonuses(
+      tick.convictionBonuses,
+      tickDisplay.conviction,
+      tick.weightedBaseConviction ?? tick.lanes?.combinedPercent,
+    );
     renderComponentList(els.optionComponents, tick.optionComponents, 'option');
     renderComponentList(els.paComponents, tick.priceActionComponents, 'pa');
     renderPaDrilldown(tick.paDrilldown);
@@ -2355,7 +2404,16 @@
     if (data.marketOpen) els.live.classList.remove('hidden');
     else els.live.classList.add('hidden');
 
-    applyGauges(data.gauges, liveDisplay.conviction, liveDisplay.action);
+    applyGauges(
+      data.gauges,
+      combinedLanePercent(data, data.gauges),
+      liveDisplay.action,
+    );
+    renderConvictionBonuses(
+      data.convictionBonuses,
+      liveDisplay.conviction,
+      data.weightedBaseConviction ?? data.lanes?.combinedPercent,
+    );
     renderComponentList(els.optionComponents, data.optionComponents, 'option');
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
     renderPaDrilldown(data.paDrilldown);
@@ -2492,7 +2550,18 @@
     const display = resolveReplayDisplay(point);
     const chartAction = display.action;
     const gauges = replayGaugesFromPoint(point);
-    applyGauges(gauges, display.conviction, display.action);
+    const replayCombined =
+      point.weightedBaseConviction ??
+      Math.round(
+        (gauges.priceAction.percent || 0) * 0.65 +
+          (gauges.option.percent || 0) * 0.35,
+      );
+    applyGauges(gauges, replayCombined, display.action);
+    renderConvictionBonuses(
+      point.convictionBonuses,
+      display.conviction,
+      point.weightedBaseConviction ?? replayCombined,
+    );
     els.action.textContent = display.action;
     updateEntryConviction(
       display.conviction,

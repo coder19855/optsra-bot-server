@@ -1,8 +1,11 @@
+import { getStyleScoringConfig } from '../constants/trading-style';
+import { FlowMode } from '../types/flow-mode';
 import {
   ConfluenceContext,
   TrendQuality,
 } from '../types/technical-analysis';
 import { TradingStyle } from '../types/trading-style';
+import { VetoMode } from '../types/veto-mode';
 
 export type MarketRegimeKind = 'trending' | 'transitional' | 'sideways';
 export type MarketRegimeDirection = 'up' | 'down' | 'flat';
@@ -138,14 +141,39 @@ function labelFor(
   return 'Trending';
 }
 
-function hintFor(kind: MarketRegimeKind): string {
-  if (kind === 'trending') {
-    return 'PA-led · strict veto · option as light filter';
-  }
-  if (kind === 'sideways') {
-    return 'PA + options blend · require alignment · stricter entry';
-  }
-  return 'Balanced blend · watch for regime shift';
+/** Deck subtitle: user's /flow + /veto settings and tape context (not regime suggestions). */
+export function buildDeckRegimeHint(params: {
+  regimeKind: MarketRegimeKind;
+  flowMode: FlowMode;
+  vetoMode: VetoMode;
+  tradingStyle: TradingStyle;
+}): string {
+  const scoring = getStyleScoringConfig(params.tradingStyle);
+  const paPct = Math.round(scoring.priceActionWeight * 100);
+  const optPct = Math.round(scoring.optionFlowWeight * 100);
+
+  const flowLabel =
+    params.flowMode === 'pa-only'
+      ? 'PA-only'
+      : params.flowMode === 'option-only'
+        ? 'Option-only'
+        : `Blend ${paPct}/${optPct}`;
+
+  const vetoLabel =
+    params.vetoMode === 'off'
+      ? 'veto off'
+      : params.vetoMode === 'relaxed'
+        ? 'relaxed veto'
+        : 'strict veto';
+
+  const tapeLabel =
+    params.regimeKind === 'trending'
+      ? 'directional tape'
+      : params.regimeKind === 'sideways'
+        ? 'range-bound tape'
+        : 'transitional tape';
+
+  return `${flowLabel} · ${vetoLabel} · ${tapeLabel}`;
 }
 
 function weightsFor(kind: MarketRegimeKind): {
@@ -235,7 +263,12 @@ export function resolveDeckMarketRegime(
     direction: stable.direction,
     arrow: arrowFor(stable.direction),
     label: labelFor(stable.kind, stable.direction),
-    hint: hintFor(stable.kind),
+    hint: buildDeckRegimeHint({
+      regimeKind: stable.kind,
+      flowMode: 'blend',
+      vetoMode: 'strict',
+      tradingStyle: input.tradingStyle,
+    }),
     rawKind,
     confirming,
     pollsInRegime: stable.pollsInRegime,

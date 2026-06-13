@@ -520,7 +520,11 @@ export class TelegramCommandPoller {
             includeReplay: true,
           })
         : this.replyOptions(replyChatId);
-    await this.deps.sendMessage(result.message, deckOpts);
+    let finalMessage = result.message;
+    if (result.openPositionNote) {
+      finalMessage = `${result.message}\n\n📌 ${result.openPositionNote}`;
+    }
+    await this.deps.sendMessage(finalMessage, deckOpts);
   }
 
   private async handleWhy(text: string, replyChatId?: number): Promise<void> {
