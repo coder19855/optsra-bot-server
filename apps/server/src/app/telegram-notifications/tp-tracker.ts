@@ -113,6 +113,7 @@ export function buildTpMonitorSnapshot(
     lastAlertKind: evaluation.alertKind,
     updatedAt: now,
     lastNotifiedAt: notified ? now : previous?.lastNotifiedAt,
+    lastPositionHealthScore: evaluation.managementAdvice?.positionHealth?.score ?? previous?.lastPositionHealthScore,
   };
 }
 

@@ -42,7 +42,7 @@ import {
 import { saveAlertWhyContext } from '../telegram-notifications/alert-context-store';
 import { notifyOpenOutcomeSymbols } from '../market-data/market-stream-coordinator';
 import { createPollMarketDataContext } from '../market-data/poll-market-data-context';
-import { evaluateOpenPositionTpAlerts } from '../telegram-notifications/position-monitor';
+import { evaluateOpenPositionTpAlerts, getOpenPositionContext } from '../telegram-notifications/position-monitor';
 import {
   closeSessionSignalOutcomes,
   loadOpenOutcomeOptionSymbols,
@@ -977,6 +977,24 @@ export default fp(
         openPositionsMonitored,
         openPositionsTracked,
         lastTpAlertAt: lastTpAlertAt ? lastTpAlertAt.toISOString() : null,
+        // Live holding status for transparency in /status
+        currentOpenPositions: await (async () => {
+          try {
+            const summaries = [];
+            for (const sym of watchedSymbols) {
+              const ctx = await getOpenPositionContext(fastify, [sym]);
+              if (ctx.count > 0) {
+                summaries.push({
+                  symbol: sym,
+                  count: ctx.count,
+                  directions: [...new Set(ctx.positions.map(p => p.direction))],
+                  isMixed: ctx.isMixedDirections,
+                });
+              }
+            }
+            return summaries;
+          } catch { return []; }
+        })(),
         tpSnapshots: [...tpMemory.values()].map((snap) => ({
           positionSymbol: snap.positionSymbol,
           isTracked: snap.isTracked,

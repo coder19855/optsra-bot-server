@@ -524,6 +524,9 @@ export class TelegramCommandPoller {
     if (result.openPositionNote) {
       finalMessage = `${result.message}\n\n📌 ${result.openPositionNote}`;
     }
+    if (result.managementAdvice?.headline) {
+      finalMessage += `\n\n🧠 Management: ${result.managementAdvice.headline}`;
+    }
     await this.deps.sendMessage(finalMessage, deckOpts);
   }
 

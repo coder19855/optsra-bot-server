@@ -50,7 +50,7 @@ import {
   buildDeckOpenPositions,
   DeckOpenPositionsPayload,
 } from './deck-open-positions';
-import { getOpenPositionContext } from './position-monitor';
+import { computeManagementAdvice, getOpenPositionContext } from './position-monitor';
 import {
   buildDeckRegimeHint,
   DeckMarketRegime,
@@ -1176,23 +1176,36 @@ export async function buildDeckLivePayload(
       flowMode: flowState.flowMode,
       vetoMode: vetoState.vetoMode,
     }),
-    // Robust live position context surfaced alongside recommendations.
-    // Frontend / users should prefer management actions (TP, trail, exit) when present.
+    // Robust live position context + rich Management Brain advice.
+    // This is what should drive UI behavior when the user is holding.
     managementContext: await (async () => {
       try {
         const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
+        const base = {
+          hasOpenPosition: ctx.count > 0,
+          heldDirection: ctx.heldDirection,
+          isMixedDirections: ctx.isMixedDirections,
+          count: ctx.count,
+        };
+
         if (ctx.count > 0) {
+          // Build a minimal PriceActionResponse-like object from decision + last known price
+          const priceForMgmt = {
+            lastPrice: (decision as any).lastPrice ?? 0,
+            momentumDecay: (decision as any).momentumDecay,
+            tradeSetup: (decision as any).tradeSetup,
+            levels: (decision as any).priceAction?.levels ?? {},
+          } as any;
+
+          const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
           return {
-            hasOpenPosition: true,
-            heldDirection: ctx.heldDirection,
-            isMixedDirections: ctx.isMixedDirections,
-            count: ctx.count,
-            note: ctx.isMixedDirections
-              ? 'Mixed open legs on this index.'
-              : `Holding ${ctx.heldDirection} — treat engine signals as reference for management only.`,
+            ...base,
+            advice,
+            note: advice.headline,
+            health: advice.positionHealth,   // convenient top-level for UI gauges
           };
         }
-        return { hasOpenPosition: false };
+        return { ...base, hasOpenPosition: false };
       } catch {
         return { hasOpenPosition: false, fetchError: true };
       }
@@ -1273,13 +1286,22 @@ export async function buildDeckLiveStreamTick(
       flowMode: flowState.flowMode,
       vetoMode: vetoState.vetoMode,
     }),
-    // Live tick also carries management context so the UI can de-emphasize new-entry CTAs.
+    // Live tick also carries rich management context.
     managementContext: await (async () => {
       try {
         const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
-        return ctx.count > 0
-          ? { hasOpenPosition: true, heldDirection: ctx.heldDirection, isMixed: ctx.isMixedDirections }
-          : { hasOpenPosition: false };
+        if (ctx.count > 0) {
+          const priceForMgmt = { lastPrice: liveLastPrice, momentumDecay: decision.momentumDecayPercent } as any;
+          const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
+          return {
+            hasOpenPosition: true,
+            heldDirection: ctx.heldDirection,
+            isMixed: ctx.isMixedDirections,
+            advice,
+            health: advice.positionHealth,
+          };
+        }
+        return { hasOpenPosition: false };
       } catch {
         return { hasOpenPosition: false };
       }
@@ -1453,5 +1475,16 @@ export async function buildDeckReplayPayload(
       trades.length === 0
         ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'
         : undefined,
+    // Explicitly no live management in historical replay
+    managementContext: {
+      hasOpenPosition: false,
+      note: 'Replay — historical view. Live position health and management advice are not applicable.',
+    },
+    // Do not mix current live broker positions into historical replay view
+    openPositions: {
+      asOf: new Date().toISOString(),
+      entries: [],
+      note: 'Open positions hidden in replay (historical session view).',
+    },
   };
 }

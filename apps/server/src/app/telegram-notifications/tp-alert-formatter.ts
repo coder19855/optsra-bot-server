@@ -58,6 +58,14 @@ export function formatTelegramTpAlertMessage(params: {
   const { position } = evaluation;
   const pnlSign = position.unrealizedPnl >= 0 ? '+' : '';
   const tpScenario = scenarioForTpKinds(kinds);
+
+  // If the Management Brain produced advice, use it to make the alert much more useful
+  const mgmt = (evaluation as any).managementAdvice;
+  if (mgmt) {
+    // Prepend strong management framing
+    const mgmtLine = `🧠 ${mgmt.headline}`;
+    // We will append the rich actions at the end
+  }
   const holdScenario = scenarioForHoldAdvice(evaluation.holdAdvice);
   const pnlScenario = scenarioForPnl(position.unrealizedPnl);
 
@@ -97,5 +105,25 @@ export function formatTelegramTpAlertMessage(params: {
     reasons || null,
   ].filter((line): line is string => line != null));
 
-  return joinTelegramSections(header, positionBlock, rrBlock, coachBlock);
+  // Management Brain enrichment — this is what makes alerts feel like a real co-pilot when holding
+  let finalSections = [header, positionBlock, rrBlock, coachBlock];
+  const mgmt = (evaluation as any).managementAdvice;
+  if (mgmt) {
+    if (mgmt.positionHealth) {
+      const h = mgmt.positionHealth;
+      const trendEmoji = h.trend === 'improving' ? '↑' : h.trend === 'deteriorating' ? '↓' : '';
+      finalSections.push(`Position Health: **${h.score}/100 ${h.label}** ${trendEmoji}`);
+    }
+    if (mgmt.recommendedActions?.length) {
+      const actionsText = mgmt.recommendedActions
+        .map((a: any) => `• ${a.detail}`)
+        .join('\n');
+      finalSections.push(`🧠 Management:\n${escapeHtml(actionsText)}`);
+    }
+    if (mgmt.riskAdjustment?.notes?.length) {
+      finalSections.push(`Risk note: ${mgmt.riskAdjustment.notes[0]}`);
+    }
+  }
+
+  return joinTelegramSections(...finalSections);
 }

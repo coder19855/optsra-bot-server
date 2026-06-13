@@ -200,6 +200,9 @@ export interface TpMonitorSnapshot {
   updatedAt: Date;
   trackedAt?: Date;
   lastNotifiedAt?: Date;
+
+  /** Last computed Position Health Score (for trend detection in management brain) */
+  lastPositionHealthScore?: number;
 }
 
 export interface OpenPositionMonitorContext {
@@ -232,6 +235,8 @@ export interface PositionTpEvaluation {
   holdAdvice: TpHoldAdvice;
   holdHeadline: string;
   holdReasons: string[];
+  /** Rich output from the Management Brain — primary source of truth for what to do with the open position. */
+  managementAdvice?: import('../telegram-notifications/position-monitor').ManagementAdvice;
 }
 
 export interface TelegramNotificationStatus {

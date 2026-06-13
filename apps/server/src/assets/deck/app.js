@@ -2425,6 +2425,7 @@
     );
     renderStrategyRecommendation(data.strategyRecommendation);
     renderOpenPositions(data.openPositions);
+    renderManagementContext(data.managementContext || data.management || null);
     renderMarketRegime(data.marketRegime);
     if (els.optionComponentsNote) {
       if (data.flowMode === 'pa-only') {
@@ -2476,6 +2477,41 @@
       },
     );
     setError('');
+
+    // NEW: Render management brain context (health, advice) when user is holding a position.
+    // This closes the gap where backend sends rich management data but frontend ignored it.
+    renderManagementContext(data.managementContext || data.management || null);
+  }
+
+  function renderManagementContext(mgmt) {
+    if (!mgmt || !mgmt.hasOpenPosition || !els.strategyContent) return;
+
+    // Create or update a management banner inside strategy area
+    let banner = document.getElementById('mgmt-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'mgmt-banner';
+      banner.style.cssText = 'margin: 8px 0; padding: 6px 8px; border-radius: 6px; background: #2a2f3a; font-size: 0.8rem;';
+      els.strategyContent.parentNode.insertBefore(banner, els.strategyContent);
+    }
+
+    const h = mgmt.health || mgmt.advice?.positionHealth;
+    const advice = mgmt.advice || mgmt;
+
+    let html = `<strong>🧠 MANAGEMENT MODE</strong> — holding ${mgmt.heldDirection || ''}`;
+    if (h) {
+      const trend = h.trend === 'improving' ? '↑' : h.trend === 'deteriorating' ? '↓' : '';
+      html += ` &nbsp; <span style="font-weight:600">Health: ${h.score}/100 ${h.label} ${trend}</span>`;
+    }
+    if (advice?.headline) {
+      html += `<div style="margin-top:4px; opacity:0.9;">${advice.headline}</div>`;
+    }
+    if (advice?.recommendedActions?.length) {
+      const actions = advice.recommendedActions.map(a => `• ${a.detail}`).join('<br>');
+      html += `<div style="margin-top:4px; font-size:0.75rem; opacity:0.85;">${actions}</div>`;
+    }
+    banner.innerHTML = html;
+    banner.classList.remove('hidden');
   }
 
   function resolveReplayDisplay(point) {

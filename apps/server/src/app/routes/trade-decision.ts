@@ -9,7 +9,12 @@ import { OptionMetricsResponse, PriceActionResponse } from '../types';
 import { recordOptionChainSnapshot } from '../telegram-notifications/option-chain-snapshot-store';
 import { parseFlowModeQuery } from '../telegram-notifications/flow-preference';
 import { parseVetoModeQuery } from '../telegram-notifications/veto-preference';
-import { getOpenPositionContext, HeldDirection } from '../telegram-notifications/position-monitor';
+import {
+  computeManagementAdvice,
+  getOpenPositionContext,
+  HeldDirection,
+  ManagementAdvice,
+} from '../telegram-notifications/position-monitor';
 import { isOptionOnlyFlow, isPaOnlyFlow } from '../types/flow-mode';
 import { isVetoOff } from '../types/veto-mode';
 
@@ -395,10 +400,13 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         greeksStrikeInsight = greeksInsights?.PE ?? null;
       }
 
-      // Robust open position context (best-effort, never throws the whole request)
+      // Robust open position context + Management Brain (the key upgrade)
       let positionContext: any = null;
+      let managementAdvice: ManagementAdvice | null = null;
+
       try {
         const posCtx = await getOpenPositionContext(fastify, [symbol]);
+
         if (posCtx && posCtx.count > 0) {
           positionContext = {
             hasOpenPosition: true,
@@ -416,6 +424,14 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
                 ? 'Multiple directions open for this index. Exercise caution with new directional ideas.'
                 : `You currently hold a ${posCtx.heldDirection} position on this index. The engine read above is for reference, scaling, or management — not a fresh entry solicitation.`,
           };
+
+          // Compute rich management advice using the live position + current decision
+          managementAdvice = computeManagementAdvice(posCtx, {
+            ...coreDecision,
+            lastPrice: priceData.lastPrice,
+            priceAction: { action: priceData.signal?.action as any },
+            tradeGuidance: { shouldConsiderTrade: false },
+          } as any, priceData, activeStyle);
         } else if (posCtx && !posCtx.fetchSucceeded) {
           positionContext = { hasOpenPosition: false, fetchError: posCtx.fetchError || 'position fetch failed' };
         }
@@ -530,9 +546,11 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
         // 4. Final Strategies with confidence
         recommendedStrategies: finalStrategies,
 
-        // Position awareness (robust, best-effort). When present, callers (Deck, alerts, users)
-        // should treat the directional recommendation as reference only.
+        // Position awareness + Management Brain output.
+        // When holding, this is the primary thing users and UIs should look at.
         positionContext,
+        managementAdvice,
+        positionHealth: managementAdvice?.positionHealth,
 
         // Keep for advanced debugging
         _debug: {

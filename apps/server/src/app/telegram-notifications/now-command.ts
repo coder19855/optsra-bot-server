@@ -14,7 +14,7 @@ import {
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
 } from './signal-tracker';
-import { getOpenPositionContext } from './position-monitor';
+import { computeManagementAdvice, getOpenPositionContext } from './position-monitor';
 
 function resolveWatchList(
   text: string,
@@ -144,6 +144,7 @@ export async function buildNowTelegramMessage(
 
   // Best-effort open position awareness for /now so the user sees context
   let openPositionNote: string | null = null;
+  let managementAdvice: any = null;
   try {
     const primarySymbol = primaryItem?.symbol ?? watchList[0]?.symbol ?? defaultSymbol;
     const posCtx = await getOpenPositionContext(fastify, [primarySymbol]);
@@ -152,6 +153,16 @@ export async function buildNowTelegramMessage(
         openPositionNote = 'Open positions detected (mixed directions on index) — current engine read is for management context only.';
       } else if (posCtx.heldDirection) {
         openPositionNote = `You hold ${posCtx.heldDirection} on ${primarySymbol}. This /now is the live engine read (for scaling/TP reference), not a new buy signal.`;
+      }
+
+      // Attach full management brain advice + health score for /now
+      if (primaryItem) {
+        managementAdvice = computeManagementAdvice(posCtx, primaryItem as any, { lastPrice: primaryItem.lastPrice } as any, primaryItem.tradingStyle);
+        if (managementAdvice?.positionHealth) {
+          const h = managementAdvice.positionHealth;
+          const trend = h.trend === 'improving' ? '↑' : h.trend === 'deteriorating' ? '↓' : '';
+          openPositionNote = (openPositionNote || '') + ` Health: ${h.score}/100 ${h.label} ${trend}`;
+        }
       }
     }
   } catch {}
@@ -164,5 +175,6 @@ export async function buildNowTelegramMessage(
     ),
     openPositionNote,
     hasOpenPosition: !!openPositionNote,
+    managementAdvice,
   };
 }
