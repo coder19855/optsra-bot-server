@@ -188,7 +188,7 @@ export async function buildNowTelegramMessage(
     ),
     openPositionNote,
     hasOpenPosition: !!openPositionNote,
-    managementAdvice,
-    managementContext: managementContext || undefined,
+    managementAdvice: managementAdvice ?? undefined,
+    managementContext: managementContext ?? undefined,
   };
 }
