@@ -382,7 +382,6 @@ function resolveManagementPriceData(decision: DeckTradeDecision): PriceActionRes
     return toManagementPriceData({
       ...rawPrice,
       lastPrice: decision.lastPrice,
-      momentumDecay: rawPrice.momentumDecay ?? decision.momentumDecay,
     });
   }
   return {
@@ -626,8 +625,7 @@ function extractVetoBreakup(
           reasons: momentumDecay.reasons ?? [],
         }
       : undefined,
-    vetoedByDecay:
-      rawDecay?.vetoedByDecay ?? decision._debug?.rawPrice?.signal?.vetoedByDecay,
+    vetoedByDecay: rawDecay?.vetoedByDecay,
     minConfidenceAfterDecay: rawDecay?.minConfidenceRequired,
   });
 }
