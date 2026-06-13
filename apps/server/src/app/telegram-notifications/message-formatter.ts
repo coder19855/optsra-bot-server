@@ -272,9 +272,12 @@ function formatAiBetaSection(
   if (!ai || !ai.betaNote) return null;
 
   const emoji = ai.verdict === 'AGREE' ? '✅' : ai.verdict === 'DISAGREE' ? '❌' : '⚠️';
+  const providerLabel = ai.provider === 'XAI' ? 'Grok' : ai.provider === 'OPENAI' ? 'Copilot' : ai.provider === 'GEMINI' ? 'Gemini' : 'Groq';
+
   return joinTelegramLines(
-    `🧪 <b>AI BETA: ${ai.verdict} (${ai.provider})</b>`,
+    `🧪 <b>AI BETA: ${ai.verdict}</b>`,
     `${emoji} <i>${escapeHtml(ai.betaNote)}</i>`,
+    `✨ <i>Powered by ${providerLabel}</i>`,
   );
 }
 

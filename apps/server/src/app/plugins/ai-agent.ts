@@ -181,14 +181,27 @@ export default fp(
           }
           aiCache.set(cacheKey, response);
           return response;
-        } catch (error) {
-          fastify.log.error({ err: error }, 'AI Agent analysis failed');
+        } catch (error: any) {
+          const isQuotaError = 
+            error.status === 429 || 
+            error.message?.toLowerCase().includes('quota') || 
+            error.message?.toLowerCase().includes('credit') ||
+            error.message?.toLowerCase().includes('rate limit');
+
+          if (isQuotaError) {
+            fastify.log.error({ provider, err: error.message }, 'AI Credit/Quota Exhausted');
+          } else {
+            fastify.log.error({ err: error }, 'AI Agent analysis failed');
+          }
+
           return {
             provider,
             model: 'error-fallback',
             verdict: 'CAUTION',
             confidenceAdjustment: 0,
-            betaNote: 'AI analysis temporarily unavailable.',
+            betaNote: isQuotaError 
+              ? `AI analysis paused (Quota exhausted for ${provider}).` 
+              : 'AI analysis temporarily unavailable.',
             timestamp: Date.now(),
           };
         }
