@@ -50,7 +50,7 @@ import {
   buildDeckOpenPositions,
   DeckOpenPositionsPayload,
 } from './deck-open-positions';
-import { computeManagementAdvice, getOpenPositionContext } from './position-monitor';
+import { computeManagementAdvice, getOpenPositionContext, PositionManagementContext } from './position-monitor';
 import {
   buildDeckRegimeHint,
   DeckMarketRegime,
@@ -207,7 +207,7 @@ export interface DeckLiveStreamTick {
   structuralAction?: string;
   patternContext?: DeckPatternContext;
   marketRegime: DeckMarketRegime;
-  managementContext?: any;
+  managementContext?: PositionManagementContext;
 }
 
 export interface DeckLivePayload {
@@ -255,7 +255,7 @@ export interface DeckLivePayload {
   patternContext?: DeckPatternContext;
   openPositions: DeckOpenPositionsPayload;
   marketRegime: DeckMarketRegime;
-  managementContext?: any;
+  managementContext?: PositionManagementContext;
 }
 
 export interface DeckReplayPayload {
@@ -281,7 +281,7 @@ export interface DeckReplayPayload {
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   pnlNote?: string;
-  managementContext?: any;
+  managementContext?: PositionManagementContext;
   openPositions?: DeckOpenPositionsPayload;
 }
 
@@ -1202,12 +1202,16 @@ export async function buildDeckLivePayload(
           } as any;
 
           const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
-          return {
-            ...base,
+          const context: PositionManagementContext = {
+            hasOpenPosition: true,
+            heldDirection: ctx.heldDirection,
+            isMixedDirections: ctx.isMixedDirections,
+            count: ctx.count,
             advice,
             note: advice.headline,
-            health: advice.positionHealth,   // convenient top-level for UI gauges
+            health: advice.positionHealth,
           };
+          return context;
         }
         return { ...base, hasOpenPosition: false };
       } catch {
@@ -1297,13 +1301,15 @@ export async function buildDeckLiveStreamTick(
         if (ctx.count > 0) {
           const priceForMgmt = { lastPrice: liveLastPrice, momentumDecay: (decision as any).momentumDecayPercent ?? (decision as any).momentumDecay ?? 0 } as any;
           const advice = computeManagementAdvice(ctx, decision as any, priceForMgmt, style);
-          return {
+          const context: PositionManagementContext = {
             hasOpenPosition: true,
             heldDirection: ctx.heldDirection,
-            isMixed: ctx.isMixedDirections,
+            isMixedDirections: ctx.isMixedDirections,
+            count: ctx.count,
             advice,
             health: advice.positionHealth,
           };
+          return context;
         }
         return { hasOpenPosition: false };
       } catch {
@@ -1483,7 +1489,7 @@ export async function buildDeckReplayPayload(
     managementContext: {
       hasOpenPosition: false,
       note: 'Replay — historical view. Live position health and management advice are not applicable.',
-    },
+    } as PositionManagementContext,
     // Do not mix current live broker positions into historical replay view
     openPositions: {
       asOf: new Date().toISOString(),

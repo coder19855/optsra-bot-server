@@ -11,7 +11,7 @@ import { PriceActionResponse } from '../types';
 import { PositionSizingResponse } from '../types/position-sizing';
 import { TradingStyle } from '../trading-style';
 import { ResponseStatus } from '../types/common';
-import { computeManagementAdvice, getOpenPositionContext } from '../telegram-notifications/position-monitor';
+import { computeManagementAdvice, getOpenPositionContext, PositionManagementContext } from '../telegram-notifications/position-monitor';
 
 function parseTradingStyle(styleQuery?: string): TradingStyle {
   const styleStr = (styleQuery || 'INTRADAY').toUpperCase();
@@ -211,11 +211,13 @@ export default async function positionSizingRoute(fastify: FastifyInstance) {
               tradeGuidance: { shouldConsiderTrade: false },
             } as any, priceData as any, activeStyle);
 
-            response.managementContext = {
+            const mgmtContext: PositionManagementContext = {
               hasOpenPosition: true,
               heldDirection: posCtx.heldDirection,
               advice: mgmt,
+              health: mgmt.positionHealth,
             };
+            response.managementContext = mgmtContext;
             response.notes.unshift(
               `You are already holding on this index. The numbers below are for *adjusting risk* on your existing position, not for a new entry.`
             );

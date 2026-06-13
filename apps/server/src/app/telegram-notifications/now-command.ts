@@ -14,7 +14,7 @@ import {
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
 } from './signal-tracker';
-import { computeManagementAdvice, getOpenPositionContext } from './position-monitor';
+import { computeManagementAdvice, getOpenPositionContext, ManagementAdvice, PositionManagementContext } from './position-monitor';
 
 function resolveWatchList(
   text: string,
@@ -55,7 +55,8 @@ export async function buildNowTelegramMessage(
   deckStyle?: string;
   openPositionNote?: string | null;
   hasOpenPosition?: boolean;
-  managementAdvice?: any;
+  managementAdvice?: ManagementAdvice;
+  managementContext?: PositionManagementContext;
 }> {
   const voice =
     params.voice ??
@@ -147,7 +148,8 @@ export async function buildNowTelegramMessage(
 
   // Best-effort open position awareness for /now so the user sees context
   let openPositionNote: string | null = null;
-  let managementAdvice: any = null;
+  let managementAdvice: ManagementAdvice | null = null;
+  let managementContext: PositionManagementContext | null = null;
   try {
     const primarySymbol = primaryItem?.symbol ?? watchList[0]?.symbol ?? defaultSymbol;
     const posCtx = await getOpenPositionContext(fastify, [primarySymbol]);
@@ -161,6 +163,14 @@ export async function buildNowTelegramMessage(
       // Attach full management brain advice + health score for /now
       if (primaryItem) {
         managementAdvice = computeManagementAdvice(posCtx, primaryItem as any, { lastPrice: primaryItem.lastPrice } as any, primaryItem.tradingStyle);
+        managementContext = {
+          hasOpenPosition: true,
+          heldDirection: posCtx.heldDirection,
+          isMixedDirections: posCtx.isMixedDirections,
+          count: posCtx.count,
+          advice: managementAdvice,
+          health: managementAdvice?.positionHealth,
+        };
         if (managementAdvice?.positionHealth) {
           const h = managementAdvice.positionHealth;
           const trend = h.trend === 'improving' ? '↑' : h.trend === 'deteriorating' ? '↓' : '';
@@ -179,5 +189,6 @@ export async function buildNowTelegramMessage(
     openPositionNote,
     hasOpenPosition: !!openPositionNote,
     managementAdvice,
+    managementContext: managementContext || undefined,
   };
 }

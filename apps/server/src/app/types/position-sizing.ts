@@ -1,5 +1,6 @@
 import { TradeAction } from './technical-analysis';
 import { TradingStyle } from './trading-style';
+import { PositionManagementContext } from '../telegram-notifications/position-monitor';
 
 export interface PositionSizingTier {
   label: 'conservative' | 'standard' | 'aggressive';
@@ -50,5 +51,5 @@ export interface PositionSizingResponse {
   };
   tiers: PositionSizingTier[];
   notes: string[];
-  managementContext?: any;
+  managementContext?: PositionManagementContext;
 }

@@ -99,7 +99,7 @@ export function formatTelegramTpAlertMessage(params: {
 
   // Management Brain enrichment — this is what makes alerts feel like a real co-pilot when holding
   let finalSections = [header, positionBlock, rrBlock, coachBlock];
-  const mgmt = (evaluation as any).managementAdvice;
+  const mgmt = evaluation.managementAdvice;
   if (mgmt) {
     if (mgmt.positionHealth) {
       const h = mgmt.positionHealth;

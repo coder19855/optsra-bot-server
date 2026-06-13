@@ -93,6 +93,16 @@ export interface PositionHealth {
   }>;
   previousScore?: number;
 }
+
+export interface PositionManagementContext {
+  hasOpenPosition: boolean;
+  heldDirection?: HeldDirection | null;
+  isMixedDirections?: boolean;
+  count?: number;
+  advice?: ManagementAdvice;
+  note?: string;
+  health?: PositionHealth;
+}
 import {
   RrLabel,
   TradeAction,
