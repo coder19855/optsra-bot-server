@@ -125,9 +125,12 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
           : activeStyle === TradingStyle.Positional
             ? '1h'
             : '15m';
-      const primaryScore =
-        (priceData.timeframeScores && priceData.timeframeScores[primaryTF]) ||
-        0;
+      const timeframeScores = priceData.timeframeScores ?? {
+        '5m': 0,
+        '15m': 0,
+        '1h': 0,
+      };
+      const primaryScore = timeframeScores[primaryTF as keyof typeof timeframeScores] || 0;
 
       const confluenceAndDecision = [
         {
@@ -186,25 +189,25 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
 
       const priceActionComponents = {
         '5m': {
-          score: priceData.timeframeScores['5m'],
+          score: timeframeScores['5m'],
           explanation:
-            priceData.timeframeScores['5m'] < -0.2
+            timeframeScores['5m'] < -0.2
               ? 'Bearish pressure on the 5-minute chart. Short-term momentum is negative.'
               : '5-minute chart is relatively neutral to positive.',
           weightage: tf5mWeight,
         },
         '15m': {
-          score: priceData.timeframeScores['15m'],
+          score: timeframeScores['15m'],
           explanation:
-            Math.abs(priceData.timeframeScores['15m']) < 0.1
+            Math.abs(timeframeScores['15m']) < 0.1
               ? 'Primary 15m timeframe is almost completely flat with no clear direction.'
               : '15-minute chart shows some structure but not strong.',
           weightage: tf15mWeight,
         },
         '1h': {
-          score: priceData.timeframeScores['1h'],
+          score: timeframeScores['1h'],
           explanation:
-            priceData.timeframeScores['1h'] > 0.2
+            timeframeScores['1h'] > 0.2
               ? '1-hour timeframe is mildly supportive with some bullish structure.'
               : 'Higher timeframe is not strongly contributing.',
           weightage: tf1hWeight,
@@ -460,7 +463,7 @@ export default async function tradeDecisionRoute(fastify: FastifyInstance) {
           positionContext = { hasOpenPosition: false, fetchError: posCtx.fetchError || 'position fetch failed' };
         }
       } catch (e) {
-        // never break the decision response
+        fastify.log.warn({ err: e, symbol }, 'trade-decision position management block failed');
       }
 
       if (

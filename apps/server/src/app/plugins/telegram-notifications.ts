@@ -35,6 +35,8 @@ import {
   getIstSessionClock,
   hydrateSignalSnapshot,
   isIndianMarketOpen,
+  isCoachSummaryPendingForSession,
+  isWithinPostSessionCoachCatchUpWindow,
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
   snapshotKey,
@@ -627,30 +629,42 @@ export default fp(
         const sessionReady = await fastify.ensureFyersSession({
           verifyWithApi: true,
         });
-        if (!sessionReady) {
-          fastify.log.debug(
-            'Session coach skipped — Fyers token missing or API rejected',
-          );
-          return;
-        }
-
         const now = Date.now();
         const timezone = TELEGRAM_NOTIFICATION_DEFAULTS.IST_TIMEZONE;
+        const { sessionDate } = getIstSessionClock(now, timezone);
+        sessionCoachState = await loadSessionCoachState(
+          fastify,
+          sessionCoachState,
+        );
+
         const inCoachWindow = isWithinPostSessionCoachWindow(
           now,
           timezone,
           TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
           TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
         );
+        const coachPending = isCoachSummaryPendingForSession(
+          sessionCoachState,
+          sessionDate,
+        );
+        const inCoachCatchUp =
+          coachPending &&
+          isWithinPostSessionCoachCatchUpWindow(
+            now,
+            timezone,
+            TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+          );
 
         const allowCoach = options?.force || options?.coachOnly;
-        if (!allowCoach && !inCoachWindow) return;
+        if (!allowCoach && !inCoachWindow && !inCoachCatchUp) return;
 
-        const { sessionDate } = getIstSessionClock(now, timezone);
-        sessionCoachState = await loadSessionCoachState(
-          fastify,
-          sessionCoachState,
-        );
+        if (!sessionReady) {
+          fastify.log.warn(
+            { sessionDate },
+            'Session coach skipped — Fyers token missing or API rejected',
+          );
+          return;
+        }
 
         if (manualCoachInFlight) {
           fastify.log.debug(
@@ -659,7 +673,7 @@ export default fp(
           return;
         }
 
-        if (!allowCoach && sessionCoachState.lastSessionDate === sessionDate) {
+        if (!allowCoach && !coachPending) {
           return;
         }
 
@@ -704,7 +718,6 @@ export default fp(
             fastify,
             sessionCoachState,
             {
-              lastSessionDate: sessionDate,
               lastSentAt: new Date(),
               lastError: msg,
             },
@@ -740,6 +753,22 @@ export default fp(
         TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
         TELEGRAM_NOTIFICATION_DEFAULTS.POST_SESSION_COACH_WINDOW_MINUTES,
       );
+      const { sessionDate: pollSessionDate } = getIstSessionClock(now, timezone);
+      sessionCoachState = await loadSessionCoachState(
+        fastify,
+        sessionCoachState,
+      );
+      const coachPending = isCoachSummaryPendingForSession(
+        sessionCoachState,
+        pollSessionDate,
+      );
+      const inCoachCatchUp =
+        coachPending &&
+        isWithinPostSessionCoachCatchUpWindow(
+          now,
+          timezone,
+          TELEGRAM_NOTIFICATION_DEFAULTS.SESSION_CLOSE,
+        );
       const inPreSessionWindow =
         isPreSessionLearningEnabled() &&
         isWithinPreSessionLearningWindow(
@@ -749,7 +778,13 @@ export default fp(
           TELEGRAM_NOTIFICATION_DEFAULTS.PRE_SESSION_LEARNING_END,
         );
 
-      if (!options?.force && !marketOpen && !inCoachWindow && !inPreSessionWindow) {
+      if (
+        !options?.force &&
+        !marketOpen &&
+        !inCoachWindow &&
+        !inCoachCatchUp &&
+        !inPreSessionWindow
+      ) {
         fastify.log.debug(
           'Telegram poll skipped — outside market, coach, and pre-session windows',
         );
@@ -848,7 +883,7 @@ export default fp(
         }
       }
 
-      if (inCoachWindow || options?.force || options?.coachOnly) {
+      if (inCoachWindow || inCoachCatchUp || options?.force || options?.coachOnly) {
         const { sessionDate } = getIstSessionClock(now, timezone);
         try {
           const closed = await closeSessionSignalOutcomes(fastify, sessionDate);

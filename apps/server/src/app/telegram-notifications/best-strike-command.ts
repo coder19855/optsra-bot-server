@@ -56,9 +56,13 @@ async function fetchTradeDecisionPayload(
   symbol: string,
   tradingStyle: TradingStyle,
 ): Promise<TradeDecisionPayload | null> {
+  const vetoMode = fastify.telegramNotifications?.getVetoMode?.() ?? 'strict';
+  const flowMode = fastify.telegramNotifications?.getFlowMode?.() ?? 'blend';
+  const vetoQuery = `&vetoMode=${encodeURIComponent(vetoMode)}`;
+  const flowQuery = `&flowMode=${encodeURIComponent(flowMode)}`;
   const res = await fastify.inject({
     method: 'GET',
-    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}`,
+    url: `/api/trade-decision?symbol=${encodeURIComponent(symbol)}&tradingStyle=${tradingStyle}${vetoQuery}${flowQuery}`,
   });
 
   if (res.statusCode !== 200) return null;

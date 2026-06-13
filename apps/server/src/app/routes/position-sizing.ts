@@ -11,6 +11,10 @@ import { PriceActionResponse } from '../types';
 import { PositionSizingResponse } from '../types/position-sizing';
 import { TradingStyle } from '../trading-style';
 import { ResponseStatus } from '../types/common';
+import {
+  priceActionToManagementPriceData,
+  toManagementDecisionPayload,
+} from '../telegram-notifications/management-decision-mapper';
 import { computeManagementAdvice, getOpenPositionContext, PositionManagementContext } from '../telegram-notifications/position-monitor';
 
 function parseTradingStyle(styleQuery?: string): TradingStyle {
@@ -203,13 +207,17 @@ export default async function positionSizingRoute(fastify: FastifyInstance) {
       try {
         if (symbol) {
           const posCtx = await getOpenPositionContext(fastify, [symbol]);
-          if (posCtx.count > 0) {
-            const mgmt = computeManagementAdvice(posCtx, {
-              action: 'NO-TRADE',
-              conviction: 0,
-              priceAction: { action: 'NO-TRADE' as any },
-              tradeGuidance: { shouldConsiderTrade: false },
-            } as any, priceData as any, activeStyle);
+          if (posCtx.count > 0 && priceData) {
+            const mgmt = computeManagementAdvice(
+              posCtx,
+              toManagementDecisionPayload({
+                action: priceData.signal?.action ?? 'NO-TRADE',
+                conviction: priceData.signal?.confidence ?? 0,
+                overallSignal: priceData.signal,
+              }),
+              priceActionToManagementPriceData(priceData),
+              activeStyle,
+            );
 
             const mgmtContext: PositionManagementContext = {
               hasOpenPosition: true,
@@ -223,7 +231,9 @@ export default async function positionSizingRoute(fastify: FastifyInstance) {
             );
           }
         }
-      } catch {}
+      } catch (err) {
+        fastify.log.warn({ err, symbol }, 'position-sizing management context failed');
+      }
 
       return reply.send(response);
     } catch (error) {

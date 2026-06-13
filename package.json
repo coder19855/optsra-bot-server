@@ -4,6 +4,8 @@
   "license": "MIT",
   "scripts": {
     "build": "nx build @optra-pulse-bot/server && mkdir -p apps/server/dist/apps/server/src/assets && cp -R apps/server/src/assets/. apps/server/dist/apps/server/src/assets/",
+    "test:server": "nx test @optra-pulse-bot/server",
+    "verify": "npm run build && npm run test:server",
     "start": "node apps/server/dist/main.js"
   },
   "private": true,

@@ -14,6 +14,8 @@ import {
   hydrateSignalSnapshot,
   isIndianMarketOpen,
   isIndianWeekday,
+  isCoachSummaryPendingForSession,
+  isWithinPostSessionCoachCatchUpWindow,
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
   snapshotKey,
@@ -824,5 +826,34 @@ describe('IST session windows', () => {
     expect(isWithinPostSessionCoachWindow(weekdayPostSession)).toBe(true);
     expect(isWithinPostSessionCoachWindow(weekdayMorningMarket)).toBe(false);
     expect(isWithinPostSessionCoachWindow(saturday)).toBe(false);
+  });
+
+  it('detects same-day coach catch-up window (until 20:00 IST)', () => {
+    // 2026-06-11 14:30:00Z = 20:00 IST
+    const weekdayCatchUpEnd = Date.UTC(2026, 5, 11, 14, 30, 0);
+    expect(isWithinPostSessionCoachCatchUpWindow(weekdayPostSession)).toBe(true);
+    expect(isWithinPostSessionCoachCatchUpWindow(weekdayCatchUpEnd)).toBe(true);
+    expect(isWithinPostSessionCoachCatchUpWindow(weekdayMorningMarket)).toBe(false);
+  });
+
+  it('detects pending coach summary state', () => {
+    expect(
+      isCoachSummaryPendingForSession(
+        { lastSessionDate: '2026-06-11', lastError: null },
+        '2026-06-11',
+      ),
+    ).toBe(false);
+    expect(
+      isCoachSummaryPendingForSession(
+        { lastSessionDate: '2026-06-11', lastError: 'send failed' },
+        '2026-06-11',
+      ),
+    ).toBe(true);
+    expect(
+      isCoachSummaryPendingForSession(
+        { lastSessionDate: null, lastError: null },
+        '2026-06-11',
+      ),
+    ).toBe(true);
   });
 });

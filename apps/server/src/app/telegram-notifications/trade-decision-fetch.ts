@@ -12,7 +12,10 @@ import {
   TradeStructureContext,
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
-import { normalizePriceActionSignal } from './management-decision-mapper';
+import {
+  formatTradeDecisionError,
+  normalizePriceActionSignal,
+} from './management-decision-mapper';
 import { resolveTelegramPositionSizing } from './position-sizing-context';
 import {
   PollMarketDataContext,
@@ -94,7 +97,7 @@ export async function fetchTradeDecisionAlert(
 
   if (res.statusCode !== 200) {
     throw new Error(
-      `trade-decision failed for ${symbol} (${tradingStyle}): HTTP ${res.statusCode}`,
+      `${formatTradeDecisionError(res.statusCode, res.body)} [${symbol}/${tradingStyle}]`,
     );
   }
 

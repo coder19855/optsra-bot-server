@@ -443,3 +443,27 @@ export function isWithinPostSessionCoachWindow(
 
   return mins > closeMins && mins <= windowEnd;
 }
+
+/** Later same-day retry if the 45m post-close window was missed (e.g. deploy downtime). */
+export function isWithinPostSessionCoachCatchUpWindow(
+  now = Date.now(),
+  timezone = 'Asia/Kolkata',
+  sessionClose = { hour: 15, minute: 30 },
+  catchUpEnd = { hour: 20, minute: 0 },
+): boolean {
+  if (!isIndianWeekday(now, timezone)) return false;
+
+  const { mins } = getIstSessionClock(now, timezone);
+  const closeMins = sessionClose.hour * 60 + sessionClose.minute;
+  const endMins = catchUpEnd.hour * 60 + catchUpEnd.minute;
+
+  return mins > closeMins && mins <= endMins;
+}
+
+export function isCoachSummaryPendingForSession(
+  state: { lastSessionDate: string | null; lastError: string | null },
+  sessionDate: string,
+): boolean {
+  if (state.lastSessionDate !== sessionDate) return true;
+  return Boolean(state.lastError);
+}

@@ -58,6 +58,33 @@ export function toManagementPriceData(
   return priceData;
 }
 
+/** Build price context for management brain from a Telegram alert payload. */
+export function alertPayloadToManagementPriceData(
+  payload: Pick<
+    TradeDecisionAlertPayload,
+    'lastPrice' | 'tradeSetup' | 'momentumDecayPercent'
+  >,
+): PriceActionResponse {
+  return {
+    lastPrice: payload.lastPrice,
+    tradeSetup: payload.tradeSetup ?? undefined,
+    momentumDecay:
+      payload.momentumDecayPercent != null
+        ? {
+            decayPercent: payload.momentumDecayPercent,
+            reasons: [],
+          }
+        : undefined,
+  } as PriceActionResponse;
+}
+
+/** Build price context for management brain from technical-analysis only. */
+export function priceActionToManagementPriceData(
+  priceData: PriceActionResponse,
+): PriceActionResponse {
+  return priceData;
+}
+
 export function formatTradeDecisionError(statusCode: number, body: string): string {
   let detail = '';
   try {

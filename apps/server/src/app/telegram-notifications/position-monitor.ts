@@ -1089,7 +1089,12 @@ export async function evaluateOpenPositionTpAlerts(
           posCtxForEval, decision, priceData, params.tradingStyle, prevHealth
         );
       }
-    } catch {}
+    } catch (err) {
+      fastify.log.warn(
+        { err, symbol: position.symbol },
+        'TP evaluation management advice failed',
+      );
+    }
 
     const change = detectTpAlertChange(previous, evaluation, {
       isTracked: tracking.isTracked,

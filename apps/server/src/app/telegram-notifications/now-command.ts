@@ -14,6 +14,7 @@ import {
   isWithinPostSessionCoachWindow,
   isWithinPreSessionLearningWindow,
 } from './signal-tracker';
+import { alertPayloadToManagementPriceData } from './management-decision-mapper';
 import { computeManagementAdvice, getOpenPositionContext, ManagementAdvice, PositionManagementContext } from './position-monitor';
 
 function resolveWatchList(
@@ -162,7 +163,12 @@ export async function buildNowTelegramMessage(
 
       // Attach full management brain advice + health score for /now
       if (primaryItem) {
-        managementAdvice = computeManagementAdvice(posCtx, primaryItem as any, { lastPrice: primaryItem.lastPrice } as any, primaryItem.tradingStyle);
+        managementAdvice = computeManagementAdvice(
+          posCtx,
+          primaryItem,
+          alertPayloadToManagementPriceData(primaryItem),
+          primaryItem.tradingStyle,
+        );
         managementContext = {
           hasOpenPosition: true,
           heldDirection: posCtx.heldDirection,
@@ -178,7 +184,9 @@ export async function buildNowTelegramMessage(
         }
       }
     }
-  } catch {}
+  } catch (err) {
+    fastify.log.warn({ err, symbol: primaryItem?.symbol }, '/now management context failed');
+  }
 
   return {
     message: formatNowTelegramMessage({ context, items, errors, voice }),

@@ -1,4 +1,5 @@
 import {
+  alertPayloadToManagementPriceData,
   formatTradeDecisionError,
   normalizePriceActionSignal,
   toManagementDecisionPayload,
@@ -32,6 +33,22 @@ describe('management-decision-mapper', () => {
     expect(payload.action).toBe('CE-BUY');
     expect(payload.conviction).toBe(68);
     expect(payload.priceAction.action).toBe('NO-TRADE');
+  });
+
+  it('maps alert payload fields into management price data', () => {
+    const priceData = alertPayloadToManagementPriceData({
+      lastPrice: 25100,
+      tradeSetup: {
+        entry: 25000,
+        stopLoss: 24900,
+        risk: 100,
+        takeProfits: [],
+      },
+      momentumDecayPercent: 18,
+    });
+    expect(priceData.lastPrice).toBe(25100);
+    expect(priceData.tradeSetup?.risk).toBe(100);
+    expect(priceData.momentumDecay?.decayPercent).toBe(18);
   });
 
   it('formats upstream trade-decision errors with detail', () => {
