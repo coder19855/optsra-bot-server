@@ -1,7 +1,7 @@
 import { DecisionAction } from './trade-decision';
 import { TradingStyle } from './trading-style';
 
-export type AIProvider = 'GEMINI' | 'GROQ' | 'OPENAI';
+export type AIProvider = 'GEMINI' | 'GROQ' | 'OPENAI' | 'XAI';
 
 export interface AIAnalysisRequest {
   symbol: string;

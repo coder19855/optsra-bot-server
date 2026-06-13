@@ -31,7 +31,7 @@ export function formatAiStatusMessage(state: AiBetaPreferenceState): string {
     ),
     joinTelegramLines(
       '<code>/ai on|off</code> — toggle AI agent',
-      '<code>/ai provider GEMINI|GROQ</code> — switch AI model',
+      '<code>/ai provider GEMINI|GROQ|OPENAI|XAI</code> — switch AI model',
       '<code>/ai shadow on|off</code> — opinion vs influencing score',
       '<code>/ai status</code> — show current AI config',
       '',

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Groq from 'groq-sdk';
+import OpenAI from 'openai';
 import { AIAnalysisRequest, AIAnalysisResponse, AIProvider } from '../types/ai-agent';
 
 export default fp(
@@ -11,14 +12,8 @@ export default fp(
       return provider as AIProvider;
     };
 
-    const callGemini = async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
-
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-      const prompt = `
+    const buildAnalysisPrompt = (request: AIAnalysisRequest): string => {
+      return `
         As a senior options trading strategist for Indian Markets (NIFTY/BANKNIFTY), analyze this setup.
         
         DATA:
@@ -43,8 +38,16 @@ export default fp(
         Return ONLY JSON in this format:
         { "verdict": "AGREE", "confidenceAdjustment": 0, "betaNote": "..." }
       `;
+    };
 
-      const result = await model.generateContent(prompt);
+    const callGemini = async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+      const result = await model.generateContent(buildAnalysisPrompt(request));
       const response = await result.response;
       const text = response.text();
       const cleanJson = text.replace(/```json|```/g, '').trim();
@@ -95,12 +98,65 @@ export default fp(
       };
     };
 
+    const callOpenAI = async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
+      const apiKey = process.env.OPENAI_API_KEY;
+      if (!apiKey) throw new Error('OPENAI_API_KEY not configured');
+
+      const openai = new OpenAI({ apiKey });
+      const model = 'gpt-4o-mini';
+
+      const response = await openai.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: buildAnalysisPrompt(request) }],
+        response_format: { type: 'json_object' },
+      });
+
+      const parsed = JSON.parse(response.choices[0].message.content || '{}');
+
+      return {
+        provider: 'OPENAI',
+        model,
+        verdict: parsed.verdict,
+        confidenceAdjustment: parsed.confidenceAdjustment || 0,
+        betaNote: parsed.betaNote,
+        timestamp: Date.now(),
+      };
+    };
+
+    const callXai = async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
+      const apiKey = process.env.XAI_API_KEY;
+      if (!apiKey) throw new Error('XAI_API_KEY not configured');
+
+      const xai = new OpenAI({
+        apiKey,
+        baseURL: 'https://api.x.ai/v1',
+      });
+      const model = 'grok-beta';
+
+      const response = await xai.chat.completions.create({
+        model,
+        messages: [{ role: 'user', content: buildAnalysisPrompt(request) }],
+        response_format: { type: 'json_object' },
+      });
+
+      const parsed = JSON.parse(response.choices[0].message.content || '{}');
+
+      return {
+        provider: 'XAI',
+        model,
+        verdict: parsed.verdict,
+        confidenceAdjustment: parsed.confidenceAdjustment || 0,
+        betaNote: parsed.betaNote,
+        timestamp: Date.now(),
+      };
+    };
+
     const aiCache = new Map<string, AIAnalysisResponse>();
 
     const aiAgent = {
       analyze: async (request: AIAnalysisRequest): Promise<AIAnalysisResponse> => {
         const provider = getActiveProvider();
-        const cacheKey = `${request.symbol}-${request.action}`;
+        const cacheKey = `${request.symbol}-${request.action}-${provider}`;
         const cached = aiCache.get(cacheKey);
 
         // Throttle: If same action/symbol in last 15 mins, reuse opinion
@@ -109,7 +165,20 @@ export default fp(
         }
 
         try {
-          const response = provider === 'GROQ' ? await callGroq(request) : await callGemini(request);
+          let response: AIAnalysisResponse;
+          switch (provider) {
+            case 'GROQ':
+              response = await callGroq(request);
+              break;
+            case 'OPENAI':
+              response = await callOpenAI(request);
+              break;
+            case 'XAI':
+              response = await callXai(request);
+              break;
+            default:
+              response = await callGemini(request);
+          }
           aiCache.set(cacheKey, response);
           return response;
         } catch (error) {
