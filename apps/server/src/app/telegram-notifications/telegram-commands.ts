@@ -80,7 +80,11 @@ import {
   parseAiCommandArgs,
 } from './ai-command';
 import { AIProvider } from '../types/ai-agent';
-import { buildBenchmarkTelegramMessage } from './benchmark-command';
+import {
+  buildBenchmarkTelegramMessage,
+  formatBenchmarkHelpMessage,
+  isBenchmarkHelpRequest,
+} from './benchmark-command';
 import { buildBenchmarkWebAppUrl } from './deck-url';
 
 interface TelegramUpdate {
@@ -777,6 +781,24 @@ export class TelegramCommandPoller {
       return;
     }
 
+    const defaultSymbol =
+      this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
+    const defaultStyle =
+      this.deps.watchedStyles[0] ?? TradingStyle.Intraday;
+
+    if (isBenchmarkHelpRequest(text)) {
+      await this.deps.sendMessage(
+        formatBenchmarkHelpMessage({
+          symbol: defaultSymbol,
+          style: defaultStyle,
+          vetoMode: this.fastify.telegramNotifications.getVetoMode(),
+          flowMode: this.fastify.telegramNotifications.getFlowMode(),
+        }),
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
     this.benchmarkInFlight = true;
     try {
       const sessionReady = await this.fastify.ensureFyersSession({
@@ -789,11 +811,6 @@ export class TelegramCommandPoller {
         );
         return;
       }
-
-      const defaultSymbol =
-        this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
-      const defaultStyle =
-        this.deps.watchedStyles[0] ?? TradingStyle.Intraday;
 
       const result = await buildBenchmarkTelegramMessage(this.fastify, {
         text,

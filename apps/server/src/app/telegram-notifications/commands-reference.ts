@@ -68,7 +68,7 @@ export function formatCommandsReferenceMessage(
   ]);
 
   const benchmarkBlock = commandBlock('📐 <b>Engine backtest</b>', [
-    '<code>/benchmark</code> — replay signals with trailing TP (1:1.5→1:4)',
+    '<code>/benchmark</code> — show presets (does not run until you pick days/options)',
     '<i>Try:</i> <code>/benchmark 30</code> · <code>/benchmark 14 ai-shadow</code>',
     '<code>/benchmark 30 2</code> — 30 days, max <b>2 trades/day</b> (recommended)',
     '<code>/benchmark max2</code> — explicit daily cap · omit for unlimited',

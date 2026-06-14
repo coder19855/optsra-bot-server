@@ -4,8 +4,74 @@ import { BenchmarkAiMode, BenchmarkTradeRow } from '../benchmark/types';
 import { TradingStyle } from '../types/trading-style';
 import { buildBenchmarkWebAppUrl } from './deck-url';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
-import { parseSymbolStyleCommandArgs } from './command-args';
+import { parseSymbolStyleCommandArgs, shortIndexLabel } from './command-args';
 import { toErrorMessage } from '../error-message';
+import { tradingStyleLabel } from './style-command';
+import { flowModeLabel, FlowMode } from '../types/flow-mode';
+import { VetoMode, vetoModeLabel } from '../types/veto-mode';
+
+/** Bare `/benchmark` (or `help` / `options`) — show presets, do not run replay. */
+export function isBenchmarkHelpRequest(text: string): boolean {
+  const parts = text.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return true;
+
+  const cmd = parts[0].toLowerCase().split('@')[0];
+  if (cmd !== '/benchmark' && cmd !== '/backtest') return false;
+  if (parts.length === 1) return true;
+
+  const hint = parts[1].toLowerCase();
+  return (
+    hint === 'help' ||
+    hint === 'options' ||
+    hint === 'option' ||
+    hint === 'status' ||
+    hint === 'hints'
+  );
+}
+
+export function formatBenchmarkHelpMessage(params: {
+  symbol: string;
+  style: TradingStyle;
+  vetoMode: VetoMode;
+  flowMode: FlowMode;
+}): string {
+  const sym = shortIndexLabel(params.symbol);
+  const style = tradingStyleLabel(params.style);
+  const styleArg = params.style.toLowerCase();
+
+  return joinTelegramSections(
+    '📐 <b>Benchmark — pick a run</b>',
+    joinTelegramLines(
+      '<i>Replay engine signals with trailing TP (1:1.5 → 1:4). Takes ~30–90s.</i>',
+      '',
+      `<b>Defaults if you omit symbol/style:</b> ${sym} · ${style}`,
+      `<b>Uses now:</b> veto <b>${vetoModeLabel(params.vetoMode)}</b> · flow <b>${flowModeLabel(params.flowMode)}</b>`,
+      '<i>Change with</i> <code>/veto</code> <i>and</i> <code>/flow</code> <i>before you run.</i>',
+    ),
+    joinTelegramLines(
+      '<b>Quick picks</b> (tap to copy)',
+      `<code>/benchmark 14</code> — 14-day replay · AI shadow`,
+      `<code>/benchmark 30 2</code> — 30 days · max <b>2 trades/day</b> (recommended)`,
+      `<code>/benchmark 30 ai-shadow</code> — longer window · AI opinions logged`,
+      `<code>/benchmark ai-off</code> — engine only · no AI API calls`,
+    ),
+    joinTelegramLines(
+      '<b>Symbol &amp; style</b>',
+      `<code>/benchmark ${sym} ${styleArg} 30</code> — your watchlist index + style`,
+      `<code>/benchmark BANKNIFTY INTRADAY 14</code> — explicit index`,
+      `<code>/benchmark max2</code> — cap entries (also <code>2</code> after days)`,
+    ),
+    joinTelegramLines(
+      '<b>AI compare</b>',
+      '<code>/benchmark 30 ai-active</code> — re-gate entries on AI-adjusted conviction',
+      '<code>/benchmark 30 ai-shadow</code> — same entries · record agree/disagree',
+      '<code>/benchmark ai-off</code> — skip AI entirely',
+    ),
+    joinTelegramLines(
+      '<i>Days: 3–60 · Daily cap: 1–20 or unlimited · Visual report button after each run.</i>',
+    ),
+  );
+}
 
 export function parseBenchmarkCommandArgs(
   text: string,
