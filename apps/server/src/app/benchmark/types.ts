@@ -4,8 +4,14 @@ import { TradingStyle } from '../types/trading-style';
 import { FlowMode } from '../types/flow-mode';
 import { VetoMode } from '../types/veto-mode';
 
+import { BenchmarkJobProgress } from './benchmark-job-store';
+
 export type BenchmarkAiMode = 'off' | 'shadow' | 'active';
 export type BenchmarkOptionSource = 'snapshot' | 'neutral_fallback';
+
+export type BenchmarkProgressCallback = (
+  progress: BenchmarkJobProgress,
+) => void | Promise<void>;
 
 export interface BenchmarkParams {
   symbol: string;
@@ -27,6 +33,8 @@ export interface BenchmarkParams {
   startingCapitalInr?: number;
   /** Override risk % per trade for capital projection. */
   riskPercentPerTrade?: number;
+  /** Async job progress hook (benchmark jobs + mini app polling). */
+  onProgress?: BenchmarkProgressCallback;
 }
 
 export interface BenchmarkCapitalSummary {

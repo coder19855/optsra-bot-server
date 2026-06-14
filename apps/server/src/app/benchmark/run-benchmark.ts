@@ -50,6 +50,7 @@ import {
   endBenchmarkReplay,
 } from './benchmark-runtime';
 import { yieldToEventLoop } from '../promise-timeout';
+import { buildProgressUpdate } from './benchmark-job-store';
 
 async function fetchHistory(
   fastify: FastifyInstance,
@@ -170,9 +171,22 @@ async function executeBenchmarkReplay(
   const symbol = input.symbol;
   const enterThreshold =
     getStyleScoringConfig(activeStyle).convictionThreshold.enter;
+  const reportProgress = async (
+    partial: Parameters<typeof buildProgressUpdate>[0],
+  ) => {
+    if (!input.onProgress) return;
+    await input.onProgress(buildProgressUpdate(partial));
+  };
 
   const { fromMs, fetchFromMs } = computeWindow(toMs, days);
   const toEpochSeconds = (ms: number) => Math.floor(ms / 1000).toString();
+
+  await reportProgress({
+    phase: 'fetching',
+    percent: 4,
+    message: 'Fetching candle history…',
+    totalDays: days,
+  });
 
   const [res5m, res15m, res1h, snapshots] = await Promise.all([
     fetchHistory(fastify, {
@@ -240,6 +254,8 @@ async function executeBenchmarkReplay(
     onlySession,
   );
   const entryAnchorMs = new Set(entryAnchors);
+  const replayDaysSeen = new Set<string>();
+  const replayAnchorTotal = Math.max(replayAnchors.length, 1);
 
   const deps = {
     ta: fastify.technicalAnalysisPlugin,
@@ -254,6 +270,25 @@ async function executeBenchmarkReplay(
 
   for (let anchorIdx = 0; anchorIdx < replayAnchors.length; anchorIdx++) {
     await yieldToEventLoop();
+
+    if (
+      anchorIdx === 0 ||
+      anchorIdx === replayAnchors.length - 1 ||
+      anchorIdx % 12 === 0
+    ) {
+      const asOfMsPreview = replayAnchors[anchorIdx];
+      const previewDayKey = getIstSessionKey(Math.floor(asOfMsPreview / 1000));
+      replayDaysSeen.add(previewDayKey);
+      await reportProgress({
+        phase: 'replaying',
+        percent: 8 + Math.round((anchorIdx / replayAnchorTotal) * 62),
+        message: `Replaying signals · day ${replayDaysSeen.size}/${days}`,
+        currentDay: replayDaysSeen.size,
+        totalDays: days,
+        anchorsDone: anchorIdx + 1,
+        anchorsTotal: replayAnchorTotal,
+      });
+    }
 
     const asOfMs = replayAnchors[anchorIdx];
     const asOfSec = Math.floor(asOfMs / 1000);
@@ -328,8 +363,28 @@ async function executeBenchmarkReplay(
   const activeTrades: BenchmarkTradeRow[] = [];
   let aiCalls = 0;
 
+  const tradeCandidateTotal = Math.max(tradeCandidates.length, 1);
+
   for (let tradeIdx = 0; tradeIdx < tradeCandidates.length; tradeIdx++) {
     await yieldToEventLoop();
+
+    if (
+      tradeIdx === 0 ||
+      tradeIdx === tradeCandidates.length - 1 ||
+      tradeIdx % 3 === 0
+    ) {
+      await reportProgress({
+        phase: aiMode !== 'off' ? 'ai' : 'simulating',
+        percent: 72 + Math.round((tradeIdx / tradeCandidateTotal) * 18),
+        message:
+          aiMode !== 'off'
+            ? `Simulating trades & AI · ${tradeIdx + 1}/${tradeCandidates.length}`
+            : `Simulating trades · ${tradeIdx + 1}/${tradeCandidates.length}`,
+        totalDays: days,
+        currentDay: days,
+      });
+    }
+
     const candidate = tradeCandidates[tradeIdx];
     const { asOfMs, asOfSec, dayKey, action, conviction, snapshot } = candidate;
 
@@ -484,6 +539,14 @@ async function executeBenchmarkReplay(
       peCooldownUntilMs = closedAtMs + tradeCooldownMs;
     }
   }
+
+  await reportProgress({
+    phase: 'finalizing',
+    percent: 92,
+    message: 'Building report…',
+    totalDays: days,
+    currentDay: days,
+  });
 
   const snapshotDays = new Set(
     snapshots.map((s) =>

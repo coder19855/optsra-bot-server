@@ -8,6 +8,7 @@
   }
 
   const params = new URLSearchParams(window.location.search);
+  const jobId = params.get('jobId') || '';
   const reportId = params.get('reportId') || '';
   const symbol = params.get('symbol') || 'NSE:NIFTY50-INDEX';
   const style = params.get('style') || 'INTRADAY';
@@ -40,7 +41,14 @@
     tradeTbody: document.getElementById('trade-tbody'),
     notes: document.getElementById('notes'),
     error: document.getElementById('error-line'),
+    loadingText: document.getElementById('loading-text'),
+    loadingSub: document.getElementById('loading-sub'),
+    progressWrap: document.getElementById('progress-wrap'),
+    progressFill: document.getElementById('progress-fill'),
+    progressPercent: document.getElementById('progress-percent'),
   };
+
+  const POLL_MS = 2000;
 
   function shortSymbol(sym) {
     return (sym.split(':')[1] || sym).replace('-INDEX', '');
@@ -375,72 +383,139 @@
         : `${aiModeLabel(mode)} · unlimited/day`;
   }
 
-  async function load() {
-    if (!reportId) {
-      els.symbol.textContent = shortSymbol(symbol);
-      els.style.textContent = style;
-      els.days.textContent = `${days}d`;
-      els.ai.textContent = maxTrades
-        ? `${aiModeLabel(aiMode)} · max ${maxTrades}/day`
-        : `${aiModeLabel(aiMode)} · unlimited/day`;
-    }
-
+  function authHeaders() {
     const headers = {};
     if (initData) headers['x-telegram-init-data'] = initData;
+    return headers;
+  }
 
-    const loadingText = document.querySelector('.loading-text');
-    const loadingSub = document.querySelector('.loading-sub');
-    if (reportId) {
-      if (loadingText) loadingText.textContent = 'Loading report…';
-      if (loadingSub) loadingSub.textContent = 'Opening cached benchmark results';
+  function setProgressUI(progress) {
+    if (!progress) return;
+    const pct = Math.min(100, Math.max(0, Number(progress.percent) || 0));
+    if (els.progressWrap) els.progressWrap.classList.remove('hidden');
+    if (els.progressFill) els.progressFill.style.width = `${pct}%`;
+    if (els.progressPercent) els.progressPercent.textContent = `${pct}%`;
+    if (els.loadingSub && progress.message) {
+      els.loadingSub.textContent = progress.message;
     }
+    if (els.loadingText) {
+      if (progress.phase === 'complete') {
+        els.loadingText.textContent = 'Loading report…';
+      } else if (progress.phase === 'failed') {
+        els.loadingText.textContent = 'Benchmark failed';
+      } else {
+        els.loadingText.textContent = 'Running backtest…';
+      }
+    }
+  }
 
-    try {
-      const url = reportId
-        ? `/api/benchmark/report?reportId=${encodeURIComponent(reportId)}`
-        : (() => {
-            const qs = new URLSearchParams({ symbol, style, days, aiMode });
-            if (maxTrades) qs.set('maxTrades', maxTrades);
-            return `/api/benchmark?${qs.toString()}`;
-          })();
-      const res = await fetch(url, { headers });
+  function applyMetaFromQuery() {
+    els.symbol.textContent = shortSymbol(symbol);
+    els.style.textContent = style;
+    els.days.textContent = `${days}d`;
+    els.ai.textContent = maxTrades
+      ? `${aiModeLabel(aiMode)} · max ${maxTrades}/day`
+      : `${aiModeLabel(aiMode)} · unlimited/day`;
+  }
+
+  function renderReport(report) {
+    applyReportMeta(report);
+    els.generated.textContent = new Date(report.generatedAt).toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+
+    renderCapitalHero(report.capitalSummary);
+    renderCapitalCurve(report.capitalCurve, report.capitalSummary);
+    renderKpis(report.aiComparison.baseline, report.capitalSummary);
+    renderCompare(report.aiComparison, report.params.aiMode);
+    renderEquityCurve(report.equityCurve, report.aiComparison.baseline.totalPnlR);
+    renderExitBars(report.aiComparison.baseline);
+    renderTrades(report.trades);
+
+    const noteLines = [
+      report.stopLossNote,
+      report.simulationNote,
+      report.optionFlowNote,
+      report.capitalSummary?.note,
+      ...report.aiComparison.notes,
+    ];
+    els.notes.innerHTML = noteLines.map((n) => escapeHtml(n)).join('<br>');
+    hideLoading();
+  }
+
+  async function fetchReportById(id) {
+    const res = await fetch(
+      `/api/benchmark/report?reportId=${encodeURIComponent(id)}`,
+      { headers: authHeaders() },
+    );
+    const body = await res.json();
+    if (!res.ok) {
+      throw new Error(apiErrorMessage(body, res.status));
+    }
+    return body;
+  }
+
+  async function pollJobUntilComplete(activeJobId) {
+    if (els.loadingText) els.loadingText.textContent = 'Running backtest…';
+    if (els.loadingSub) {
+      els.loadingSub.textContent = 'Replay in progress — you can leave and check Telegram later';
+    }
+    if (els.progressWrap) els.progressWrap.classList.remove('hidden');
+
+    for (;;) {
+      const res = await fetch(
+        `/api/benchmark/status?jobId=${encodeURIComponent(activeJobId)}`,
+        { headers: authHeaders() },
+      );
       const body = await res.json();
       if (!res.ok) {
         const msg = apiErrorMessage(body, res.status);
         if (res.status === 401) {
           throw new Error(
-            `${msg} — tap the 📊 Visual report button in Telegram (not the text link).`,
+            `${msg} — open via the 📊 Watch progress button in Telegram.`,
           );
         }
         throw new Error(msg);
       }
 
-      const report = body;
-      applyReportMeta(report);
-      els.generated.textContent = new Date(report.generatedAt).toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        dateStyle: 'short',
-        timeStyle: 'short',
-      });
+      setProgressUI(body.progress);
 
-      renderCapitalHero(report.capitalSummary);
-      renderCapitalCurve(report.capitalCurve, report.capitalSummary);
-      renderKpis(report.aiComparison.baseline, report.capitalSummary);
-      renderCompare(report.aiComparison, report.params.aiMode);
-      renderEquityCurve(report.equityCurve, report.aiComparison.baseline.totalPnlR);
-      renderExitBars(report.aiComparison.baseline);
-      renderTrades(report.trades);
+      if (body.status === 'complete' && body.reportId) {
+        if (els.loadingText) els.loadingText.textContent = 'Loading report…';
+        if (els.loadingSub) els.loadingSub.textContent = 'Opening results';
+        return fetchReportById(body.reportId);
+      }
 
-      const noteLines = [
-        report.stopLossNote,
-        report.simulationNote,
-        report.optionFlowNote,
-        report.capitalSummary?.note,
-        ...report.aiComparison.notes,
-      ];
-      els.notes.innerHTML = noteLines.map((n) => escapeHtml(n)).join('<br>');
+      if (body.status === 'failed') {
+        throw new Error(body.error || body.progress?.message || 'Benchmark failed');
+      }
 
-      hideLoading();
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+
+  async function load() {
+    applyMetaFromQuery();
+
+    try {
+      if (!reportId && !jobId) {
+        throw new Error(
+          'Run /benchmark from Telegram, then tap 📊 Watch progress or Visual report.',
+        );
+      }
+
+      if (reportId) {
+        if (els.loadingText) els.loadingText.textContent = 'Loading report…';
+        if (els.loadingSub) els.loadingSub.textContent = 'Opening cached benchmark results';
+        const report = await fetchReportById(reportId);
+        renderReport(report);
+        return;
+      }
+
+      const report = await pollJobUntilComplete(jobId);
+      renderReport(report);
     } catch (err) {
       showError(err.message || 'Benchmark failed');
     }

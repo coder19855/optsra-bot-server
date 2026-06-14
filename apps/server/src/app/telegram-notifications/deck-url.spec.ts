@@ -12,23 +12,27 @@ describe('buildBenchmarkWebAppUrl', () => {
     else process.env.PUBLIC_APP_URL = prev;
   });
 
-  it('prefers reportId for cached visual opens', () => {
+  it('includes reportId for cached visual opens', () => {
     const url = buildBenchmarkWebAppUrl({
       reportId: 'abc123',
       symbol: 'NSE:NIFTY50-INDEX',
       tradingStyle: 'INTRADAY',
+      days: 14,
     });
-    expect(url).toBe('https://bot.example.com/benchmark/?reportId=abc123');
+    expect(url).toContain('reportId=abc123');
+    expect(url).toContain('days=14');
   });
 
-  it('encodes live-run query params when no reportId', () => {
+  it('includes jobId for async progress polling', () => {
     const url = buildBenchmarkWebAppUrl({
+      jobId: 'job456',
       symbol: 'NSE:NIFTY50-INDEX',
       tradingStyle: 'INTRADAY',
       days: 30,
       aiMode: 'shadow',
       maxTradesPerDay: 2,
     });
+    expect(url).toContain('jobId=job456');
     expect(url).toContain('symbol=NSE%3ANIFTY50-INDEX');
     expect(url).toContain('days=30');
     expect(url).toContain('maxTrades=2');

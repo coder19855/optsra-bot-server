@@ -27,6 +27,8 @@ export function buildDeckWebAppUrl(params: {
 }
 
 export function buildBenchmarkWebAppUrl(params: {
+  /** In-progress async job — mini app polls status until complete. */
+  jobId?: string;
   /** Cached report from a completed /benchmark run — opens instantly without re-replay. */
   reportId?: string;
   symbol: string;
@@ -39,16 +41,17 @@ export function buildBenchmarkWebAppUrl(params: {
   if (!base) return null;
 
   const query = new URLSearchParams();
-  if (params.reportId?.trim()) {
+  if (params.jobId?.trim()) {
+    query.set('jobId', params.jobId.trim());
+  } else if (params.reportId?.trim()) {
     query.set('reportId', params.reportId.trim());
-  } else {
-    query.set('symbol', params.symbol);
-    query.set('style', params.tradingStyle);
-    query.set('days', String(params.days ?? 14));
-    query.set('aiMode', params.aiMode ?? 'shadow');
-    if (params.maxTradesPerDay != null) {
-      query.set('maxTrades', String(params.maxTradesPerDay));
-    }
+  }
+  query.set('symbol', params.symbol);
+  query.set('style', params.tradingStyle);
+  query.set('days', String(params.days ?? 14));
+  query.set('aiMode', params.aiMode ?? 'shadow');
+  if (params.maxTradesPerDay != null) {
+    query.set('maxTrades', String(params.maxTradesPerDay));
   }
   return `${base}/benchmark/?${query.toString()}`;
 }

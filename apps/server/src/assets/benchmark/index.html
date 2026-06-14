@@ -14,8 +14,14 @@
   <body>
     <div id="loading-overlay" class="loading-overlay" aria-live="polite" aria-busy="true">
       <div class="loading-spinner" role="status"></div>
-      <span class="loading-text">Running backtest…</span>
-      <span class="loading-sub">Fetching candles &amp; replaying signals</span>
+      <span class="loading-text" id="loading-text">Running backtest…</span>
+      <span class="loading-sub" id="loading-sub">Fetching candles &amp; replaying signals</span>
+      <div class="progress-wrap hidden" id="progress-wrap">
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+        <span class="progress-percent" id="progress-percent">0%</span>
+      </div>
     </div>
 
     <div id="app" class="hidden">

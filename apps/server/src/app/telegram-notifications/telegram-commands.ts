@@ -58,7 +58,6 @@ import {
 } from './message-layout';
 import { withTimeout } from '../promise-timeout';
 import { toErrorMessage } from '../error-message';
-import { shortIndexLabel } from './command-args';
 import { buildNowTelegramMessage } from './now-command';
 import {
   formatVoicePreviewMessage,
@@ -89,11 +88,14 @@ import {
   parseAiCommandArgs,
 } from './ai-command';
 import { AIProvider } from '../types/ai-agent';
+import { enqueueBenchmarkJob } from '../benchmark/benchmark-jobs';
 import {
-  buildBenchmarkTelegramMessage,
+  buildBenchmarkCompletionFromJob,
   formatBenchmarkHelpMessage,
+  formatBenchmarkStartedMessage,
   isBenchmarkHelpRequest,
   parseBenchmarkCommandArgs,
+  queueBenchmarkJobFromCommand,
 } from './benchmark-command';
 interface TelegramUpdate {
   update_id: number;
@@ -898,15 +900,6 @@ export class TelegramCommandPoller {
 
     this.benchmarkInFlight = true;
     try {
-      await this.deps.sendMessage(
-        joinTelegramLines(
-          '⏳ <b>Fetching data…</b>',
-          `📐 Backtest · ${shortIndexLabel(parsed.symbol)} · ${tradingStyleLabel(parsed.style)} · ${parsed.days}d`,
-          '<i>Usually 30–90s. Deck &amp; other commands should stay responsive.</i>',
-        ),
-        { ...reply, skipMessageTracking: true },
-      );
-
       const sessionReady = await withTimeout(
         this.fastify.ensureFyersSession({ verifyWithApi: true }),
         20_000,
@@ -920,40 +913,71 @@ export class TelegramCommandPoller {
         return;
       }
 
-      const result = await withTimeout(
-        buildBenchmarkTelegramMessage(this.fastify, {
-          text,
-          defaultSymbol,
-          defaultStyle,
-        }),
-        180_000,
-        'Benchmark replay',
+      const { jobId, progressUrl } = await queueBenchmarkJobFromCommand(
+        this.fastify,
+        parsed,
+        replyChatId,
       );
 
-      if (result.error) {
-        const opts = isFyersAuthError(result.error)
-          ? this.fyersAuthReplyOptions(replyChatId)
-          : reply;
-        await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
-        return;
-      }
+      const startedReply: TelegramSendOptions = {
+        ...reply,
+        skipMessageTracking: true,
+        inlineKeyboard: progressUrl
+          ? [[{ text: '📊 Watch progress', webAppUrl: progressUrl }]]
+          : undefined,
+      };
+      await this.deps.sendMessage(
+        formatBenchmarkStartedMessage(parsed),
+        startedReply,
+      );
 
-      if (!result.message?.trim()) {
-        await this.deps.sendMessage(
-          '⚠️ Benchmark finished but produced no summary — try a shorter window (e.g. <code>/benchmark 14</code>).',
-          reply,
-        );
-        return;
-      }
+      enqueueBenchmarkJob(this.fastify, jobId, async (job) => {
+        try {
+          if (!job || job.status === 'failed') {
+            const errText = job?.error ?? 'Benchmark failed — try a shorter window.';
+            const opts = isFyersAuthError(errText)
+              ? this.fyersAuthReplyOptions(replyChatId)
+              : reply;
+            await this.deps.sendMessage(`⚠️ ${errText}`, opts);
+            return;
+          }
 
-      await this.sendBenchmarkResultMessage(result, parsed, reply);
+          const result = await buildBenchmarkCompletionFromJob(
+            this.fastify,
+            jobId,
+            parsed,
+          );
+          if (result.error) {
+            const opts = isFyersAuthError(result.error)
+              ? this.fyersAuthReplyOptions(replyChatId)
+              : reply;
+            await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+            return;
+          }
+          if (!result.message?.trim()) {
+            await this.deps.sendMessage(
+              '⚠️ Benchmark finished but produced no summary — try <code>/benchmark 14</code>.',
+              reply,
+            );
+            return;
+          }
+          await this.sendBenchmarkResultMessage(result, parsed, reply);
+        } catch (err) {
+          this.fastify.log.warn({ err, jobId }, 'benchmark completion notify failed');
+          await this.deps.sendMessage(
+            `⚠️ ${toErrorMessage(err)}`,
+            reply,
+          );
+        } finally {
+          this.benchmarkInFlight = false;
+        }
+      });
     } catch (err) {
       this.fastify.log.warn({ err }, 'benchmark command failed');
       const opts = isFyersAuthError(toErrorMessage(err))
         ? this.fyersAuthReplyOptions(replyChatId)
         : reply;
       await this.deps.sendMessage(`⚠️ ${toErrorMessage(err)}`, opts);
-    } finally {
       this.benchmarkInFlight = false;
     }
   }
