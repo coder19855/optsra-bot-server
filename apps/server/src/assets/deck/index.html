@@ -67,37 +67,15 @@
         <button type="button" class="tab-btn" data-tab="events">Events</button>
       </nav>
 
-      <section id="veto-panel" class="veto-panel" aria-label="Veto">
+      <section id="session-rail" class="session-rail hidden" aria-label="Session timeline">
         <div id="veto-timeline-wrap" class="veto-timeline-wrap hidden">
-          <div class="veto-panel-subhead">Veto timeline</div>
+          <div class="session-rail-label">Veto timeline</div>
           <div id="veto-strip" class="veto-strip" title="Amber = chart veto blocked entry"></div>
         </div>
-
-        <div class="veto-mode-bar" id="veto-mode-bar">
-          <span class="veto-mode-label">Veto mode</span>
-          <div class="veto-mode-options" id="veto-mode-options">
-            <button type="button" class="veto-mode-btn" data-veto-mode="strict">Strict</button>
-            <button type="button" class="veto-mode-btn" data-veto-mode="relaxed">Relaxed</button>
-            <button type="button" class="veto-mode-btn" data-veto-mode="off">Off</button>
-          </div>
-        </div>
-        <p id="veto-mode-note" class="veto-mode-note hidden"></p>
-
-        <div id="replay-dock" class="replay-dock replay-only replay-dock-inline hidden">
+        <div id="replay-dock" class="replay-dock replay-only hidden">
           <div class="replay-meta" id="replay-meta">—</div>
           <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
         </div>
-
-        <section id="veto-dock" class="veto-dock collapsed" aria-label="Veto breakup">
-          <button type="button" id="veto-dock-toggle" class="veto-dock-toggle" aria-expanded="false">
-            <span id="veto-dock-summary" class="veto-dock-summary">Veto breakup</span>
-            <span class="veto-dock-chevron" aria-hidden="true">›</span>
-          </button>
-          <div id="veto-dock-body" class="veto-dock-body">
-            <span id="veto-breakup-note" class="veto-dock-note hidden"></span>
-            <div id="veto-breakup" class="veto-breakup-list"></div>
-          </div>
-        </section>
       </section>
 
       <div id="tab-signal" class="tab-panel active">
@@ -181,12 +159,25 @@
       </div>
 
       <div id="tab-veto" class="tab-panel">
-        <section class="veto-breakup-block veto-tab-panel">
-          <div class="panel-head">
-            <span>Veto breakup</span>
-            <span class="panel-note">Sorted: block → warn → eased → ok</span>
+        <section id="veto-panel" class="veto-tab-panel">
+          <div class="veto-mode-bar" id="veto-mode-bar">
+            <span class="veto-mode-label">Veto mode</span>
+            <div class="veto-mode-options" id="veto-mode-options">
+              <button type="button" class="veto-mode-btn" data-veto-mode="strict">Strict</button>
+              <button type="button" class="veto-mode-btn" data-veto-mode="relaxed">Relaxed</button>
+              <button type="button" class="veto-mode-btn" data-veto-mode="off">Off</button>
+            </div>
           </div>
-          <div id="veto-breakup-tab" class="veto-breakup-list"></div>
+          <p id="veto-mode-note" class="veto-mode-note hidden"></p>
+
+          <section class="veto-breakup-block">
+            <div class="panel-head">
+              <span>Veto breakup</span>
+              <span id="veto-breakup-summary" class="panel-note">—</span>
+            </div>
+            <p id="veto-breakup-note" class="veto-breakup-note hidden" role="status"></p>
+            <div id="veto-breakup" class="veto-breakup-list"></div>
+          </section>
         </section>
       </div>
 

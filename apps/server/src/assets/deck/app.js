@@ -59,11 +59,8 @@
     paDrilldownToggle: document.getElementById('pa-drilldown-toggle'),
     optionComponentsNote: document.getElementById('option-components-note'),
     vetoBreakup: document.getElementById('veto-breakup'),
-    vetoBreakupTab: document.getElementById('veto-breakup-tab'),
     vetoBreakupNote: document.getElementById('veto-breakup-note'),
-    vetoDock: document.getElementById('veto-dock'),
-    vetoDockToggle: document.getElementById('veto-dock-toggle'),
-    vetoDockSummary: document.getElementById('veto-dock-summary'),
+    vetoBreakupSummary: document.getElementById('veto-breakup-summary'),
     vetoTabBadge: document.getElementById('veto-tab-badge'),
     signalVetoNotice: document.getElementById('signal-veto-notice'),
     signalFlowNote: document.getElementById('signal-flow-note'),
@@ -83,6 +80,7 @@
     marketRegimeLabel: document.getElementById('market-regime-label'),
     marketRegimeConfirm: document.getElementById('market-regime-confirm'),
     marketRegimeHint: document.getElementById('market-regime-hint'),
+    sessionRail: document.getElementById('session-rail'),
     vetoPanel: document.getElementById('veto-panel'),
     vetoTimelineWrap: document.getElementById('veto-timeline-wrap'),
     vetoStrip: document.getElementById('veto-strip'),
@@ -474,18 +472,26 @@
     }
   }
 
-  function syncVetoPanelVisibility() {
+  function syncSessionRailVisibility() {
     if (els.vetoTimelineWrap) {
       els.vetoTimelineWrap.classList.toggle('hidden', !vetoTimeline.length);
     }
     if (els.replayDock) {
       els.replayDock.classList.toggle('hidden', currentMode !== 'replay');
     }
+    if (els.sessionRail) {
+      const showRail = vetoTimeline.length > 0 || currentMode === 'replay';
+      els.sessionRail.classList.toggle('hidden', !showRail);
+      els.sessionRail.classList.toggle(
+        'has-replay-scrub',
+        currentMode === 'replay',
+      );
+    }
   }
 
   function setVetoTimeline(nextTimeline, activeIndex) {
     vetoTimeline = nextTimeline || [];
-    syncVetoPanelVisibility();
+    syncSessionRailVisibility();
     if (vetoTimeline.length) {
       renderVetoStrip(
         activeIndex == null ? Math.max(0, vetoTimeline.length - 1) : activeIndex,
@@ -816,39 +822,25 @@
     return counts;
   }
 
-  function formatVetoDockSummary(items) {
+  function formatVetoBreakupSummary(items) {
     const counts = summarizeVetoBreakup(items);
     const parts = [];
-    if (counts.block) parts.push(`<span class="count-block">${counts.block} BLOCK</span>`);
-    if (counts.warn) parts.push(`<span class="count-warn">${counts.warn} WARN</span>`);
-    if (counts.skipped) parts.push(`<span class="count-eased">${counts.skipped} EASED</span>`);
-    if (counts.ok) parts.push(`<span class="count-ok">${counts.ok} OK</span>`);
-    if (!parts.length) return 'Veto breakup';
-    return parts.join(' · ');
-  }
-
-  let vetoDockOpen = false;
-  let vetoDockTouched = false;
-
-  function setVetoDockOpen(open) {
-    vetoDockOpen = open;
-    if (els.vetoDock) {
-      els.vetoDock.classList.toggle('collapsed', !open);
-    }
-    if (els.vetoDockToggle) {
-      els.vetoDockToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    }
+    if (counts.block) parts.push(`${counts.block} BLOCK`);
+    if (counts.warn) parts.push(`${counts.warn} WARN`);
+    if (counts.skipped) parts.push(`${counts.skipped} EASED`);
+    if (counts.ok) parts.push(`${counts.ok} OK`);
+    return parts.length ? parts.join(' · ') : 'Sorted: block → warn → eased → ok';
   }
 
   function updateVetoChrome(items) {
     const sorted = sortVetoBreakupItems(items);
     const counts = summarizeVetoBreakup(sorted);
 
-    if (els.vetoDockSummary) {
-      els.vetoDockSummary.innerHTML = formatVetoDockSummary(sorted);
+    if (els.vetoBreakupSummary) {
+      els.vetoBreakupSummary.textContent = formatVetoBreakupSummary(sorted);
     }
-    if (els.vetoDock) {
-      els.vetoDock.classList.toggle('has-block', counts.block > 0);
+    if (els.vetoPanel) {
+      els.vetoPanel.classList.toggle('has-block', counts.block > 0);
     }
     if (els.vetoTabBadge) {
       if (counts.block > 0) {
@@ -865,13 +857,6 @@
       }
     }
     return sorted;
-  }
-
-  if (els.vetoDockToggle) {
-    els.vetoDockToggle.addEventListener('click', () => {
-      vetoDockTouched = true;
-      setVetoDockOpen(!vetoDockOpen);
-    });
   }
 
   function analyzeVetoScoreImpact(items) {
@@ -2529,7 +2514,7 @@
     renderComponentList(els.paComponents, tick.priceActionComponents, 'pa');
     renderPaDrilldown(tick.paDrilldown);
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupTab],
+      els.vetoBreakup,
       tick.vetoBreakup,
       tick.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
       buildFlowVetoContext(tick),
@@ -2602,7 +2587,7 @@
     renderComponentList(els.paComponents, data.priceActionComponents, 'pa');
     renderPaDrilldown(data.paDrilldown);
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupTab],
+      els.vetoBreakup,
       data.vetoBreakup,
       data.chartVetoed ? vetoModeStatusText(serverVetoMode) : '',
       buildFlowVetoContext(data),
@@ -2631,7 +2616,7 @@
         btn.disabled = true;
       });
     }
-    syncVetoPanelVisibility();
+    syncSessionRailVisibility();
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
@@ -2677,7 +2662,7 @@
         btn.disabled = true;
       });
     }
-    syncVetoPanelVisibility();
+    syncSessionRailVisibility();
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
@@ -3126,7 +3111,7 @@
     renderComponentList(els.paComponents, point.paComponents || [], 'pa');
     renderPaDrilldown(point.paDrilldown);
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupTab],
+      els.vetoBreakup,
       point.vetoBreakup || [],
       display.statusSuffix ? display.statusSuffix.replace(/^ · /, '') : '',
       buildFlowVetoContext({
@@ -3169,9 +3154,9 @@
     replayEntryThreshold = Number(data.entryThreshold) || 60;
     replayBaseVetoTimeline = data.vetoTimeline || [];
     setVetoTimeline(buildVetoTimelineForMode(replayPoints, vetoMode), replayPoints.length - 1);
-    syncVetoPanelVisibility();
+    syncSessionRailVisibility();
     renderVetoBreakup(
-      [els.vetoBreakup, els.vetoBreakupTab],
+      els.vetoBreakup,
       data.vetoBreakup || [],
       '',
       buildFlowVetoContext(data),
@@ -3250,7 +3235,7 @@
       else {
         document.body.classList.remove('replay-mode');
         applyLive(data);
-        syncVetoPanelVisibility();
+        syncSessionRailVisibility();
       }
       if (deckHasRenderableContent(data)) {
         hasDisplayedDeck = true;
