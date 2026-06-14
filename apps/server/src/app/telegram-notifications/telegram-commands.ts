@@ -80,6 +80,8 @@ import {
   parseAiCommandArgs,
 } from './ai-command';
 import { AIProvider } from '../types/ai-agent';
+import { buildBenchmarkTelegramMessage } from './benchmark-command';
+import { buildBenchmarkWebAppUrl } from './deck-url';
 
 interface TelegramUpdate {
   update_id: number;
@@ -134,6 +136,7 @@ export class TelegramCommandPoller {
   private errorBackoffMs =
     TELEGRAM_NOTIFICATION_DEFAULTS.COMMAND_POLL_INTERVAL_MS;
   private coachInFlight = false;
+  private benchmarkInFlight = false;
   private readonly seenUpdateIds = new Set<number>();
 
   constructor(
@@ -275,6 +278,8 @@ export class TelegramCommandPoller {
         command === '/fyersusage'
       ) {
         await this.handleFyersUsage(replyChatId);
+      } else if (command === '/benchmark' || command === '/backtest') {
+        await this.handleBenchmark(text, replyChatId);
       } else if (command === '/outcomes') {
         await this.handleOutcomes(replyChatId);
       } else if (command === '/conviction') {
@@ -757,6 +762,69 @@ export class TelegramCommandPoller {
     } finally {
       this.coachInFlight = false;
       this.deps.onCoachCommandEnd?.();
+    }
+  }
+
+  private async handleBenchmark(
+    text: string,
+    replyChatId?: number,
+  ): Promise<void> {
+    if (this.benchmarkInFlight) {
+      await this.deps.sendMessage(
+        '⏳ Benchmark is already running — this can take a minute.',
+        this.replyOptions(replyChatId),
+      );
+      return;
+    }
+
+    this.benchmarkInFlight = true;
+    try {
+      const sessionReady = await this.fastify.ensureFyersSession({
+        verifyWithApi: true,
+      });
+      if (!sessionReady) {
+        await this.deps.sendMessage(
+          FYERS_AUTH_ERROR_REPLY,
+          this.fyersAuthReplyOptions(replyChatId),
+        );
+        return;
+      }
+
+      const defaultSymbol =
+        this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
+      const defaultStyle =
+        this.deps.watchedStyles[0] ?? TradingStyle.Intraday;
+
+      const result = await buildBenchmarkTelegramMessage(this.fastify, {
+        text,
+        defaultSymbol,
+        defaultStyle,
+      });
+
+      if (result.error) {
+        const opts = isFyersAuthError(result.error)
+          ? this.fyersAuthReplyOptions(replyChatId)
+          : this.replyOptions(replyChatId);
+        await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
+        return;
+      }
+
+      const reportUrl =
+        result.reportUrl ??
+        buildBenchmarkWebAppUrl({
+          symbol: defaultSymbol,
+          tradingStyle: String(defaultStyle),
+        });
+
+      const sendOpts: TelegramSendOptions = {
+        ...this.replyOptions(replyChatId),
+        inlineKeyboard: reportUrl
+          ? [[{ text: '📊 Visual report', webAppUrl: reportUrl }]]
+          : undefined,
+      };
+      await this.deps.sendMessage(result.message, sendOpts);
+    } finally {
+      this.benchmarkInFlight = false;
     }
   }
 

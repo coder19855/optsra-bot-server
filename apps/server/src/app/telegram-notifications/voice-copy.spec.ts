@@ -72,17 +72,17 @@ describe('tpHoldHeadline', () => {
       }),
     ).toContain('stop na lage tab tak hold');
   });
-  it('localizes 1:2 trail advice in marathi voice', () => {
+  it('localizes 1:2.5 trail advice in marathi voice', () => {
     const line = tpHoldHeadline({
       voice: 'marathi',
       original:
-        '1:2 target hit — trail stop and hold for 1:3 if momentum stays clean.',
+        '1:2.5 locked — trail toward 1:4; floor protects at 1:2.5 on reversal.',
       holdAdvice: 'trail',
       alertKind: 'HOLD_REVIEW',
-      highestHitRr: '1:2',
+      highestHitRr: '1:2.5',
     });
-    expect(line).toContain('1:2');
-    expect(line).not.toContain('target hit');
+    expect(line).toContain('1:2.5');
+    expect(line).toContain('1:4');
   });
 });
 

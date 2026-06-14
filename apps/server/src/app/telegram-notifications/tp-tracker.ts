@@ -111,6 +111,10 @@ export function buildTpMonitorSnapshot(
           : previous?.approachingTpRr ?? null,
     lastHoldAdvice: evaluation.holdAdvice,
     lastAlertKind: evaluation.alertKind,
+    oppositeExitStreak: evaluation.oppositeExitStreak ?? 0,
+    awaitingOppositeExitConfirmation:
+      evaluation.awaitingOppositeExitConfirmation ?? false,
+    peakR: Math.max(previous?.peakR ?? 0, evaluation.currentR),
     updatedAt: now,
     lastNotifiedAt: notified ? now : previous?.lastNotifiedAt,
     lastPositionHealthScore: evaluation.managementAdvice?.positionHealth?.score ?? previous?.lastPositionHealthScore,

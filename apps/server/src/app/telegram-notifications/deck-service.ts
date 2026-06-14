@@ -41,9 +41,9 @@ import {
   timelineToConvictionSeries,
 } from './deck-replay-utils';
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
-import { loadFlowPreference } from './flow-preference';
-import { loadVetoPreference, VetoMode } from './veto-preference';
+import { VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
+import { DECK_LIVE_TIMELINE } from '../constants/technical-analysis';
 import { ConvictionBonus } from '../types/trade-decision';
 import {
   toManagementDecisionPayload,
@@ -509,12 +509,96 @@ async function fetchDeckTradeDecision(
   return body as DeckTradeDecision;
 }
 
+function resolveDeckPreferences(fastify: FastifyInstance): {
+  vetoMode: VetoMode;
+  flowMode: FlowMode;
+} {
+  return {
+    vetoMode: fastify.telegramNotifications?.getVetoMode?.() ?? 'strict',
+    flowMode: fastify.telegramNotifications?.getFlowMode?.() ?? 'blend',
+  };
+}
+
+type TimelineResponse = {
+  points?: Array<Record<string, unknown>>;
+  spotCandles?: {
+    '5m': DeckCandlePoint[];
+    '15m': DeckCandlePoint[];
+    '1h': DeckCandlePoint[];
+  };
+};
+
+function multiCandlesFromTimeline(
+  timeline: TimelineResponse | null,
+  toMs: number,
+): { c5: DeckCandlePoint[]; c15: DeckCandlePoint[]; c1h: DeckCandlePoint[] } {
+  const session = buildIstChartSession(toMs);
+  const raw = timeline?.spotCandles;
+  if (raw) {
+    return {
+      c5: filterCandlesToIstSession(raw['5m'] ?? [], session),
+      c15: filterCandlesToIstSession(raw['15m'] ?? [], session),
+      c1h: filterCandlesToIstSession(raw['1h'] ?? [], session),
+    };
+  }
+  return { c5: [], c15: [], c1h: [] };
+}
+
+async function buildDeckManagementContext(
+  fastify: FastifyInstance,
+  decision: DeckTradeDecision,
+  style: TradingStyle,
+  indexSymbol: string,
+): Promise<PositionManagementContext> {
+  try {
+    const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
+    const base = {
+      hasOpenPosition: ctx.count > 0,
+      heldDirection: ctx.heldDirection,
+      isMixedDirections: ctx.isMixedDirections,
+      count: ctx.count,
+    };
+
+    if (ctx.count > 0) {
+      const advice = computeManagementAdvice(
+        ctx,
+        toManagementDecisionPayload({
+          action: decision.action,
+          conviction: decision.conviction,
+          overallSignal: decision.priceAction.overallSignal,
+        }),
+        resolveManagementPriceData(decision),
+        style,
+      );
+      return {
+        hasOpenPosition: true,
+        heldDirection: ctx.heldDirection,
+        isMixedDirections: ctx.isMixedDirections,
+        count: ctx.count,
+        advice,
+        note: advice.headline,
+        health: advice.positionHealth,
+      };
+    }
+    return { ...base, hasOpenPosition: false };
+  } catch {
+    return { hasOpenPosition: false };
+  }
+}
+
 async function fetchTimeline(
   fastify: FastifyInstance,
   symbol: string,
   tradingStyle: TradingStyle,
-  options?: { sessionOnly?: boolean; to?: string; days?: number; interval?: number },
-): Promise<any | null> {
+  options?: {
+    sessionOnly?: boolean;
+    to?: string;
+    days?: number;
+    interval?: number;
+    maxPoints?: number;
+    includeCandles?: boolean;
+  },
+): Promise<TimelineResponse | null> {
   const params = new URLSearchParams();
   params.set('symbol', symbol);
   if (tradingStyle) params.set('tradingStyle', String(tradingStyle));
@@ -522,6 +606,10 @@ async function fetchTimeline(
   if (options?.to) params.set('to', String(options.to));
   if (options?.days !== undefined) params.set('days', String(options.days));
   if (options?.interval !== undefined) params.set('interval', String(options.interval));
+  if (options?.maxPoints !== undefined) {
+    params.set('maxPoints', String(options.maxPoints));
+  }
+  if (options?.includeCandles) params.set('includeCandles', 'true');
 
   try {
     const res = await fastify.inject({
@@ -626,6 +714,25 @@ async function resolveMultiTimeframeCandles(
   };
 }
 
+/** Fallback when timeline omits candles (e.g. upstream error). */
+async function ensureTimelineHasCandles(
+  fastify: FastifyInstance,
+  timeline: TimelineResponse | null,
+  symbol: string,
+  toMs: number,
+): Promise<TimelineResponse | null> {
+  if (timeline?.spotCandles?.['5m']?.length) return timeline;
+  const multi = await resolveMultiTimeframeCandles(fastify, symbol, toMs);
+  return {
+    ...(timeline ?? {}),
+    spotCandles: {
+      '5m': multi.c5,
+      '15m': multi.c15,
+      '1h': multi.c1h,
+    },
+  };
+}
+
 async function fetchSpotCandlesWithResolution(
   fastify: FastifyInstance,
   symbol: string,
@@ -657,28 +764,31 @@ async function fetchSpotCandlesWithResolution(
   }
 }
 
-export async function buildDeckLivePayload(
+function assembleLivePayloadParts(
   fastify: FastifyInstance,
-  params: { symbol: string; tradingStyle?: string },
-): Promise<DeckLivePayload> {
-  const sessionReady = await fastify.ensureFyersSession({ verifyWithApi: true });
-  if (!sessionReady) {
-    throw new Error(
-      'Fyers session expired — log in again to load live deck data.',
-    );
-  }
-
-  const style = parseTradingStyle(params.tradingStyle);
-  const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
-  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
-  const decision = await fetchDeckTradeDecision(
-    fastify,
-    params.symbol,
+  params: {
+    symbol: string;
+    style: TradingStyle;
+    decision: DeckTradeDecision;
+    timeline: TimelineResponse | null;
+    vetoMode: VetoMode;
+    flowMode: FlowMode;
+    openPositions: DeckOpenPositionsPayload;
+    managementContext: PositionManagementContext;
+    strategyRecommendation: DeckStrategyPayload;
+    toMs?: number;
+  },
+): DeckLivePayload {
+  const {
+    decision,
+    timeline,
     style,
-    vetoState.vetoMode,
-    flowState.flowMode,
-    { sessionVerified: true },
-  );
+    vetoMode,
+    flowMode,
+    openPositions,
+    managementContext,
+    strategyRecommendation,
+  } = params;
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
   const primaryScore =
@@ -695,11 +805,10 @@ export async function buildDeckLivePayload(
     hasMomentumDecay: Boolean(decision.momentumDecay?.decayPercent),
   });
 
-  const timeline = await fetchTimeline(fastify, params.symbol, style);
   const points = timeline?.points ?? [];
-  const recent = points.slice(-48);
-
-  const marketOpen = isIndianMarketOpen(Date.now());
+  const recent = points;
+  const toMs = params.toMs ?? Date.now();
+  const marketOpen = isIndianMarketOpen(toMs);
   const indexSymbol = decision.symbol || params.symbol;
   const liveLastPrice = resolveLiveIndexPrice(
     fastify,
@@ -713,19 +822,14 @@ export async function buildDeckLivePayload(
     streamSpotSeries,
   );
 
-  const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
+  const chartVetoed = liveChartVetoed(decision, vetoMode);
   const laneMeta = buildDeckLaneMeta(decision, gauges);
-
-  const multiCandles = await resolveMultiTimeframeCandles(
-    fastify,
-    indexSymbol,
-    Date.now(),
-  );
+  const multiCandles = multiCandlesFromTimeline(timeline, toMs);
 
   return {
     mode: 'live',
-    symbol: decision.symbol || params.symbol,
-    symbolLabel: shortSymbol(decision.symbol || params.symbol),
+    symbol: indexSymbol,
+    symbolLabel: shortSymbol(indexSymbol),
     tradingStyle: String(style),
     asOf: new Date().toISOString(),
     marketOpen,
@@ -737,13 +841,15 @@ export async function buildDeckLivePayload(
     entryThreshold: resolveEntryThreshold(decision, style),
     lastPrice: liveLastPrice,
     chartVetoed,
-    vetoMode: vetoState.vetoMode,
-    vetoOff: isVetoOff(vetoState.vetoMode),
-    flowMode: flowState.flowMode,
+    vetoMode,
+    vetoOff: isVetoOff(vetoMode),
+    flowMode,
     gauges,
     lanes: laneMeta.lanes,
     spotSeries,
-    spotCandles: multiCandles.c5.length ? multiCandles.c5 : spotSeriesToSyntheticCandles(spotSeries),
+    spotCandles: multiCandles.c5.length
+      ? multiCandles.c5
+      : spotSeriesToSyntheticCandles(spotSeries),
     spotCandles5m: multiCandles.c5,
     spotCandles15m: multiCandles.c15,
     spotCandles1h: multiCandles.c1h,
@@ -769,74 +875,204 @@ export async function buildDeckLivePayload(
     vetoTimeline: timelineToVetoSeries(recent),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
-    vetoBreakup: extractVetoBreakup(
-      decision,
-      vetoState.vetoMode,
-      flowState.flowMode,
-    ),
+    vetoBreakup: extractVetoBreakup(decision, vetoMode, flowMode),
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
-    strategyRecommendation: await extractStrategyRecommendation(
-      fastify,
-      decision,
-      style,
-      {
-        marketRegime: extractMarketRegime(decision, style, {
-          flowMode: flowState.flowMode,
-          vetoMode: vetoState.vetoMode,
-        }),
-      },
-    ),
+    strategyRecommendation,
     patternContext: extractPatternContext(decision, spotSeries),
     patternInsights: extractPatternInsights(decision),
-    openPositions: await buildDeckOpenPositions(fastify, {
-      watchedIndexSymbol: indexSymbol,
-      ivRegime: decision.optionFlow?.ivRegime,
-    }),
+    openPositions,
     marketRegime: extractMarketRegime(decision, style, {
-      flowMode: flowState.flowMode,
-      vetoMode: vetoState.vetoMode,
+      flowMode,
+      vetoMode,
     }),
-    // Robust live position context + rich Management Brain advice.
-    // This is what should drive UI behavior when the user is holding.
-    managementContext: await (async () => {
-      try {
-        const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
-        const base = {
-          hasOpenPosition: ctx.count > 0,
-          heldDirection: ctx.heldDirection,
-          isMixedDirections: ctx.isMixedDirections,
-          count: ctx.count,
-        };
-
-        if (ctx.count > 0) {
-          const advice = computeManagementAdvice(
-            ctx,
-            toManagementDecisionPayload({
-              action: decision.action,
-              conviction: decision.conviction,
-              overallSignal: decision.priceAction.overallSignal,
-            }),
-            resolveManagementPriceData(decision),
-            style,
-          );
-          const context: PositionManagementContext = {
-            hasOpenPosition: true,
-            heldDirection: ctx.heldDirection,
-            isMixedDirections: ctx.isMixedDirections,
-            count: ctx.count,
-            advice,
-            note: advice.headline,
-            health: advice.positionHealth,
-          };
-          return context;
-        }
-        return { ...base, hasOpenPosition: false };
-      } catch {
-        return { hasOpenPosition: false, fetchError: true };
-      }
-    })(),
+    managementContext,
   };
+}
+
+export type DeckLiveEnrichmentPayload = Pick<
+  DeckLivePayload,
+  | 'symbol'
+  | 'symbolLabel'
+  | 'tradingStyle'
+  | 'vetoMode'
+  | 'vetoOff'
+  | 'flowMode'
+  | 'chartVetoed'
+  | 'spotSeries'
+  | 'spotCandles'
+  | 'spotCandles5m'
+  | 'spotCandles15m'
+  | 'spotCandles1h'
+  | 'convictionSeries'
+  | 'markers'
+  | 'events'
+  | 'vetoTimeline'
+  | 'strategyRecommendation'
+  | 'patternContext'
+  | 'patternInsights'
+  | 'openPositions'
+  | 'managementContext'
+  | 'marketRegime'
+>;
+
+export async function buildDeckLiveEnrichmentPayload(
+  fastify: FastifyInstance,
+  params: { symbol: string; tradingStyle?: string },
+): Promise<DeckLiveEnrichmentPayload> {
+  const sessionReady = await fastify.ensureFyersSession();
+  if (!sessionReady) {
+    throw new Error(
+      'Fyers session expired — log in again to load live deck data.',
+    );
+  }
+
+  const style = parseTradingStyle(params.tradingStyle);
+  const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
+
+  const [decision, timeline] = await Promise.all([
+    fetchDeckTradeDecision(
+      fastify,
+      params.symbol,
+      style,
+      vetoMode,
+      flowMode,
+      { sessionVerified: true },
+    ),
+    fetchTimeline(fastify, params.symbol, style, {
+      days: DECK_LIVE_TIMELINE.DAYS,
+      maxPoints: DECK_LIVE_TIMELINE.MAX_POINTS,
+      includeCandles: true,
+    }),
+  ]);
+
+  const indexSymbol = decision.symbol || params.symbol;
+  const timelineWithCandles = await ensureTimelineHasCandles(
+    fastify,
+    timeline,
+    indexSymbol,
+    Date.now(),
+  );
+  const marketRegime = extractMarketRegime(decision, style, {
+    flowMode,
+    vetoMode,
+  });
+
+  const [openPositions, managementContext, strategyRecommendation] =
+    await Promise.all([
+      buildDeckOpenPositions(fastify, {
+        watchedIndexSymbol: indexSymbol,
+        ivRegime: decision.optionFlow?.ivRegime,
+      }),
+      buildDeckManagementContext(fastify, decision, style, indexSymbol),
+      extractStrategyRecommendation(fastify, decision, style, {
+        marketRegime,
+      }),
+    ]);
+
+  const full = assembleLivePayloadParts(fastify, {
+    symbol: params.symbol,
+    style,
+    decision,
+    timeline: timelineWithCandles,
+    vetoMode,
+    flowMode,
+    openPositions,
+    managementContext,
+    strategyRecommendation,
+  });
+
+  return {
+    symbol: full.symbol,
+    symbolLabel: full.symbolLabel,
+    tradingStyle: full.tradingStyle,
+    vetoMode: full.vetoMode,
+    vetoOff: full.vetoOff,
+    flowMode: full.flowMode,
+    chartVetoed: full.chartVetoed,
+    spotSeries: full.spotSeries,
+    spotCandles: full.spotCandles,
+    spotCandles5m: full.spotCandles5m,
+    spotCandles15m: full.spotCandles15m,
+    spotCandles1h: full.spotCandles1h,
+    convictionSeries: full.convictionSeries,
+    markers: full.markers,
+    events: full.events,
+    vetoTimeline: full.vetoTimeline,
+    strategyRecommendation: full.strategyRecommendation,
+    patternContext: full.patternContext,
+    patternInsights: full.patternInsights,
+    openPositions: full.openPositions,
+    managementContext: full.managementContext,
+    marketRegime: full.marketRegime,
+  };
+}
+
+export async function buildDeckLivePayload(
+  fastify: FastifyInstance,
+  params: { symbol: string; tradingStyle?: string },
+): Promise<DeckLivePayload> {
+  const sessionReady = await fastify.ensureFyersSession();
+  if (!sessionReady) {
+    throw new Error(
+      'Fyers session expired — log in again to load live deck data.',
+    );
+  }
+
+  const style = parseTradingStyle(params.tradingStyle);
+  const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
+
+  const [decision, timeline] = await Promise.all([
+    fetchDeckTradeDecision(
+      fastify,
+      params.symbol,
+      style,
+      vetoMode,
+      flowMode,
+      { sessionVerified: true },
+    ),
+    fetchTimeline(fastify, params.symbol, style, {
+      days: DECK_LIVE_TIMELINE.DAYS,
+      maxPoints: DECK_LIVE_TIMELINE.MAX_POINTS,
+      includeCandles: true,
+    }),
+  ]);
+
+  const indexSymbol = decision.symbol || params.symbol;
+  const timelineWithCandles = await ensureTimelineHasCandles(
+    fastify,
+    timeline,
+    indexSymbol,
+    Date.now(),
+  );
+  const marketRegime = extractMarketRegime(decision, style, {
+    flowMode,
+    vetoMode,
+  });
+
+  const [openPositions, managementContext, strategyRecommendation] =
+    await Promise.all([
+      buildDeckOpenPositions(fastify, {
+        watchedIndexSymbol: indexSymbol,
+        ivRegime: decision.optionFlow?.ivRegime,
+      }),
+      buildDeckManagementContext(fastify, decision, style, indexSymbol),
+      extractStrategyRecommendation(fastify, decision, style, {
+        marketRegime,
+      }),
+    ]);
+
+  return assembleLivePayloadParts(fastify, {
+    symbol: params.symbol,
+    style,
+    decision,
+    timeline: timelineWithCandles,
+    vetoMode,
+    flowMode,
+    openPositions,
+    managementContext,
+    strategyRecommendation,
+  });
 }
 
 export async function buildDeckLiveStreamTick(
@@ -844,14 +1080,14 @@ export async function buildDeckLiveStreamTick(
   params: { symbol: string; tradingStyle?: string },
 ): Promise<DeckLiveStreamTick> {
   const style = parseTradingStyle(params.tradingStyle);
-  const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
-  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
+  const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
   const decision = await fetchDeckTradeDecision(
     fastify,
     params.symbol,
     style,
-    vetoState.vetoMode,
-    flowState.flowMode,
+    vetoMode,
+    flowMode,
+    { sessionVerified: true },
   );
   const { price, option } = extractConvictions(decision);
   const primaryTf = primaryTimeframeForStyle(style);
@@ -879,7 +1115,7 @@ export async function buildDeckLiveStreamTick(
   const spotSeries =
     fastify.fyersMarketStream?.getSpotSeries(indexSymbol) ?? [];
 
-  const chartVetoed = liveChartVetoed(decision, vetoState.vetoMode);
+  const chartVetoed = liveChartVetoed(decision, vetoMode);
   const laneMeta = buildDeckLaneMeta(decision, gauges);
 
   return {
@@ -899,128 +1135,33 @@ export async function buildDeckLiveStreamTick(
     spotSeries,
     ...extractComponentGauges(decision),
     paDrilldown: extractPaDrilldown(decision),
-    flowMode: flowState.flowMode,
-    vetoBreakup: extractVetoBreakup(
-      decision,
-      vetoState.vetoMode,
-      flowState.flowMode,
-    ),
+    flowMode,
+    vetoBreakup: extractVetoBreakup(decision, vetoMode, flowMode),
     vetoReason: decision.priceAction.overallSignal.vetoReason,
     structuralAction: decision.priceAction.overallSignal.structuralAction,
     patternContext: extractPatternContext(decision, spotSeries),
     patternInsights: extractPatternInsights(decision),
     marketRegime: extractMarketRegime(decision, style, {
-      flowMode: flowState.flowMode,
-      vetoMode: vetoState.vetoMode,
+      flowMode,
+      vetoMode,
     }),
-    // Live tick also carries rich management context.
-    managementContext: await (async () => {
-      try {
-        const ctx = await getOpenPositionContext(fastify, [indexSymbol]);
-        if (ctx.count > 0) {
-          const advice = computeManagementAdvice(
-            ctx,
-            toManagementDecisionPayload({
-              action: decision.action,
-              conviction: decision.conviction,
-              overallSignal: decision.priceAction.overallSignal,
-            }),
-            {
-              ...resolveManagementPriceData(decision),
-              lastPrice: liveLastPrice,
-            },
-            style,
-          );
-          const context: PositionManagementContext = {
-            hasOpenPosition: true,
-            heldDirection: ctx.heldDirection,
-            isMixedDirections: ctx.isMixedDirections,
-            count: ctx.count,
-            advice,
-            health: advice.positionHealth,
-          };
-          return context;
-        }
-        return { hasOpenPosition: false };
-      } catch {
-        return { hasOpenPosition: false };
-      }
-    })(),
   };
 }
 
-export async function buildDeckReplayPayload(
+export interface DeckReplayTradesPayload {
+  trades: DeckTradeMarker[];
+  pnlSeries: Array<{ t: number; v: number }>;
+  pnlNote?: string;
+}
+
+export async function buildDeckReplayTradesPayload(
   fastify: FastifyInstance,
-  params: { symbol: string; tradingStyle?: string; sessionDate?: string },
-): Promise<DeckReplayPayload> {
+  params: { symbol: string; tradingStyle?: string; sessionDate: string },
+): Promise<DeckReplayTradesPayload> {
   const style = parseTradingStyle(params.tradingStyle);
-  const { sessionDate } = getIstSessionClock(
-    Date.now(),
-    'Asia/Kolkata',
-  );
-  const date = params.sessionDate ?? sessionDate;
-
-  const vetoState = await loadVetoPreference(fastify, { vetoMode: 'strict' });
-  const flowState = await loadFlowPreference(fastify, { flowMode: 'blend' });
-  const decision = await fetchDeckTradeDecision(
-    fastify,
-    params.symbol,
-    style,
-    vetoState.vetoMode,
-    flowState.flowMode,
-  );
-  const { price, option } = extractConvictions(decision);
-  const primaryTf = primaryTimeframeForStyle(style);
-  const primaryScore =
-    decision.priceAction.components[primaryTf]?.score ?? 0;
-
-  const gauges = buildDeckGauges({
-    action: decision.action as 'CE-BUY' | 'PE-BUY' | 'NO-TRADE' | 'NEUTRAL',
-    optionConviction: option,
-    optionBias: decision.optionFlow.bias,
-    optionOverallScore: decision.optionFlow.overallScore,
-    priceConviction: price,
-    priceConvictionBeforeDecay: decision.priceConvictionBeforeDecay,
-    primaryScore,
-    hasMomentumDecay: Boolean(decision.momentumDecay?.decayPercent),
-  });
-
-  const timeline = await fetchTimeline(fastify, params.symbol, style, {
-    sessionOnly: true,
-    to: `${date}T15:30:00+05:30`,
-  });
-  const points = timeline?.points ?? [];
-  const optionSnapshots = await loadOptionChainSnapshotsForSession(
-    fastify,
-    params.symbol,
-    style,
-    date,
-  );
-  let replayPoints = timelineToConvictionSeries(
-    points,
-    style,
-    optionSnapshots,
-    vetoState.vetoMode,
-  );
-  const isCurrentSession = date === sessionDate;
-  if (isCurrentSession && replayPoints.length > 0) {
-    const indexSymbol = decision.symbol || params.symbol;
-    const liveSpot = resolveLiveIndexPrice(
-      fastify,
-      indexSymbol,
-      decision.lastPrice,
-    );
-    replayPoints = syncLastReplayPointToLive(
-      replayPoints,
-      decision,
-      gauges,
-      vetoState.vetoMode,
-      liveSpot,
-    );
-  }
-  const hasHistoricalOptions = optionSnapshots.length > 0;
-
+  const date = params.sessionDate;
   const trades: DeckTradeMarker[] = [];
+
   try {
     const coachRes = await fastify.inject({
       method: 'GET',
@@ -1037,9 +1178,7 @@ export async function buildDeckReplayPayload(
           analysis: { verdict: string };
         }>;
       };
-      let cumPnl = 0;
       for (const report of coach.trades) {
-        cumPnl += report.trade.pnlInr;
         const label = report.trade.optionSymbol.split(':').pop() ?? 'trade';
         trades.push({
           t: report.trade.entryAtMs,
@@ -1061,35 +1200,137 @@ export async function buildDeckReplayPayload(
     pnlSeries.push({ t: trade.t, v: running });
   }
 
-  const toMs = Date.parse(`${date}T15:30:00+05:30`);
+  return {
+    trades,
+    pnlSeries,
+    pnlNote:
+      trades.length === 0
+        ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'
+        : undefined,
+  };
+}
+
+export async function buildDeckReplayPayload(
+  fastify: FastifyInstance,
+  params: { symbol: string; tradingStyle?: string; sessionDate?: string },
+): Promise<DeckReplayPayload> {
+  const style = parseTradingStyle(params.tradingStyle);
+  const { sessionDate } = getIstSessionClock(
+    Date.now(),
+    'Asia/Kolkata',
+  );
+  const date = params.sessionDate ?? sessionDate;
+  const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
+
+  const sessionEndIso = `${date}T15:30:00+05:30`;
+  const [decision, timeline, optionSnapshots] = await Promise.all([
+    fetchDeckTradeDecision(
+      fastify,
+      params.symbol,
+      style,
+      vetoMode,
+      flowMode,
+      { sessionVerified: true },
+    ),
+    fetchTimeline(fastify, params.symbol, style, {
+      sessionOnly: true,
+      to: sessionEndIso,
+      includeCandles: true,
+    }),
+    loadOptionChainSnapshotsForSession(
+      fastify,
+      params.symbol,
+      style,
+      date,
+    ),
+  ]);
+
+  const { price, option } = extractConvictions(decision);
+  const primaryTf = primaryTimeframeForStyle(style);
+  const primaryScore =
+    decision.priceAction.components[primaryTf]?.score ?? 0;
+
+  const gauges = buildDeckGauges({
+    action: decision.action as 'CE-BUY' | 'PE-BUY' | 'NO-TRADE' | 'NEUTRAL',
+    optionConviction: option,
+    optionBias: decision.optionFlow.bias,
+    optionOverallScore: decision.optionFlow.overallScore,
+    priceConviction: price,
+    priceConvictionBeforeDecay: decision.priceConvictionBeforeDecay,
+    primaryScore,
+    hasMomentumDecay: Boolean(decision.momentumDecay?.decayPercent),
+  });
+
+  const points = timeline?.points ?? [];
+  let replayPoints = timelineToConvictionSeries(
+    points,
+    style,
+    optionSnapshots,
+    vetoMode,
+  );
+  const isCurrentSession = date === sessionDate;
+  if (isCurrentSession && replayPoints.length > 0) {
+    const indexSymbol = decision.symbol || params.symbol;
+    const liveSpot = resolveLiveIndexPrice(
+      fastify,
+      indexSymbol,
+      decision.lastPrice,
+    );
+    replayPoints = syncLastReplayPointToLive(
+      replayPoints,
+      decision,
+      gauges,
+      vetoMode,
+      liveSpot,
+    );
+  }
+  const hasHistoricalOptions = optionSnapshots.length > 0;
+
+  const toMs = Date.parse(sessionEndIso);
   const indexSymbol = decision.symbol || params.symbol;
-  const multiCandles = await resolveMultiTimeframeCandles(
+  const timelineWithCandles = await ensureTimelineHasCandles(
     fastify,
+    timeline,
     indexSymbol,
     toMs,
+  );
+  const multiCandles = multiCandlesFromTimeline(timelineWithCandles, toMs);
+  const spotSeries = timelineToSpotSeries(points);
+
+  const strategyRecommendation = await extractStrategyRecommendation(
+    fastify,
+    decision,
+    style,
+    {
+      replayNote:
+        'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',
+      replayMode: true,
+    },
   );
 
   return {
     mode: 'replay',
-    symbol: decision.symbol || params.symbol,
-    symbolLabel: shortSymbol(decision.symbol || params.symbol),
+    symbol: indexSymbol,
+    symbolLabel: shortSymbol(indexSymbol),
     tradingStyle: String(style),
     sessionDate: date,
     entryThreshold: resolveEntryThreshold(decision, style),
     gauges,
     replayPoints,
-    spotSeries: timelineToSpotSeries(points),
-    spotCandles: multiCandles.c5.length ? multiCandles.c5 : spotSeriesToSyntheticCandles(timelineToSpotSeries(points)),
+    spotSeries,
+    spotCandles: multiCandles.c5.length
+      ? multiCandles.c5
+      : spotSeriesToSyntheticCandles(spotSeries),
     spotCandles5m: multiCandles.c5,
     spotCandles15m: multiCandles.c15,
     spotCandles1h: multiCandles.c1h,
-    pnlSeries,
-    trades,
+    pnlSeries: [],
+    trades: [],
     markers: timelineMarkers(points),
     events: buildDeckEvents(
       timelineMarkers(points),
       timelineToVetoSeries(points),
-      trades,
+      [],
     ),
     optionComponents: hasHistoricalOptions
       ? replayPoints[replayPoints.length - 1]?.optionComponents ??
@@ -1099,34 +1340,17 @@ export async function buildDeckReplayPayload(
       ? 'Option chain breakdown from stored 5–15m snapshots · scrub updates both lanes'
       : 'Option chain breakdown is a live read until snapshots accumulate · scrub updates price-action components per minute',
     vetoTimeline: timelineToVetoSeries(points),
-    vetoMode: vetoState.vetoMode,
-    flowMode: flowState.flowMode,
-    vetoBreakup: extractVetoBreakup(
-      decision,
-      vetoState.vetoMode,
-      flowState.flowMode,
-    ),
-    strategyRecommendation: await extractStrategyRecommendation(
-      fastify,
-      decision,
-      style,
-      {
-        replayNote:
-          'Strategy read uses the engine snapshot for this style (not scrubbed per replay minute).',
-        replayMode: true,
-      },
-    ),
+    vetoMode,
+    flowMode,
+    vetoBreakup: extractVetoBreakup(decision, vetoMode, flowMode),
+    strategyRecommendation,
     patternInsights: extractPatternInsights(decision),
     pnlNote:
-      trades.length === 0
-        ? 'Fills session PnL when /coach finds closed option trades for this date (Fyers tradebook).'
-        : undefined,
-    // Explicitly no live management in historical replay
+      'Loading session PnL from Fyers tradebook…',
     managementContext: {
       hasOpenPosition: false,
       note: 'Replay — historical view. Live position health and management advice are not applicable.',
     } as PositionManagementContext,
-    // Do not mix current live broker positions into historical replay view
     openPositions: {
       asOf: new Date().toISOString(),
       entries: [],

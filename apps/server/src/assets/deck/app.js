@@ -14,6 +14,11 @@
   const sessionDate = params.get('date') || '';
   const initData = tg?.initData || '';
 
+  function shortSymbolLabel(sym) {
+    const part = sym.split(':')[1] || sym;
+    return part.replace('-INDEX', '');
+  }
+
   const els = {
     symbol: document.getElementById('symbol-label'),
     style: document.getElementById('style-label'),
@@ -125,6 +130,8 @@
   let spotOverlayLines = { '5m': [], '15m': [], '1h': [] };
   const SPOT_CHART_HEIGHT = 200;
   let chartsVisible = true;
+  els.symbol.textContent = shortSymbolLabel(symbol);
+  els.style.textContent = style;
 
   function setChartsVisible(visible) {
     chartsVisible = visible;
@@ -2587,6 +2594,90 @@
     setError('');
   }
 
+  function applyLiveEnrichment(data) {
+    if (!data) return;
+    els.symbol.textContent = data.symbolLabel || data.symbol || shortSymbolLabel(symbol);
+    els.style.textContent = data.tradingStyle || style;
+    serverVetoMode = data.vetoMode || (data.vetoOff ? 'off' : 'strict');
+    setVetoModeUi(serverVetoMode);
+    setFlowModeUi(data.flowMode || 'blend');
+    renderStrategyRecommendation(data.strategyRecommendation);
+    renderOpenPositions(data.openPositions);
+    renderManagementContext(data.managementContext || null);
+    renderMarketRegime(data.marketRegime);
+    if (els.vetoSection) {
+      vetoTimeline = data.vetoTimeline || [];
+      if (vetoTimeline.length) {
+        els.vetoSection.classList.remove('hidden');
+        els.vetoSection.classList.remove('replay-only');
+        renderVetoStrip(vetoTimeline.length - 1);
+      } else {
+        els.vetoSection.classList.add('hidden');
+      }
+    }
+    if (els.vetoModeOptions) {
+      els.vetoModeOptions.querySelectorAll('.veto-mode-btn').forEach((btn) => {
+        btn.disabled = true;
+      });
+    }
+    deckEvents = buildEventsFromPayload(data);
+    renderEvents(deckEvents);
+    spotCandlesPayload = resolveSpotCandles(data);
+    updateSpotSeries(spotCandlesPayload);
+    renderPatternContext(
+      data.patternContext ?? {
+        label: '',
+        markers: [],
+        overlays: [],
+        session: buildIstSessionBounds(),
+      },
+    );
+    renderPatternInsights(data.patternInsights);
+    if (els.optionComponentsNote) {
+      if (data.flowMode === 'pa-only') {
+        els.optionComponentsNote.textContent =
+          'PA-only (/flow pa) — option components for reference only';
+        els.optionComponentsNote.classList.remove('hidden');
+      } else if (data.flowMode === 'option-only') {
+        els.optionComponentsNote.textContent =
+          'Option-only (/flow option) — PA components for reference only';
+        els.optionComponentsNote.classList.remove('hidden');
+      } else {
+        els.optionComponentsNote.classList.add('hidden');
+        els.optionComponentsNote.textContent = '';
+      }
+    }
+  }
+
+  function applyReplayTrades(data) {
+    if (!data) return;
+    const trades = data.trades || [];
+    updatePnlSeries(data.pnlSeries);
+    if (els.pnlNote) {
+      if (data.pnlNote) {
+        els.pnlNote.textContent = data.pnlNote;
+        els.pnlNote.classList.remove('hidden');
+      } else {
+        els.pnlNote.classList.add('hidden');
+        els.pnlNote.textContent = '';
+      }
+    }
+    const tradeEvents = trades.map((trade) => {
+      const sign = trade.pnlInr >= 0 ? '+' : '';
+      return {
+        t: trade.t,
+        type: 'trade',
+        label: trade.label,
+        detail: `${sign}₹${Math.round(trade.pnlInr)} · ${trade.verdict}`,
+        action: trade.verdict,
+      };
+    });
+    deckEvents = [...deckEvents.filter((e) => e.type !== 'trade'), ...tradeEvents].sort(
+      (a, b) => a.t - b.t,
+    );
+    renderEvents(deckEvents);
+  }
+
   function renderManagementContext(mgmt) {
     if (!mgmt || !mgmt.hasOpenPosition || !els.strategyContent) return;
 
@@ -2881,13 +2972,8 @@
     setError('');
   }
 
-  async function fetchDeck() {
-    const base =
-      mode === 'replay'
-        ? `/api/deck/replay?symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}${sessionDate ? `&date=${encodeURIComponent(sessionDate)}` : ''}`
-        : `/api/deck/live?symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}`;
-
-    const res = await fetch(base, {
+  async function deckFetch(path) {
+    const res = await fetch(path, {
       headers: initData ? { 'X-Telegram-Init-Data': initData } : {},
     });
     if (!res.ok) {
@@ -2895,6 +2981,25 @@
       throw new Error(body.error || `Request failed (${res.status})`);
     }
     return res.json();
+  }
+
+  async function fetchDeck() {
+    const base =
+      mode === 'replay'
+        ? `/api/deck/replay?symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}${sessionDate ? `&date=${encodeURIComponent(sessionDate)}` : ''}`
+        : `/api/deck/live?symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}`;
+    return deckFetch(base);
+  }
+
+  async function fetchDeckEnrichment() {
+    const qs = `/api/deck/live?scope=enrichment&symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}`;
+    return deckFetch(qs);
+  }
+
+  async function fetchReplayTrades() {
+    const date = sessionDate || new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const qs = `/api/deck/replay-trades?symbol=${encodeURIComponent(symbol)}&style=${encodeURIComponent(style)}&date=${encodeURIComponent(date)}`;
+    return deckFetch(qs);
   }
 
   async function refresh(options = {}) {
@@ -2938,7 +3043,8 @@
     pollTimer = null;
   }
 
-  function connectDeckStream() {
+  function connectDeckStream(options = {}) {
+    const { onFirstData } = options;
     stopDeckStream();
     stopFallbackPoll();
 
@@ -2950,6 +3056,7 @@
 
     const source = new EventSource(`/api/deck/stream?${qs.toString()}`);
     deckEventSource = source;
+    let firstDataSeen = false;
 
     source.onmessage = (event) => {
       try {
@@ -2963,11 +3070,22 @@
           if (deckHasRenderableContent(payload)) {
             hasDisplayedDeck = true;
           }
+          if (!firstDataSeen) {
+            firstDataSeen = true;
+            onFirstData?.();
+          }
           setError('');
           return;
         }
         if (payload.type === 'tick') {
           applyDeckTick(payload);
+          if (deckHasRenderableContent(payload)) {
+            hasDisplayedDeck = true;
+          }
+          if (!firstDataSeen) {
+            firstDataSeen = true;
+            onFirstData?.();
+          }
           setError('');
         }
       } catch (err) {
@@ -2979,6 +3097,46 @@
       stopDeckStream();
       startFallbackPoll();
     };
+  }
+
+  async function loadLiveEnrichment() {
+    try {
+      const data = await fetchDeckEnrichment();
+      applyLiveEnrichment(data);
+      setError('');
+    } catch (err) {
+      if (!hasDisplayedDeck) {
+        setError(err.message || 'Failed to load charts and positions');
+      }
+    }
+  }
+
+  async function loadReplayTrades() {
+    try {
+      const data = await fetchReplayTrades();
+      applyReplayTrades(data);
+    } catch {
+      if (els.pnlNote) {
+        els.pnlNote.textContent =
+          'Session PnL unavailable — Fyers tradebook may be slow or empty for this date.';
+        els.pnlNote.classList.remove('hidden');
+      }
+    }
+  }
+
+  function bootstrapLiveDeck() {
+    setLoading(true);
+    connectDeckStream({
+      onFirstData: () => {
+        setLoading(false);
+      },
+    });
+    void loadLiveEnrichment();
+  }
+
+  async function bootstrapReplayDeck() {
+    await refresh();
+    void loadReplayTrades();
   }
 
   if (els.tabBar) {
@@ -3011,9 +3169,11 @@
     }
   });
 
-  refresh().then(() => {
-    if (mode === 'live') connectDeckStream();
-  });
+  if (mode === 'live') {
+    bootstrapLiveDeck();
+  } else {
+    void bootstrapReplayDeck();
+  }
 
   window.addEventListener('beforeunload', () => {
     stopDeckStream();

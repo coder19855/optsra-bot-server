@@ -597,66 +597,66 @@ export function tpHoldHeadline(params: {
     }
   }
 
-  if (highestHitRr === '1:3') {
+  if (highestHitRr === '1:4' || original.includes('Past 1:4')) {
     switch (voice) {
       case 'simple':
-        return 'Poora 1:3 target aa gaya — baaki book karo, profit bachao.';
+        return '1:4 cross ho gaya — trail 1:2.5 floor pe, flip confirm pe book.';
       case 'tapori':
-        return 'Bhai full 1:3 ho gaya — baaki book kar, profit safe kar!';
+        return 'Bhai 1:4 cross — 1:2.5 floor trail maar, flip confirm pe nikal.';
       case 'marathi':
-        return 'Full 1:3 laagla — baaki book kar, profit vachav.';
+        return '1:4 cross — 1:2.5 floor trail thev, flip confirm var book kar.';
     }
   }
 
-  if (highestHitRr === '1:2' || original.includes('1:2 target hit')) {
+  if (highestHitRr === '1:2.5' || original.includes('1:2.5')) {
     if (holdAdvice === 'trail') {
       switch (voice) {
         case 'simple':
-          return '1:2 hit — trail stop rakho, momentum sahi hai to 1:3 ke liye hold.';
+          return '1:2.5 lock — trail stop rakho, momentum sahi hai to 1:4 ke liye hold.';
         case 'tapori':
-          return '1:2 pakka — trail maar, momentum clean hai to 1:3 ke liye hold kar bhai!';
+          return '1:2.5 pakka — trail maar, momentum clean hai to 1:4 ke liye hold kar bhai!';
         case 'marathi':
-          return '1:2 laagla — trail stop thev, momentum clean asel tar 1:3 sathi hold kar.';
+          return '1:2.5 lock — trail stop thev, momentum clean asel tar 1:4 sathi hold kar.';
       }
     }
-    if (original.includes('only runners')) {
+    if (original.includes('only runners') || original.includes('partials')) {
       switch (voice) {
         case 'simple':
-          return '1:2 hit — partial book karo; baaki sirf tight trail wale runners.';
+          return '1:2.5 lock — partial book karo; baaki sirf tight trail wale runners.';
         case 'tapori':
-          return '1:2 ho gaya bhai — partial book kar; baaki sirf tight trail runners.';
+          return '1:2.5 ho gaya bhai — partial book kar; baaki sirf tight trail runners.';
         case 'marathi':
-          return '1:2 laagla — partial book kar; baaki fakt tight trail runners.';
+          return '1:2.5 lock — partial book kar; baaki fakt tight trail runners.';
       }
     }
     switch (voice) {
       case 'simple':
-        return '1:2 hit — partial book karo, tight trail se runner rakho.';
+        return '1:2.5 lock — partial book karo, tight trail se runner rakho.';
       case 'tapori':
-        return '1:2 ho gaya bhai — partial book kar, baaki tight trail pe chhod.';
+        return '1:2.5 ho gaya bhai — partial book kar, baaki tight trail pe chhod.';
       case 'marathi':
-        return '1:2 laagla — partial book kar, baaki tight trail var thev.';
+        return '1:2.5 lock — partial book kar, baaki tight trail var thev.';
     }
   }
 
-  if (highestHitRr === '1:1' || original.startsWith('1:1 target')) {
+  if (highestHitRr === '1:1.5' || original.includes('1:1.5')) {
     if (holdAdvice === 'exit') {
       switch (voice) {
         case 'simple':
-          return '1:1 aa gaya lekin conviction weak — zyada tar book karo.';
+          return '1:1.5 lock lekin conviction weak — zyada tar book karo.';
         case 'tapori':
-          return '1:1 to aa gaya bhai par conviction weak — zyada hissa book kar.';
+          return '1:1.5 lock bhai par conviction weak — zyada hissa book kar.';
         case 'marathi':
-          return '1:1 laagla pan conviction weak — jast book kar.';
+          return '1:1.5 lock pan conviction weak — jast book kar.';
       }
     }
     switch (voice) {
       case 'simple':
-        return '1:1 hit — thoda book karo, baaki 1:2 ke liye trail.';
+        return '1:1.5 lock — thoda book karo, baaki 1:2.5 ke liye trail.';
       case 'tapori':
-        return '1:1 pakka bhai — thoda book kar, baaki 1:2 ke trail pe chhod.';
+        return '1:1.5 lock bhai — thoda book kar, baaki 1:2.5 ke trail pe chhod.';
       case 'marathi':
-        return '1:1 laagla — thoda book kar, baaki 1:2 sathi trail.';
+        return '1:1.5 lock — thoda book kar, baaki 1:2.5 sathi trail.';
     }
   }
 

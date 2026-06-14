@@ -13,6 +13,8 @@ module.exports = {
   displayName: '@optra-pulse-bot/server',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
+  // Recycle workers that grow large after loading heavy plugin graphs.
+  workerIdleMemoryLimit: '512MB',
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },

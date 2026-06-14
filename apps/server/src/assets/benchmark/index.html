@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
+    />
+    <title>Optra Benchmark</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="loading-overlay" class="loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="loading-spinner" role="status"></div>
+      <span class="loading-text">Running backtest…</span>
+      <span class="loading-sub">Fetching candles &amp; replaying signals</span>
+    </div>
+
+    <div id="app" class="hidden">
+      <header class="top-bar">
+        <div class="top-left">
+          <h1 id="symbol-label">—</h1>
+          <div class="meta-row">
+            <span id="style-label" class="pill">INTRADAY</span>
+            <span id="days-label" class="pill muted-pill">14d</span>
+            <span id="ai-label" class="pill ai-pill">AI shadow</span>
+          </div>
+        </div>
+        <div class="top-right">
+          <span id="generated-label" class="muted">—</span>
+        </div>
+      </header>
+
+      <section class="capital-hero" id="capital-hero" aria-label="Capital projection">
+        <div class="capital-hero-inner">
+          <div class="capital-start">
+            <span class="capital-label">Starting</span>
+            <span id="capital-start" class="capital-amount">—</span>
+          </div>
+          <div class="capital-arrow" aria-hidden="true">→</div>
+          <div class="capital-end">
+            <span class="capital-label">Ending</span>
+            <span id="capital-end" class="capital-amount highlight">—</span>
+            <span id="capital-delta" class="capital-delta">—</span>
+          </div>
+        </div>
+        <p id="capital-risk-note" class="capital-risk-note">—</p>
+      </section>
+
+      <section class="kpi-grid" id="kpi-grid" aria-label="Summary metrics"></section>
+
+      <section class="compare-panel" id="compare-panel" aria-label="AI comparison">
+        <h2>Engine vs AI</h2>
+        <div class="compare-cards" id="compare-cards"></div>
+        <div class="ai-insights" id="ai-insights"></div>
+      </section>
+
+      <section class="chart-section">
+        <div class="section-head">
+          <h2>Capital curve (₹)</h2>
+          <span id="capital-chart-total" class="curve-total">—</span>
+        </div>
+        <div id="capital-chart" class="equity-chart"></div>
+      </section>
+
+      <section class="chart-section">
+        <div class="section-head">
+          <h2>Equity curve (R)</h2>
+          <span id="curve-total" class="curve-total">—</span>
+        </div>
+        <div id="equity-chart" class="equity-chart"></div>
+      </section>
+
+      <section class="chart-section">
+        <div class="section-head">
+          <h2>Exit breakdown</h2>
+        </div>
+        <div id="exit-bars" class="exit-bars"></div>
+      </section>
+
+      <section class="table-section">
+        <div class="section-head">
+          <h2>Trade log</h2>
+          <span id="trade-count" class="muted">0 signals</span>
+        </div>
+        <div class="table-wrap">
+          <table id="trade-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>SL / TP</th>
+                <th>Exit</th>
+                <th>R</th>
+                <th>Verdict</th>
+              </tr>
+            </thead>
+            <tbody id="trade-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="notes" id="notes"></footer>
+      <p id="error-line" class="error-line hidden"></p>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

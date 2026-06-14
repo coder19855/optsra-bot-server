@@ -6,27 +6,31 @@ import {
   TIMELINE_DEFAULTS,
   TIMELINE_STOP_ATR,
 } from '../constants/technical-analysis';
+import { FLIP_POLL_INTERVAL_MINUTES } from '../constants/trade-rr';
+import { buildFlipExitSignals } from '../benchmark/flip-exit-utils';
+import type { EnginePollRead } from '../technical-analysis/flip-exit-policy';
+import { simulateTradeOutcomeWithTrailingFloor } from '../benchmark/trailing-tp-simulator';
 import { buildPriceActionSnapshot } from '../technical-analysis/snapshot';
 import {
   buildTimelineAnchors,
   calcOutcomeVsEnd,
   computeWindow,
   getIstSessionKey,
+  mapFyersCandlesToOhlc,
   parseEpochMs,
   resolveSimulationUntilSec,
-  simulateTradeOutcome,
   sliceCandlesAfter,
   sliceCandlesUpTo,
+  summarizeTimelinePoints,
   toIso,
 } from '../technical-analysis/timeline-utils';
 import { ResponseStatus } from '../types';
 import {
-  RrLabel,
   TechnicalAnalysisTimelineResponse,
   TimelinePoint,
   TradeAction,
 } from '../types/technical-analysis';
-import { TradingStyle } from '../trading-style';
+import { getStyleScoringConfig, TradingStyle } from '../trading-style';
 
 function parseTradingStyle(styleQuery?: string): TradingStyle {
   const styleStr = (styleQuery || 'INTRADAY').toUpperCase();
@@ -51,6 +55,8 @@ export default async function technicalAnalysisTimelineRoute(
         days,
         interval,
         sessionOnly,
+        maxPoints,
+        includeCandles,
       } = request.query as {
         symbol: string;
         tradingStyle?: string;
@@ -58,6 +64,8 @@ export default async function technicalAnalysisTimelineRoute(
         days?: string | number;
         interval?: string | number;
         sessionOnly?: string | boolean;
+        maxPoints?: string | number;
+        includeCandles?: string | boolean;
       };
 
       if (!symbol) {
@@ -85,6 +93,14 @@ export default async function technicalAnalysisTimelineRoute(
         sessionOnly === undefined ||
         sessionOnly === 'true' ||
         sessionOnly === true;
+      const maxPointsLimit =
+        maxPoints !== undefined && maxPoints !== ''
+          ? Math.max(1, Number(maxPoints))
+          : undefined;
+      const withCandles =
+        includeCandles === 'true' ||
+        includeCandles === true ||
+        includeCandles === '1';
 
       const { fromMs, fetchFromMs } = computeWindow(toMs, windowDays);
       const toEpochSeconds = (ms: number) => Math.floor(ms / 1000).toString();
@@ -150,6 +166,13 @@ export default async function technicalAnalysisTimelineRoute(
         intervalMinutes,
         onlySession,
       );
+      const flipPollAnchors = buildTimelineAnchors(
+        candles5m,
+        fromMs,
+        toMs,
+        FLIP_POLL_INTERVAL_MINUTES,
+        onlySession,
+      );
 
       if (anchors.length === 0) {
         return reply.code(400).send({
@@ -169,24 +192,35 @@ export default async function technicalAnalysisTimelineRoute(
         0;
 
       const points: TimelinePoint[] = [];
-      const signalCounts: Record<TradeAction, number> = {
-        'CE-BUY': 0,
-        'PE-BUY': 0,
-        'NO-TRADE': 0,
-      };
-      let confidenceTotal = 0;
-      let pnlRTotal = 0;
-      let tradedPoints = 0;
-      const tradeOutcomes = {
-        stopLoss: 0,
-        takeProfit: { '1:1': 0, '1:2': 0, '1:3': 0 } as Record<RrLabel, number>,
-        sessionEnd: 0,
-        open: 0,
-        noTrade: 0,
-      };
-      let decayPercentTotal = 0;
-      let decaySampleCount = 0;
-      let vetoedByDecayCount = 0;
+      const flipPollReads: EnginePollRead[] = [];
+      const enterThreshold =
+        getStyleScoringConfig(activeStyle).convictionThreshold.enter;
+
+      for (const asOfMs of flipPollAnchors) {
+        const asOfSec = Math.floor(asOfMs / 1000);
+        const slice5m = sliceCandlesUpTo(candles5m, asOfSec);
+        const slice15m = sliceCandlesUpTo(candles15m, asOfSec);
+        const slice1h = sliceCandlesUpTo(candles1h, asOfSec);
+        if (slice5m.length < TIMELINE_DEFAULTS.MIN_CANDLES_FOR_ANALYSIS) {
+          continue;
+        }
+        const pollSnapshot = buildPriceActionSnapshot(deps, {
+          symbol,
+          tradingStyle: activeStyle,
+          candles5m: slice5m,
+          candles15m: slice15m,
+          candles1h: slice1h,
+          asOfMs,
+        });
+        if (!pollSnapshot) continue;
+        flipPollReads.push({
+          asOfMs,
+          dayKey: getIstSessionKey(asOfSec),
+          action:
+            pollSnapshot.signal.structuralAction ?? pollSnapshot.signal.action,
+          conviction: pollSnapshot.signal.confidence,
+        });
+      }
 
       const windowToSec = Math.floor(toMs / 1000);
       const defaultSimScope =
@@ -284,17 +318,6 @@ export default async function technicalAnalysisTimelineRoute(
           structuralAction = 'PE-BUY';
         }
 
-        signalCounts[signalAction] += 1;
-        confidenceTotal += signalConfidence;
-
-        if (snapshot.momentumDecay) {
-          decayPercentTotal += snapshot.momentumDecay.decayPercent;
-          decaySampleCount += 1;
-          if (snapshot.momentumDecay.vetoedByDecay) {
-            vetoedByDecayCount += 1;
-          }
-        }
-
         const { untilSec, scope: pointSimScope } = resolveSimulationUntilSec(
           asOfSec,
           activeStyle,
@@ -305,11 +328,22 @@ export default async function technicalAnalysisTimelineRoute(
           asOfSec,
           untilSec,
         );
-        const tradeOutcome = simulateTradeOutcome(
+        const flipExits =
+          signalAction === 'CE-BUY' || signalAction === 'PE-BUY'
+            ? buildFlipExitSignals(
+                asOfMs,
+                signalAction,
+                untilSec,
+                flipPollReads,
+                enterThreshold,
+              )
+            : [];
+        const tradeOutcome = simulateTradeOutcomeWithTrailingFloor(
           signalAction,
           tradeSetup,
           forwardCandles,
           pointSimScope,
+          { flipExits, enableFlipExit: true },
         );
 
         if (
@@ -329,32 +363,6 @@ export default async function technicalAnalysisTimelineRoute(
             }
             peCooldownUntilMs = closedAtMs + tradeCooldownMs;
           }
-        }
-
-        if (tradeOutcome.status === 'NO-TRADE') {
-          tradeOutcomes.noTrade += 1;
-        } else if (tradeOutcome.status === 'SESSION_END') {
-          tradeOutcomes.sessionEnd += 1;
-          tradedPoints += 1;
-          pnlRTotal += tradeOutcome.pnlR;
-        } else if (tradeOutcome.status === 'STOP_LOSS') {
-          tradeOutcomes.stopLoss += 1;
-          tradedPoints += 1;
-          pnlRTotal += tradeOutcome.pnlR;
-        } else if (tradeOutcome.status === 'TAKE_PROFIT') {
-          if (
-            tradeOutcome.hitLevel === '1:1' ||
-            tradeOutcome.hitLevel === '1:2' ||
-            tradeOutcome.hitLevel === '1:3'
-          ) {
-            tradeOutcomes.takeProfit[tradeOutcome.hitLevel] += 1;
-          }
-          tradedPoints += 1;
-          pnlRTotal += tradeOutcome.pnlR;
-        } else {
-          tradeOutcomes.open += 1;
-          tradedPoints += 1;
-          pnlRTotal += tradeOutcome.pnlR;
         }
 
         const direction =
@@ -411,20 +419,10 @@ export default async function technicalAnalysisTimelineRoute(
         });
       }
 
-      const vetoBreakdown: Record<string, number> = {};
-      let winningTrades = 0;
-      for (const pt of points) {
-        const reason = pt.signal.vetoReason;
-        if (reason && pt.signal.action === 'NO-TRADE') {
-          vetoBreakdown[reason] = (vetoBreakdown[reason] ?? 0) + 1;
-        }
-        if (
-          pt.tradeOutcome.status !== 'NO-TRADE' &&
-          pt.tradeOutcome.pnlR > 0
-        ) {
-          winningTrades += 1;
-        }
-      }
+      const trimmedPoints =
+        maxPointsLimit != null && Number.isFinite(maxPointsLimit)
+          ? points.slice(-maxPointsLimit)
+          : points;
 
       const response: TechnicalAnalysisTimelineResponse = {
         replayMode: 'price_action_only',
@@ -433,7 +431,8 @@ export default async function technicalAnalysisTimelineRoute(
         simulation: {
           scope: defaultSimScope,
           stopModel: 'atr_clamped_swing',
-          rrTargets: ['1:1', '1:2', '1:3'],
+          exitModel: 'trailing_floor',
+          rrTargets: ['1:1.5', '1:2.5', '1:4'],
           atrStopBand: {
             minMult: TIMELINE_STOP_ATR.MIN_MULT,
             maxMult: TIMELINE_STOP_ATR.MAX_MULT,
@@ -458,29 +457,17 @@ export default async function technicalAnalysisTimelineRoute(
         },
         intervalMinutes,
         sessionOnly: onlySession,
-        summary: {
-          totalPoints: points.length,
-          signals: signalCounts,
-          avgConfidence: +(confidenceTotal / points.length).toFixed(1),
-          endSpot: +endSpot.toFixed(2),
-          tradeOutcomes,
-          decay: {
-            vetoedCount: vetoedByDecayCount,
-            avgDecayPercent: decaySampleCount
-              ? +(decayPercentTotal / decaySampleCount).toFixed(1)
-              : 0,
-          },
-          avgPnlR: tradedPoints
-            ? +(pnlRTotal / tradedPoints).toFixed(3)
-            : 0,
-          totalTrades: tradedPoints,
-          totalPnlR: +pnlRTotal.toFixed(3),
-          winRate: tradedPoints
-            ? +(winningTrades / tradedPoints).toFixed(3)
-            : 0,
-          vetoBreakdown,
-        },
-        points,
+        summary: summarizeTimelinePoints(trimmedPoints, endSpot),
+        points: trimmedPoints,
+        ...(withCandles
+          ? {
+              spotCandles: {
+                '5m': mapFyersCandlesToOhlc(candles5m),
+                '15m': mapFyersCandlesToOhlc(candles15m),
+                '1h': mapFyersCandlesToOhlc(candles1h),
+              },
+            }
+          : {}),
       };
 
       reply.send(response);

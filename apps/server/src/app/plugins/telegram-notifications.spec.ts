@@ -1,7 +1,3 @@
-import fp from 'fastify-plugin';
-import telegramNotificationsPlugin from './telegram-notifications';
-import { buildPluginApp, decorateMongo } from '../testing/fastify-test-harness';
-
 jest.mock('axios', () => ({
   post: jest.fn().mockResolvedValue({
     data: { ok: true, result: { message_id: 1 } },
@@ -14,6 +10,18 @@ jest.mock('axios', () => ({
     get: jest.fn().mockResolvedValue({ data: { ok: true, result: [] } }),
   },
 }));
+
+/** Avoid loading the full command router (benchmark replay, deck, etc.) in unit tests. */
+jest.mock('../telegram-notifications/telegram-commands', () => ({
+  TelegramCommandPoller: jest.fn().mockImplementation(() => ({
+    start: jest.fn(),
+    stop: jest.fn(),
+  })),
+}));
+
+import fp from 'fastify-plugin';
+import telegramNotificationsPlugin from './telegram-notifications';
+import { buildPluginApp, decorateMongo } from '../testing/fastify-test-harness';
 
 async function registerPluginDeps(fastify: import('fastify').FastifyInstance) {
   decorateMongo(fastify);

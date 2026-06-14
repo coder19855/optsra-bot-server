@@ -244,7 +244,13 @@ export interface TimelineMomentumDecay {
   vetoedByDecay: boolean;
 }
 
-export type RrLabel = '1:1' | '1:2' | '1:3';
+export type RrLabel =
+  | '1:1'
+  | '1:2'
+  | '1:3'
+  | '1:1.5'
+  | '1:2.5'
+  | '1:4';
 
 export interface TradeTakeProfitLevel {
   rr: RrLabel;
@@ -273,7 +279,13 @@ export interface TradeOutcome {
   exitAt?: number;
   exitAtISO?: string;
   /** Which level closed the trade; OPEN uses highest TP touched if any */
-  hitLevel?: RrLabel | 'STOP_LOSS' | 'OPEN' | 'SESSION_END';
+  hitLevel?:
+    | RrLabel
+    | 'STOP_LOSS'
+    | 'OPEN'
+    | 'SESSION_END'
+    | 'SIGNAL_FLIP'
+    | 'TRAIL_FLOOR';
   barsHeld: number;
   simulationScope?: 'session' | 'window';
 }
@@ -312,7 +324,7 @@ export interface TimelinePoint {
     support: number;
     resistance: number;
   };
-  /** Entry, SL, and RR targets (1:1, 1:2, 1:3) from the signal at this point */
+  /** Entry, SL, and RR targets (1:1.5, 1:2.5, 1:4) from the signal at this point */
   tradeSetup?: TradeSetup;
   /** Simulated forward outcome on 5m candles until SL, TP, or window end */
   tradeOutcome: TradeOutcome;
@@ -332,6 +344,7 @@ export interface TechnicalAnalysisTimelineResponse {
   simulation: {
     scope: 'session' | 'window';
     stopModel: 'atr_clamped_swing';
+    exitModel?: 'fixed_tp' | 'trailing_floor';
     rrTargets: RrLabel[];
     atrStopBand: { minMult: number; maxMult: number };
     sessionCooldownMinutes?: number;
@@ -363,6 +376,7 @@ export interface TechnicalAnalysisTimelineResponse {
       sessionEnd: number;
       open: number;
       noTrade: number;
+      signalFlip?: number;
     };
     decay: {
       vetoedCount: number;
@@ -375,4 +389,10 @@ export interface TechnicalAnalysisTimelineResponse {
     vetoBreakdown: Record<string, number>;
   };
   points: TimelinePoint[];
+  /** Present when `includeCandles=true` — 5m/15m/1h OHLC for the fetched window */
+  spotCandles?: {
+    '5m': Array<{ t: number; o: number; h: number; l: number; c: number }>;
+    '15m': Array<{ t: number; o: number; h: number; l: number; c: number }>;
+    '1h': Array<{ t: number; o: number; h: number; l: number; c: number }>;
+  };
 }

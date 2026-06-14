@@ -14,6 +14,13 @@ import {
   TradeDecisionAlertPayload,
 } from '../types/telegram-notifications';
 import { DecisionAction } from '../types/trade-decision';
+import { computeOppositeExitStreak } from '../technical-analysis/flip-exit-policy';
+import {
+  buildTrailingTpHoldGuidance,
+  evaluateTrailingTpState,
+  highestTpHit,
+  nextTpLevel,
+} from '../technical-analysis/trailing-tp-policy';
 import { isIndexStopBreached } from './signal-exit-policy';
 
 export type HeldDirection = 'CE-BUY' | 'PE-BUY';
@@ -128,8 +135,6 @@ import {
 } from './tp-tracker';
 import { TpTrackReason } from '../types/telegram-notifications';
 
-const RR_ORDER: RrLabel[] = ['1:1', '1:2', '1:3'];
-
 function shortIndexLabel(symbol: string): string {
   const meta = FYERS_OPTION_INDEX_SYMBOLS.find((row) => row.symbol === symbol);
   return meta?.shortName ?? symbol.split(':')[1]?.replace('-INDEX', '') ?? symbol;
@@ -141,12 +146,6 @@ function optionLabel(symbol: string): string {
 
 function positionDirection(optionType: 'CE' | 'PE'): 'CE-BUY' | 'PE-BUY' {
   return optionType === 'CE' ? 'CE-BUY' : 'PE-BUY';
-}
-
-function maxRr(a: RrLabel | null, b: RrLabel | null): RrLabel | null {
-  if (!a) return b;
-  if (!b) return a;
-  return RR_ORDER.indexOf(a) >= RR_ORDER.indexOf(b) ? a : b;
 }
 
 function tpByRr(
@@ -179,40 +178,6 @@ function currentRMultiple(
   return 0;
 }
 
-function highestTpHit(
-  direction: TradeAction,
-  spot: number,
-  takeProfits: TradeTakeProfitLevel[],
-): TradeTakeProfitLevel | null {
-  if (direction === 'CE-BUY') {
-    for (let i = takeProfits.length - 1; i >= 0; i -= 1) {
-      if (spot >= takeProfits[i].price) return takeProfits[i];
-    }
-    return null;
-  }
-  if (direction === 'PE-BUY') {
-    for (let i = takeProfits.length - 1; i >= 0; i -= 1) {
-      if (spot <= takeProfits[i].price) return takeProfits[i];
-    }
-    return null;
-  }
-  return null;
-}
-
-function nextTpLevel(
-  direction: TradeAction,
-  spot: number,
-  takeProfits: TradeTakeProfitLevel[],
-): TradeTakeProfitLevel | null {
-  if (direction === 'CE-BUY') {
-    return takeProfits.find((tp) => spot < tp.price) ?? null;
-  }
-  if (direction === 'PE-BUY') {
-    return takeProfits.find((tp) => spot > tp.price) ?? null;
-  }
-  return null;
-}
-
 function distanceToTp(
   direction: TradeAction,
   spot: number,
@@ -227,11 +192,12 @@ function buildHoldGuidance(params: {
   tradingStyle: TradingStyle;
   conviction: number;
   momentumDecayPercent: number | null;
-  aligned: boolean;
-  highestHitRr: RrLabel | null;
+  trailing: ReturnType<typeof evaluateTrailingTpState>;
   nextTpRr: RrLabel | null;
   currentR: number;
   approaching: boolean;
+  oppositeFlipConfirmed: boolean;
+  peakLockedForFlip: boolean;
 }): {
   holdAdvice: TpHoldAdvice;
   holdHeadline: string;
@@ -239,115 +205,23 @@ function buildHoldGuidance(params: {
   alertKind: TpAlertKind;
 } {
   const thresholds = getStyleScoringConfig(params.tradingStyle).convictionThreshold;
-  const reasons: string[] = [];
-
-  if (!params.aligned) {
-    return {
-      holdAdvice: 'exit',
-      holdHeadline: 'Signal no longer supports this position — book or cut size.',
-      holdReasons: [
-        'Engine direction has diverged from your open option leg.',
-        'Do not hold a CE/PE position against a flipped or flat system read.',
-      ],
-      alertKind: 'SIGNAL_CONFLICT',
-    };
-  }
-
-  if (params.momentumDecayPercent != null && params.momentumDecayPercent >= 25) {
-    reasons.push(
-      `Momentum decay is elevated (${params.momentumDecayPercent}%) — edge is fading.`,
-    );
-  }
-
-  if (params.conviction < thresholds.enter) {
-    reasons.push(
-      `Conviction (${params.conviction}%) is below the ${params.tradingStyle} entry bar (${thresholds.enter}%).`,
-    );
-  }
-
-  if (params.highestHitRr === '1:3') {
-    return {
-      holdAdvice: 'exit',
-      holdHeadline: 'Full 1:3 index target reached — book remaining and protect gains.',
-      holdReasons: [
-        'Engine spot target at 1:3 is hit. Trail only if you have a separate discretionary plan.',
-        ...reasons,
-      ],
-      alertKind: 'REACHED',
-    };
-  }
-
-  if (params.highestHitRr === '1:2') {
-    const canHold =
-      params.conviction >= thresholds.strong &&
-      (params.momentumDecayPercent ?? 0) < 20;
-    return {
-      holdAdvice: canHold ? 'trail' : 'partial',
-      holdHeadline: canHold
-        ? '1:2 target hit — trail stop and hold for 1:3 if momentum stays clean.'
-        : '1:2 target hit — book partials; only runners with a tight trail.',
-      holdReasons: canHold
-        ? [
-            `Conviction still strong (${params.conviction}% ≥ ${thresholds.strong}).`,
-            'Move stop toward breakeven+ and let a reduced size work toward 1:3.',
-            ...reasons,
-          ]
-        : [
-            'Take meaningful profit at 1:2; conviction/momentum does not justify full size into 1:3.',
-            ...reasons,
-          ],
-      alertKind: 'HOLD_REVIEW',
-    };
-  }
-
-  if (params.highestHitRr === '1:1') {
-    const canHold = params.conviction >= thresholds.enter;
-    return {
-      holdAdvice: canHold ? 'partial' : 'exit',
-      holdHeadline: canHold
-        ? '1:1 target reached — book partial, trail rest toward 1:2.'
-        : '1:1 target reached — conviction weakened; prefer booking most of the trade.',
-      holdReasons: canHold
-        ? [
-            'First target achieved. System still aligned — common playbook is 50% off + breakeven stop.',
-            `Next engine target is 1:2${params.nextTpRr ? '' : ''}.`,
-            ...reasons,
-          ]
-        : [
-            'First target achieved but follow-through quality is poor — do not assume 1:2.',
-            ...reasons,
-          ],
-      alertKind: 'HOLD_REVIEW',
-    };
-  }
-
-  if (params.approaching && params.nextTpRr) {
-    const canHold = params.conviction >= thresholds.medium;
-    return {
-      holdAdvice: canHold ? 'hold' : 'partial',
-      holdHeadline: canHold
-        ? `Approaching ${params.nextTpRr} — prepare to scale out or trail if wicks reject.`
-        : `Approaching ${params.nextTpRr} — lean toward booking into the level.`,
-      holdReasons: canHold
-        ? [
-            `Spot is within reach of engine ${params.nextTpRr} (${params.currentR.toFixed(2)}R now).`,
-            'If level rejects, tighten stop; if it accepts with volume, trail for next R.',
-            ...reasons,
-          ]
-        : [
-            `Near ${params.nextTpRr} but conviction is only ${params.conviction}%.`,
-            'Consider taking profit into the level instead of hoping for extension.',
-            ...reasons,
-          ],
-      alertKind: 'APPROACHING',
-    };
-  }
-
+  const guidance = buildTrailingTpHoldGuidance({
+    conviction: params.conviction,
+    enterThreshold: thresholds.enter,
+    strongThreshold: thresholds.strong,
+    momentumDecayPercent: params.momentumDecayPercent,
+    trailing: params.trailing,
+    nextTpRr: params.nextTpRr,
+    currentR: params.currentR,
+    approaching: params.approaching,
+    oppositeFlipConfirmed: params.oppositeFlipConfirmed,
+    peakLockedForFlip: params.peakLockedForFlip,
+  });
   return {
-    holdAdvice: 'hold',
-    holdHeadline: 'Position in progress — no TP trigger yet.',
-    holdReasons: reasons,
-    alertKind: 'HOLD_REVIEW',
+    holdAdvice: guidance.holdAdvice,
+    holdHeadline: guidance.holdHeadline,
+    holdReasons: guidance.holdReasons,
+    alertKind: guidance.alertKind,
   };
 }
 
@@ -446,13 +320,16 @@ export function computePositionHealthScore(
     breakdown.push({ factor: 'R Multiple', contribution: rContrib, note: currentR >= 1.5 ? `Banked ${currentR.toFixed(1)}R` : `Only ${currentR.toFixed(1)}R so far` });
   }
 
-  // TP milestones
-  if (highestHitRr === '1:3') {
-    score -= 8; // time to protect
-    breakdown.push({ factor: 'TP Milestone', contribution: -8, note: '1:3 reached — protect profits' });
-  } else if (highestHitRr === '1:2') {
+  // TP milestones (trailing ladder 1:1.5 → 1:2.5 → 1:4)
+  if (highestHitRr === '1:4') {
+    score += 6;
+    breakdown.push({ factor: 'TP Milestone', contribution: 6, note: '1:4 touched — trail with 1:2.5 floor' });
+  } else if (highestHitRr === '1:2.5') {
     score += 4;
-    breakdown.push({ factor: 'TP Milestone', contribution: 4, note: '1:2 achieved — good runner potential' });
+    breakdown.push({ factor: 'TP Milestone', contribution: 4, note: '1:2.5 locked — runner toward 1:4' });
+  } else if (highestHitRr === '1:1.5') {
+    score += 2;
+    breakdown.push({ factor: 'TP Milestone', contribution: 2, note: '1:1.5 locked — partial + trail' });
   }
 
   // Stop / structure risk
@@ -581,8 +458,8 @@ export function computeManagementAdvice(
   if (momentumDecay >= 30) holdSuitability -= 25;
   else if (momentumDecay >= 15) holdSuitability -= 10;
 
-  if (highestHitRr === '1:3') holdSuitability -= 15; // time to book
-  if (highestHitRr === '1:2') holdSuitability += 5; // can trail
+  if (highestHitRr === '1:4') holdSuitability += 8;
+  if (highestHitRr === '1:2.5') holdSuitability += 5;
 
   // Stop breach check using current structure (better than static)
   const currentStopBreached = tradeSetup?.stopLoss
@@ -600,18 +477,18 @@ export function computeManagementAdvice(
   if (currentStopBreached) {
     overall = 'HARD_EXIT';
     reasons.push('Index stop level has been breached.');
-  } else if (!aligned && conviction < 45) {
+  } else if (!aligned && conviction >= thresholds.enter) {
     overall = 'EXIT_SOON';
-    reasons.push('Engine has flipped or significantly weakened against your held direction.');
+    reasons.push('Opposite engine read building — exit on 2-poll confirmation or trail floor.');
   } else if (alignment === 'WEAKENING' && momentumDecay >= 20) {
     overall = 'PARTIAL_BOOK';
     reasons.push('Momentum decay elevated and conviction softening — book some size.');
-  } else if (highestHitRr === '1:3') {
-    overall = 'PARTIAL_BOOK';
-    reasons.push('Full 1:3 target achieved — protect gains.');
-  } else if (highestHitRr === '1:2' && conviction >= thresholds.strong) {
+  } else if (highestHitRr === '1:4') {
     overall = 'TRAIL';
-    reasons.push('1:2 hit with strong conviction — trail for 1:3.');
+    reasons.push('Past 1:4 — hold for extension; trail with 1:2.5 floor or exit on confirmed flip.');
+  } else if (highestHitRr === '1:2.5' && conviction >= thresholds.strong) {
+    overall = 'TRAIL';
+    reasons.push('1:2.5 locked with strong conviction — trail toward 1:4.');
   } else if (holdSuitability < 40) {
     overall = 'EXIT_SOON';
     reasons.push(`Hold suitability is low (${holdSuitability}%).`);
@@ -630,7 +507,7 @@ export function computeManagementAdvice(
     recommendedActions.push({ action: 'BOOK_PARTIAL', detail: 'Book 40-60% into strength or at current R-multiple.', rrTarget: highestHitRr ?? 'current' });
     recommendedActions.push({ action: 'MOVE_STOP_TO_BREAKEVEN', detail: 'Move stop to breakeven or better on remaining size.' });
   } else if (overall === 'TRAIL') {
-    recommendedActions.push({ action: 'TRAIL_STOP', detail: 'Trail stop toward breakeven+ and let runner work toward 1:3.' });
+    recommendedActions.push({ action: 'TRAIL_STOP', detail: 'Trail stop toward 1:2.5 floor and let runner work toward 1:4.' });
   } else if (overall === 'STRONG_HOLD') {
     recommendedActions.push({ action: 'MONITOR', detail: 'Position is well supported — stay disciplined on original plan.' });
   } else {
@@ -833,11 +710,26 @@ function evaluatePositionTp(
   }
 
   const spot = priceData.lastPrice;
-  const spotHit = highestTpHit(position.direction, spot, tradeSetup.takeProfits);
-  const effectiveHitRr = maxRr(previous?.highestTpRr ?? null, spotHit?.rr ?? null);
+  const trailing = evaluateTrailingTpState(
+    position.direction,
+    spot,
+    tradeSetup,
+    previous?.highestTpRr ?? null,
+    previous?.peakR ?? 0,
+  );
+  const effectiveHitRr = trailing.peakRr;
   const highestHitTp = tpByRr(tradeSetup.takeProfits, effectiveHitRr);
   const nextTp = nextTpLevel(position.direction, spot, tradeSetup.takeProfits);
   const currentR = currentRMultiple(position.direction, spot, tradeSetup);
+  const thresholds = getStyleScoringConfig(tradingStyle).convictionThreshold;
+  const oppositeExit = computeOppositeExitStreak(
+    position.direction,
+    decision.action,
+    decision.conviction,
+    thresholds.enter,
+    previous?.oppositeExitStreak ?? 0,
+  );
+  const peakLockedForFlip = trailing.peakR >= 1.5;
   const distanceToNextPoints = nextTp
     ? distanceToTp(position.direction, spot, nextTp)
     : null;
@@ -858,21 +750,16 @@ function evaluatePositionTp(
     distanceToNextPoints <= approachThreshold &&
     distanceToNextR <= TELEGRAM_NOTIFICATION_DEFAULTS.TP_APPROACH_WITHIN_R + 0.05;
 
-  const aligned = signalSupportsPosition(
-    position.direction,
-    decision.action,
-    decision.priceAction.action,
-  );
-
   const guidance = buildHoldGuidance({
     tradingStyle,
     conviction: decision.conviction,
     momentumDecayPercent: priceData.momentumDecay?.decayPercent ?? null,
-    aligned,
-    highestHitRr: effectiveHitRr,
+    trailing,
     nextTpRr: nextTp?.rr ?? null,
     currentR,
     approaching,
+    oppositeFlipConfirmed: oppositeExit.confirmed && peakLockedForFlip,
+    peakLockedForFlip,
   });
 
   return {
@@ -894,6 +781,8 @@ function evaluatePositionTp(
     holdAdvice: guidance.holdAdvice,
     holdHeadline: guidance.holdHeadline,
     holdReasons: guidance.holdReasons,
+    oppositeExitStreak: oppositeExit.streak,
+    awaitingOppositeExitConfirmation: oppositeExit.awaitingConfirmation,
   };
 }
 

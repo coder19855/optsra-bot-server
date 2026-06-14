@@ -67,13 +67,22 @@ export function formatCommandsReferenceMessage(
     '<i>Try:</i> <code>/outcomes</code>',
   ]);
 
+  const benchmarkBlock = commandBlock('📐 <b>Engine backtest</b>', [
+    '<code>/benchmark</code> — replay signals with trailing TP (1:1.5→1:4)',
+    '<i>Try:</i> <code>/benchmark 30</code> · <code>/benchmark 14 ai-shadow</code>',
+    '<code>/benchmark 30 2</code> — 30 days, max <b>2 trades/day</b> (recommended)',
+    '<code>/benchmark max2</code> — explicit daily cap · omit for unlimited',
+    '<code>/benchmark 30 ai-active</code> — compare AI-gated entries',
+    '<code>/benchmark ai-off</code> — engine only (no AI calls)',
+  ]);
+
   const convictionBlock = commandBlock('📈 <b>Your personal enter bar</b>', [
     '<code>/conviction</code> — win-rate by conviction bucket',
     `<i>Try:</i> <code>/conviction</code> · <code>/conviction PE ${sym} ${style}</code>`,
   ]);
 
   const planBlock = commandBlock('📐 <b>Plan the trade</b>', [
-    '<code>/rr</code> — entry, stop, 1:1 / 1:2 / 1:3 targets',
+    '<code>/rr</code> — entry, stop, 1:1.5 / 1:2.5 / 1:4 targets',
     `<i>Try:</i> <code>/rr ${sym} ${style}</code>`,
     '<code>/size</code> — lots from balance + stop risk',
     `<i>Try:</i> <code>/size</code> · <code>/size ${sym} ${style}</code>`,
@@ -170,6 +179,7 @@ export function formatCommandsReferenceMessage(
     newsBlock,
     learningBlock,
     outcomesBlock,
+    benchmarkBlock,
     convictionBlock,
     planBlock,
     nowBlock,
@@ -208,6 +218,7 @@ export const TELEGRAM_BOT_COMMANDS = [
   { command: 'apiusage', description: 'Fyers API consumption' },
   { command: 'clear', description: 'Tidy bot messages' },
   { command: 'outcomes', description: 'Paper alert scoreboard' },
+  { command: 'benchmark', description: 'Engine backtest & AI compare' },
   { command: 'conviction', description: 'Your enter threshold' },
   { command: 'rr', description: 'Risk / reward map' },
   { command: 'size', description: 'How many lots?' },

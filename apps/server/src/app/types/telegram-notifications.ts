@@ -204,6 +204,11 @@ export interface TpMonitorSnapshot {
   updatedAt: Date;
   trackedAt?: Date;
   lastNotifiedAt?: Date;
+  /** Consecutive opposite-direction polls while holding (live 2-poll flip confirm). */
+  oppositeExitStreak?: number;
+  awaitingOppositeExitConfirmation?: boolean;
+  /** Peak favorable R multiple for dynamic trail ratchet. */
+  peakR?: number;
 
   /** Last computed Position Health Score (for trend detection in management brain) */
   lastPositionHealthScore?: number;
@@ -239,6 +244,8 @@ export interface PositionTpEvaluation {
   holdAdvice: TpHoldAdvice;
   holdHeadline: string;
   holdReasons: string[];
+  oppositeExitStreak?: number;
+  awaitingOppositeExitConfirmation?: boolean;
   /** Rich output from the Management Brain — primary source of truth for what to do with the open position. */
   managementAdvice?: import('../telegram-notifications/position-monitor').ManagementAdvice;
 }

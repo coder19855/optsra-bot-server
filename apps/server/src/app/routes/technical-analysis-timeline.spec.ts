@@ -69,4 +69,29 @@ describe('GET /api/technical-analysis/timeline', () => {
     expect(body.summary).toEqual(expect.any(Object));
     await app.close();
   });
+
+  it('trims points when maxPoints is set and can include candles', async () => {
+    const candles = sampleCandles(120);
+    const fyers = createMockFyers({
+      getHistory: jest.fn().mockResolvedValue({
+        s: ResponseStatus.ok,
+        candles,
+      }),
+    });
+    const app = await buildRouteApp(technicalAnalysisTimelineRoute, async (f) => {
+      decorateFyers(f, fyers);
+      await f.register(momentumDecayPlugin);
+      await f.register(technicalAnalysisPlugin);
+    });
+    const toSec = candles[candles.length - 1][0];
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/technical-analysis/timeline?symbol=NSE:NIFTY50-INDEX&days=3&interval=15&to=${toSec}&sessionOnly=false&maxPoints=5&includeCandles=true`,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.points.length).toBeLessThanOrEqual(5);
+    expect(body.spotCandles?.['5m']?.length).toBeGreaterThan(0);
+    await app.close();
+  });
 });

@@ -9,8 +9,10 @@ import {
 import { resolveDeckSseEnabled } from '../constants/deck-stream';
 import { handleDeckStream } from '../telegram-notifications/deck-stream-handler';
 import {
+  buildDeckLiveEnrichmentPayload,
   buildDeckLivePayload,
   buildDeckReplayPayload,
+  buildDeckReplayTradesPayload,
 } from '../telegram-notifications/deck-service';
 import { resolveAllowedTelegramUserIds } from '../telegram-notifications/telegram-access';
 
@@ -97,23 +99,60 @@ export default async function deckRoutes(fastify: FastifyInstance) {
   fastify.get('/api/deck/live', async (request, reply) => {
     if (!(await assertDeckAccess(request, reply))) return;
 
-    const { symbol, style } = request.query as {
+    const { symbol, style, scope } = request.query as {
       symbol?: string;
       style?: string;
+      scope?: string;
     };
     if (!symbol?.trim()) {
       return reply.code(400).send({ error: 'symbol is required' });
     }
 
     try {
-      const payload = await buildDeckLivePayload(fastify, {
-        symbol: symbol.trim(),
-        tradingStyle: style,
-      });
+      const trimmedSymbol = symbol.trim();
+      const payload =
+        scope === 'enrichment'
+          ? await buildDeckLiveEnrichmentPayload(fastify, {
+              symbol: trimmedSymbol,
+              tradingStyle: style,
+            })
+          : await buildDeckLivePayload(fastify, {
+              symbol: trimmedSymbol,
+              tradingStyle: style,
+            });
       return payload;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       fastify.log.warn({ err }, 'deck live failed');
+      return reply.code(502).send({ error: message });
+    }
+  });
+
+  fastify.get('/api/deck/replay-trades', async (request, reply) => {
+    if (!(await assertDeckAccess(request, reply))) return;
+
+    const { symbol, style, date } = request.query as {
+      symbol?: string;
+      style?: string;
+      date?: string;
+    };
+    if (!symbol?.trim()) {
+      return reply.code(400).send({ error: 'symbol is required' });
+    }
+    if (!date?.trim()) {
+      return reply.code(400).send({ error: 'date is required (YYYY-MM-DD)' });
+    }
+
+    try {
+      const payload = await buildDeckReplayTradesPayload(fastify, {
+        symbol: symbol.trim(),
+        tradingStyle: style,
+        sessionDate: date.trim(),
+      });
+      return payload;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      fastify.log.warn({ err }, 'deck replay trades failed');
       return reply.code(502).send({ error: message });
     }
   });

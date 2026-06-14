@@ -15,6 +15,18 @@ import { TradingStyle } from '../types/trading-style';
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+export function mapFyersCandlesToOhlc(
+  candles: FyersAPI.Candle[],
+): Array<{ t: number; o: number; h: number; l: number; c: number }> {
+  return candles.map(([t, o, h, l, c]) => ({
+    t: t * 1000,
+    o,
+    h,
+    l,
+    c,
+  }));
+}
+
 export function parseEpochMs(value: unknown, fallback: number): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0) return fallback;
@@ -448,4 +460,116 @@ export function simulateTradeOutcome(
         : (bestTp?.rr ?? 'OPEN'),
     barsHeld: forwardCandles.length,
   });
+}
+
+/** Recompute timeline summary for a (possibly trimmed) point set. */
+export function summarizeTimelinePoints(
+  points: import('../types/technical-analysis').TimelinePoint[],
+  endSpot: number,
+): import('../types/technical-analysis').TechnicalAnalysisTimelineResponse['summary'] {
+  const signals: Record<TradeAction, number> = {
+    'CE-BUY': 0,
+    'PE-BUY': 0,
+    'NO-TRADE': 0,
+  };
+  const tradeOutcomes = {
+    stopLoss: 0,
+    takeProfit: {
+      '1:1': 0,
+      '1:2': 0,
+      '1:3': 0,
+      '1:1.5': 0,
+      '1:2.5': 0,
+      '1:4': 0,
+    } as Record<RrLabel, number>,
+    sessionEnd: 0,
+    open: 0,
+    noTrade: 0,
+    signalFlip: 0,
+  };
+  const vetoBreakdown: Record<string, number> = {};
+  let confidenceTotal = 0;
+  let pnlRTotal = 0;
+  let tradedPoints = 0;
+  let winningTrades = 0;
+  let decayPercentTotal = 0;
+  let decaySampleCount = 0;
+  let vetoedByDecayCount = 0;
+
+  for (const pt of points) {
+    signals[pt.signal.action] += 1;
+    confidenceTotal += pt.signal.confidence;
+
+    if (pt.momentumDecay) {
+      decayPercentTotal += pt.momentumDecay.decayPercent;
+      decaySampleCount += 1;
+      if (pt.momentumDecay.vetoedByDecay) vetoedByDecayCount += 1;
+    }
+
+    const reason = pt.signal.vetoReason;
+    if (reason && pt.signal.action === 'NO-TRADE') {
+      vetoBreakdown[reason] = (vetoBreakdown[reason] ?? 0) + 1;
+    }
+
+    const outcome = pt.tradeOutcome;
+    if (outcome.status === 'NO-TRADE') {
+      tradeOutcomes.noTrade += 1;
+    } else if (outcome.status === 'SESSION_END') {
+      tradeOutcomes.sessionEnd += 1;
+      tradedPoints += 1;
+      pnlRTotal += outcome.pnlR;
+    } else if (outcome.status === 'STOP_LOSS') {
+      tradeOutcomes.stopLoss += 1;
+      tradedPoints += 1;
+      pnlRTotal += outcome.pnlR;
+    } else if (outcome.status === 'TAKE_PROFIT') {
+      if (
+        outcome.hitLevel === '1:1' ||
+        outcome.hitLevel === '1:2' ||
+        outcome.hitLevel === '1:3' ||
+        outcome.hitLevel === '1:1.5' ||
+        outcome.hitLevel === '1:2.5' ||
+        outcome.hitLevel === '1:4'
+      ) {
+        tradeOutcomes.takeProfit[outcome.hitLevel] += 1;
+      } else if (outcome.hitLevel === 'SIGNAL_FLIP') {
+        tradeOutcomes.signalFlip += 1;
+      }
+      tradedPoints += 1;
+      pnlRTotal += outcome.pnlR;
+    } else if (outcome.hitLevel === 'SIGNAL_FLIP') {
+      tradeOutcomes.signalFlip += 1;
+      tradedPoints += 1;
+      pnlRTotal += outcome.pnlR;
+    } else {
+      tradeOutcomes.open += 1;
+      tradedPoints += 1;
+      pnlRTotal += outcome.pnlR;
+    }
+
+    if (outcome.status !== 'NO-TRADE' && outcome.pnlR > 0) {
+      winningTrades += 1;
+    }
+  }
+
+  return {
+    totalPoints: points.length,
+    signals,
+    avgConfidence: points.length
+      ? +(confidenceTotal / points.length).toFixed(1)
+      : 0,
+    endSpot: +endSpot.toFixed(2),
+    tradeOutcomes,
+    decay: {
+      vetoedCount: vetoedByDecayCount,
+      avgDecayPercent: decaySampleCount
+        ? +(decayPercentTotal / decaySampleCount).toFixed(1)
+        : 0,
+    },
+    avgPnlR: tradedPoints ? +(pnlRTotal / tradedPoints).toFixed(3) : 0,
+    totalTrades: tradedPoints,
+    totalPnlR: +pnlRTotal.toFixed(3),
+    winRate: tradedPoints ? +(winningTrades / tradedPoints).toFixed(3) : 0,
+    vetoBreakdown,
+  };
 }
