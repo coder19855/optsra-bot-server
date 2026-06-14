@@ -212,72 +212,146 @@
 
   let capitalChartApi = null;
   let equityChartApi = null;
+  let pendingCapitalCurve = null;
+  let pendingEquityCurve = null;
+  let pendingEquityTotalR = 0;
 
-  function renderCapitalCurve(curve, summary) {
-    if (!summary || !curve?.length) return;
-    els.capitalChartTotal.textContent = fmtInr(summary.endingCapitalInr);
-    els.capitalChartTotal.className = `curve-total ${pnlClass(summary.netPnlInr)}`;
+  function toChartSeries(curve, valueKey) {
+    const byTime = new Map();
+    for (const point of curve || []) {
+      const time = Math.floor(point.t / 1000);
+      const value = Number(point[valueKey]);
+      if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
+      byTime.set(time, value);
+    }
+    const series = [...byTime.entries()]
+      .map(([time, value]) => ({ time, value }))
+      .sort((a, b) => a.time - b.time);
+    if (series.length === 1) {
+      series.unshift({
+        time: series[0].time - 3600,
+        value: series[0].value,
+      });
+    }
+    return series;
+  }
 
-    if (!window.LightweightCharts) return;
-    if (capitalChartApi) {
-      capitalChartApi.remove();
-      capitalChartApi = null;
+  function chartHeight(container, fallback) {
+    const h = container?.clientHeight || 0;
+    return h > 20 ? h : fallback;
+  }
+
+  function showChartEmptyNote(container, message) {
+    if (!container) return;
+    container.innerHTML = `<p class="chart-empty-note">${escapeHtml(message)}</p>`;
+  }
+
+  function mountAreaChart(container, { height, lineColor, topColor, bottomColor, data }) {
+    if (!container) return null;
+    container.innerHTML = '';
+
+    if (!window.LightweightCharts) {
+      showChartEmptyNote(
+        container,
+        'Chart library failed to load — reload from the Telegram button.',
+      );
+      return null;
     }
 
-    capitalChartApi = LightweightCharts.createChart(els.capitalChart, {
+    if (!data.length) {
+      showChartEmptyNote(container, 'No curve data for this window.');
+      return null;
+    }
+
+    const width = container.clientWidth;
+    if (width < 10) {
+      return null;
+    }
+
+    const api = LightweightCharts.createChart(container, {
+      autoSize: true,
       layout: { background: { color: '#161a20' }, textColor: '#8b95a8' },
       grid: { vertLines: { color: '#252b36' }, horzLines: { color: '#252b36' } },
       rightPriceScale: { borderColor: '#252b36' },
       timeScale: { borderColor: '#252b36', timeVisible: true },
-      height: 200,
+      height: chartHeight(container, height),
     });
 
-    const series = capitalChartApi.addAreaSeries({
+    const series = api.addAreaSeries({
+      lineColor,
+      topColor,
+      bottomColor,
+      lineWidth: 2,
+    });
+    series.setData(data);
+    api.timeScale().fitContent();
+    return api;
+  }
+
+  function destroyChart(api) {
+    if (!api) return;
+    try {
+      api.remove();
+    } catch {
+      // Chart may already be removed.
+    }
+  }
+
+  function renderCapitalCurve(curve, summary) {
+    pendingCapitalCurve = { curve, summary };
+    if (!summary) return;
+    els.capitalChartTotal.textContent = fmtInr(summary.endingCapitalInr);
+    els.capitalChartTotal.className = `curve-total ${pnlClass(summary.netPnlInr)}`;
+    if (!curve?.length) {
+      showChartEmptyNote(els.capitalChart, 'No capital curve data.');
+      return;
+    }
+    mountCapitalChart();
+  }
+
+  function mountCapitalChart() {
+    const { curve, summary } = pendingCapitalCurve || {};
+    if (!summary || !curve?.length) return;
+
+    destroyChart(capitalChartApi);
+    capitalChartApi = mountAreaChart(els.capitalChart, {
+      height: 200,
       lineColor: '#fbbf24',
       topColor: 'rgba(251, 191, 36, 0.35)',
       bottomColor: 'rgba(251, 191, 36, 0.02)',
-      lineWidth: 2,
+      data: toChartSeries(curve, 'capitalInr'),
     });
-
-    const data = curve.map((p) => ({
-      time: Math.floor(p.t / 1000),
-      value: p.capitalInr,
-    }));
-    if (data.length) series.setData(data);
-    capitalChartApi.timeScale().fitContent();
   }
 
   function renderEquityCurve(curve, totalR) {
+    pendingEquityCurve = curve;
+    pendingEquityTotalR = totalR;
     els.curveTotal.textContent = `${totalR >= 0 ? '+' : ''}${totalR}R`;
     els.curveTotal.className = `curve-total ${pnlClass(totalR)}`;
-
-    if (!window.LightweightCharts) return;
-    if (equityChartApi) {
-      equityChartApi.remove();
-      equityChartApi = null;
+    if (!curve?.length) {
+      showChartEmptyNote(els.equityChart, 'No equity curve data.');
+      return;
     }
+    mountEquityChart();
+  }
 
-    equityChartApi = LightweightCharts.createChart(els.equityChart, {
-      layout: { background: { color: '#161a20' }, textColor: '#8b95a8' },
-      grid: { vertLines: { color: '#252b36' }, horzLines: { color: '#252b36' } },
-      rightPriceScale: { borderColor: '#252b36' },
-      timeScale: { borderColor: '#252b36', timeVisible: true },
+  function mountEquityChart() {
+    const curve = pendingEquityCurve;
+    if (!curve?.length) return;
+
+    destroyChart(equityChartApi);
+    equityChartApi = mountAreaChart(els.equityChart, {
       height: 180,
-    });
-
-    const series = equityChartApi.addAreaSeries({
       lineColor: '#22d3ee',
       topColor: 'rgba(34, 211, 238, 0.35)',
       bottomColor: 'rgba(34, 211, 238, 0.02)',
-      lineWidth: 2,
+      data: toChartSeries(curve, 'cumulativeR'),
     });
+  }
 
-    const data = curve.map((p) => ({
-      time: Math.floor(p.t / 1000),
-      value: p.cumulativeR,
-    }));
-    if (data.length) series.setData(data);
-    equityChartApi.timeScale().fitContent();
+  function mountBenchmarkCharts() {
+    mountCapitalChart();
+    mountEquityChart();
   }
 
   function hitLabel(hitLevel, exitStatus) {
@@ -427,10 +501,8 @@
     });
 
     renderCapitalHero(report.capitalSummary);
-    renderCapitalCurve(report.capitalCurve, report.capitalSummary);
     renderKpis(report.aiComparison.baseline, report.capitalSummary);
     renderCompare(report.aiComparison, report.params.aiMode);
-    renderEquityCurve(report.equityCurve, report.aiComparison.baseline.totalPnlR);
     renderExitBars(report.aiComparison.baseline);
     renderTrades(report.trades);
 
@@ -442,8 +514,20 @@
       ...report.aiComparison.notes,
     ];
     els.notes.innerHTML = noteLines.map((n) => escapeHtml(n)).join('<br>');
+
+    renderCapitalCurve(report.capitalCurve, report.capitalSummary);
+    renderEquityCurve(report.equityCurve, report.aiComparison.baseline.totalPnlR);
     hideLoading();
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        mountBenchmarkCharts();
+      });
+    });
   }
+
+  window.addEventListener('resize', () => {
+    mountBenchmarkCharts();
+  });
 
   async function fetchReportById(id) {
     const res = await fetch(

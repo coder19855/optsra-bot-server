@@ -353,10 +353,25 @@ body {
 
 .equity-chart {
   height: 180px;
+  min-height: 180px;
+  width: 100%;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
   background: var(--surface);
+}
+
+#capital-chart.equity-chart {
+  height: 200px;
+  min-height: 200px;
+}
+
+.chart-empty-note {
+  margin: 0;
+  padding: 24px 12px;
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--muted);
 }
 
 .curve-total {
