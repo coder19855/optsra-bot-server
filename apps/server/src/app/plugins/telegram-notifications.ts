@@ -311,6 +311,9 @@ export default fp(
     ): Promise<void> {
       if (!shouldSendFyersLoginReminder(lastFyersLoginReminderAt)) return;
 
+      await fastify.fyers.initialize();
+      if (await fastify.fyers.isTokenValid()) return;
+
       const { text, options } = getFyersLoginReminderContent();
       await sendTelegramMessage(text, {
         channel: 'default',

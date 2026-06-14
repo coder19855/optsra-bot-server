@@ -2,6 +2,7 @@ import Fastify, { FastifyInstance } from 'fastify';
 import { ResponseStatus } from '../types/common';
 
 export type MockFyers = {
+  initialize: jest.Mock;
   isTokenValid: jest.Mock;
   generateAuthCode: jest.Mock;
   generate_access_token: jest.Mock;
@@ -17,6 +18,7 @@ export function createMockFyers(
   overrides: Partial<MockFyers> = {},
 ): MockFyers {
   return {
+    initialize: jest.fn().mockResolvedValue(undefined),
     isTokenValid: jest.fn().mockResolvedValue(false),
     generateAuthCode: jest.fn().mockReturnValue('https://auth.fyers.example'),
     generate_access_token: jest.fn(),

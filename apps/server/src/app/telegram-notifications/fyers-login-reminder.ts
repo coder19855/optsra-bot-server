@@ -25,10 +25,12 @@ export function resolvePublicAppBaseUrl(): string | null {
   }
 }
 
-export function resolveFyersLoginUrl(): string | null {
+export function resolveFyersLoginUrl(forceRelogin = false): string | null {
   const base = resolvePublicAppBaseUrl();
   if (!base) return null;
-  return `${base}/api/login?forceRedirect=true`;
+  const qs = new URLSearchParams({ forceRedirect: 'true' });
+  if (forceRelogin) qs.set('forceRelogin', 'true');
+  return `${base}/api/login?${qs.toString()}`;
 }
 
 export function buildFyersLoginInlineKeyboard():
@@ -37,6 +39,54 @@ export function buildFyersLoginInlineKeyboard():
   const loginUrl = resolveFyersLoginUrl();
   if (!loginUrl) return undefined;
   return [[{ text: '🔐 Login to Fyers', url: loginUrl }]];
+}
+
+export function getFyersLoginAlreadyActiveContent(): {
+  text: string;
+  options: TelegramSendOptions;
+} {
+  const refreshUrl = resolveFyersLoginUrl(true);
+  const inlineKeyboard = refreshUrl
+    ? [[{ text: '🔄 Force refresh token', url: refreshUrl }]]
+    : undefined;
+
+  return {
+    text: joinTelegramSections(
+      '✅ <b>Fyers session is active</b>',
+      joinTelegramLines(
+        'Your token is valid — no browser login needed.',
+        'Alerts, /coach, /benchmark, and live reads can use this session.',
+      ),
+      joinTelegramLines(
+        '<i>Check</i> <code>/status</code> <i>for session details.</i>',
+        refreshUrl
+          ? '<i>Use refresh only if commands still fail after a valid token.</i>'
+          : null,
+      ),
+    ),
+    options: inlineKeyboard ? { inlineKeyboard } : {},
+  };
+}
+
+export function getFyersLoginApiMismatchContent(): {
+  text: string;
+  options: TelegramSendOptions;
+} {
+  const loginUrl = resolveFyersLoginUrl(true);
+  const inlineKeyboard = loginUrl
+    ? [[{ text: '🔐 Refresh Fyers login', url: loginUrl }]]
+    : buildFyersLoginInlineKeyboard();
+
+  return {
+    text: joinTelegramSections(
+      '⚠️ <b>Fyers token looks valid but API check failed</b>',
+      joinTelegramLines(
+        'The stored JWT has not expired, but Fyers rejected a live profile call.',
+        'Try refresh below — or wait a minute and run <code>/status</code>.',
+      ),
+    ),
+    options: inlineKeyboard ? { inlineKeyboard } : {},
+  };
 }
 
 export function getFyersLoginReminderContent(): {

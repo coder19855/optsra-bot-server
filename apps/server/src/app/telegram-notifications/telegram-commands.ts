@@ -13,6 +13,8 @@ import {
 import {
   FYERS_AUTH_ERROR_REPLY,
   buildFyersLoginInlineKeyboard,
+  getFyersLoginAlreadyActiveContent,
+  getFyersLoginApiMismatchContent,
   getFyersLoginReminderContent,
 } from './fyers-login-reminder';
 import { isFyersAuthError } from './coach-summary-formatter';
@@ -425,11 +427,38 @@ export class TelegramCommandPoller {
   }
 
   private async handleLogin(replyChatId?: number): Promise<void> {
+    const reply = this.replyOptions(replyChatId);
+    await this.fastify.fyers.initialize();
+    const jwtValid = await this.fastify.fyers.isTokenValid();
+
+    if (jwtValid) {
+      const apiOk = await this.fastify.ensureFyersSession({
+        verifyWithApi: true,
+      });
+
+      if (apiOk) {
+        const { text: activeText, options } = getFyersLoginAlreadyActiveContent();
+        let message = activeText;
+
+        if (this.fastify.telegramNotifications.isAlertsPaused()) {
+          await this.fastify.telegramNotifications.setAlertsPaused(false);
+          message = joinTelegramSections(
+            activeText,
+            '▶️ <b>Signal alerts resumed</b> — you were paused; back on the watch now.',
+          );
+        }
+
+        await this.deps.sendMessage(message, { ...reply, ...options });
+        return;
+      }
+
+      const mismatch = getFyersLoginApiMismatchContent();
+      await this.deps.sendMessage(mismatch.text, { ...reply, ...mismatch.options });
+      return;
+    }
+
     const { text, options } = getFyersLoginReminderContent();
-    await this.deps.sendMessage(text, {
-      ...this.replyOptions(replyChatId),
-      ...options,
-    });
+    await this.deps.sendMessage(text, { ...reply, ...options });
   }
 
   private async handleHelp(_text: string, replyChatId?: number): Promise<void> {

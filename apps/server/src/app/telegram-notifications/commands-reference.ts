@@ -141,7 +141,7 @@ export function formatCommandsReferenceMessage(
   ]);
 
   const fyersBlock = commandBlock('🔐 <b>Fyers session</b>', [
-    '<code>/login</code> — login link (opens browser; auto-resumes alerts)',
+    '<code>/login</code> — checks session; login link only if token expired',
   ]);
 
   const apiBlock = commandBlock('🌡 <b>API budget</b>', [
