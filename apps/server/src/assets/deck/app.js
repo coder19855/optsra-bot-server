@@ -96,6 +96,7 @@
     loadingOverlay: document.getElementById('loading-overlay'),
     chartToggle: document.getElementById('chart-toggle'),
     chartCollapsible: document.getElementById('chart-collapsible'),
+    chartTfTabs: document.getElementById('chart-tf-tabs'),
   };
 
   let charts = {
@@ -128,8 +129,11 @@
   let chartOverlays = [];
   let chartSession = null;
   let spotOverlayLines = { '5m': [], '15m': [], '1h': [] };
-  const SPOT_CHART_HEIGHT = 200;
+  const SPOT_CHART_HEIGHT = 280;
   let chartsVisible = true;
+  let activeChartTf = '15m';
+  let replayBaseVetoTimeline = [];
+  let replayTradeOverlays = [];
   els.symbol.textContent = shortSymbolLabel(symbol);
   els.style.textContent = style;
 
@@ -565,7 +569,8 @@
     });
   }
 
-  function overlayLineColor(tone) {
+  function overlayLineColor(tone, kind) {
+    if (kind === 'entry') return '#fbbf24';
     if (tone === 'bull') return '#22c55e';
     if (tone === 'bear') return '#ef4444';
     return '#60a5fa';
@@ -574,23 +579,25 @@
   function applyChartOverlays(overlays) {
     clearSpotOverlays();
     chartOverlays = overlays || [];
-    Object.keys(charts).forEach(tf => {
-      const chart = charts[tf];
-      if (!chart.series || !chartOverlays.length) return;
-      for (const overlay of chartOverlays) {
-        const line = chart.series.createPriceLine({
-          price: overlay.price,
-          color: overlayLineColor(overlay.tone),
-          lineWidth: overlay.kind === 'neckline' ? 2 : 1,
-          lineStyle: overlay.dashed
-            ? LightweightCharts.LineStyle.Dashed
-            : LightweightCharts.LineStyle.Solid,
-          axisLabelVisible: true,
-          title: overlay.label,
-        });
-        spotOverlayLines[tf].push(line);
+    const tf = activeChartTf;
+    const chart = charts[tf];
+    if (!chart?.series || !chartOverlays.length) return;
+    for (const overlay of chartOverlays) {
+      if (overlay.kind !== 'neckline' && overlay.kind !== 'support' && overlay.kind !== 'resistance' && overlay.kind !== 'entry') {
+        continue;
       }
-    });
+      const line = chart.series.createPriceLine({
+        price: overlay.price,
+        color: overlayLineColor(overlay.tone, overlay.kind),
+        lineWidth: overlay.kind === 'neckline' || overlay.kind === 'entry' ? 2 : 1,
+        lineStyle: overlay.dashed
+          ? LightweightCharts.LineStyle.Dashed
+          : LightweightCharts.LineStyle.Solid,
+        axisLabelVisible: true,
+        title: overlay.label,
+      });
+      spotOverlayLines[tf].push(line);
+    }
   }
 
   function focusIntradaySession(session, data, api) {
@@ -626,7 +633,8 @@
     }
 
     let allMounted = true;
-    Object.keys(charts).forEach(tf => {
+    const mountTfs = forceRemount ? Object.keys(charts) : [activeChartTf];
+    mountTfs.forEach(tf => {
       const chart = charts[tf];
       const container = els[chart.container];
       if (!container) {
@@ -2128,7 +2136,7 @@
 
   function updateSpotScrub(point, action, data, eventMarkers) {
     if (!point) return;
-    Object.keys(charts).forEach(tf => {
+    [activeChartTf].forEach(tf => {
       const chart = charts[tf];
       const series = data?.[tf] || spotDataCache[tf];
       if (!chart.series || !series) return;
@@ -2286,25 +2294,27 @@
   function applySpotChartData(multiCandles, scrubPoint, scrubAction) {
     const session = resolveChartSession(
       { session: chartSession },
-      multiCandles['5m'],
+      multiCandles[activeChartTf] || multiCandles['5m'],
     );
 
     const multiMarkers = {};
+    const useSessionFilter = chartSession?.label?.includes('09:15');
 
     Object.keys(charts).forEach(tf => {
       const chart = charts[tf];
       const candles = multiCandles[tf] || [];
-      if (!chart.series) return;
+      const normalized = normalizeSpotCandles(candles);
+      const sessionCandles = useSessionFilter
+        ? filterCandlesToSession(normalized, session)
+        : normalized;
+      spotDataCache[tf] = toCandleChartData(sessionCandles);
+    });
 
-      const sessionCandles = filterCandlesToSession(
-        normalizeSpotCandles(candles),
-        session,
-      );
-      const data = toCandleChartData(sessionCandles);
-      spotDataCache[tf] = data;
+    const tf = activeChartTf;
+    const chart = charts[tf];
+    const data = spotDataCache[tf] || [];
 
-      if (!data.length) return;
-
+    if (chart.series && data.length) {
       try {
         chart.series.setData(data);
         const eventMarkers = chartMarkersForEvents(data);
@@ -2319,23 +2329,36 @@
       } catch (err) {
         console.error(`Failed to apply data to ${tf} chart:`, err);
       }
-    });
+    }
 
-    applyChartOverlays(chartOverlays);
+    const mergedOverlays = [
+      ...(chartOverlays || []),
+      ...(replayTradeOverlays || []),
+    ];
+    applyChartOverlays(mergedOverlays);
 
     if (scrubPoint) {
       updateSpotScrub(scrubPoint, scrubAction, spotDataCache, multiMarkers);
-    } else {
-      if (els.spotScrubLabel) els.spotScrubLabel.textContent = '';
+    } else if (els.spotScrubLabel) {
+      els.spotScrubLabel.textContent = '';
     }
 
-    if (currentMode === 'live') {
-      Object.keys(charts).forEach(tf => {
-        const chart = charts[tf];
-        if (chart.api && spotDataCache[tf]?.length) {
-          focusIntradaySession(session, spotDataCache[tf], chart.api);
+    if (currentMode === 'live' && chart.api && data.length) {
+      if (useSessionFilter) {
+        focusIntradaySession(session, data, chart.api);
+      } else {
+        try {
+          chart.api.timeScale().fitContent();
+        } catch {
+          // Chart may not be ready.
         }
-      });
+      }
+    } else if (currentMode === 'replay' && chart.api && data.length) {
+      try {
+        chart.api.timeScale().fitContent();
+      } catch {
+        // Chart may not be ready.
+      }
     }
   }
 
@@ -2360,17 +2383,40 @@
     els.vetoStrip.innerHTML = '';
     const maxSegs = Math.min(vetoTimeline.length, 120);
     const step = Math.max(1, Math.floor(vetoTimeline.length / maxSegs));
+    let vetoedCount = 0;
+    let tradeCount = 0;
     for (let i = 0; i < vetoTimeline.length; i += step) {
       const seg = vetoTimeline[i];
       const div = document.createElement('div');
       div.className = 'veto-seg';
-      if (seg.vetoed) div.classList.add('vetoed');
-      else if (seg.action === 'CE-BUY' || seg.action === 'PE-BUY') div.classList.add('clear');
-      else div.classList.add('flat');
+      if (seg.vetoed) {
+        div.classList.add('vetoed');
+        vetoedCount += 1;
+      } else if (seg.action === 'CE-BUY') {
+        div.classList.add('clear');
+        tradeCount += 1;
+      } else if (seg.action === 'PE-BUY') {
+        div.classList.add('bear');
+        tradeCount += 1;
+      } else {
+        div.classList.add('flat');
+      }
       const mappedReplayIdx = replayPoints.findIndex((p) => p.t === seg.t);
       if (mappedReplayIdx === activeIndex) div.classList.add('active');
-      div.title = seg.vetoReason || `${seg.action}${seg.structuralAction ? ` (struct ${seg.structuralAction})` : ''}`;
+      const modeHint =
+        currentMode === 'replay' && vetoMode !== serverVetoMode
+          ? ` · preview ${vetoMode}`
+          : '';
+      div.title =
+        (seg.vetoed
+          ? `Vetoed · ${seg.vetoReason || 'blocked'}`
+          : `${seg.action}${seg.structuralAction && seg.structuralAction !== seg.action ? ` (struct ${seg.structuralAction})` : ''}`) +
+        modeHint;
       els.vetoStrip.appendChild(div);
+    }
+    if (els.vetoStrip) {
+      const modeLabel = vetoMode === 'strict' ? 'Strict' : vetoMode === 'relaxed' ? 'Relaxed' : 'Off';
+      els.vetoStrip.title = `${modeLabel} · ${vetoedCount} vetoed · ${tradeCount} tradeable in strip`;
     }
   }
 
@@ -2588,6 +2634,9 @@
       );
     }
     updateSpotSeries(spotCandlesPayload, null, data.action);
+    if (data.chartSessionLabel && els.spotSessionLabel) {
+      els.spotSessionLabel.textContent = data.chartSessionLabel;
+    }
     renderPatternContext(
       data.patternContext ?? {
         label: '',
@@ -2797,8 +2846,52 @@
     }
   }
 
-  function resolveReplayDisplay(point) {
-    if (!point.vetoed || vetoMode === 'strict') {
+  function isPointVetoedForMode(point, mode) {
+    if (!point?.vetoed) return false;
+    if (mode === 'strict') return true;
+    if (mode === 'off') return false;
+    if (mode === 'relaxed') return !isSoftDecayVetoReason(point.vetoReason);
+    return true;
+  }
+
+  function buildVetoTimelineForMode(points, mode) {
+    return (points || []).map((point) => {
+      const display = resolveReplayDisplayWithMode(point, mode);
+      return {
+        t: point.t,
+        vetoed: isPointVetoedForMode(point, mode),
+        action: display.action,
+        structuralAction: point.structuralAction,
+        vetoReason: point.vetoReason,
+      };
+    });
+  }
+
+  function replayWhatIfFromPoint(point) {
+    if (point.whatIfAction && point.whatIfAction !== 'NO-TRADE') {
+      return {
+        action: point.whatIfAction,
+        conviction: point.whatIfConviction ?? point.conviction,
+      };
+    }
+    let action = point.structuralAction || point.action;
+    if (action === 'NO-TRADE' && Math.abs(point.paNeedle ?? 0) >= 0.1) {
+      action = point.paNeedle > 0 ? 'CE-BUY' : 'PE-BUY';
+    }
+    if (action === 'NO-TRADE') {
+      return { action: 'NO-TRADE', conviction: 0 };
+    }
+    const conviction = Math.round(
+      Math.min(90, Math.max(20, Math.abs(point.paNeedle ?? 0) * 100)),
+    );
+    return {
+      action,
+      conviction: point.whatIfConviction ?? point.conviction ?? conviction,
+    };
+  }
+
+  function resolveReplayDisplayWithMode(point, mode) {
+    if (!point.vetoed || mode === 'strict') {
       return {
         action: point.action,
         conviction: point.conviction,
@@ -2807,8 +2900,8 @@
     }
 
     const useWhatIf =
-      vetoMode === 'off' ||
-      (vetoMode === 'relaxed' && isSoftDecayVetoReason(point.vetoReason));
+      mode === 'off' ||
+      (mode === 'relaxed' && isSoftDecayVetoReason(point.vetoReason));
 
     if (!useWhatIf) {
       return {
@@ -2818,13 +2911,142 @@
       };
     }
 
+    const whatIf = replayWhatIfFromPoint(point);
     return {
-      action: point.whatIfAction,
-      conviction: point.whatIfConviction,
-      statusSuffix: point.structuralAction
-        ? ` · what-if ${point.structuralAction}`
-        : ` · what-if (${vetoMode})`,
+      action: whatIf.action,
+      conviction: whatIf.conviction,
+      statusSuffix: whatIf.action !== 'NO-TRADE'
+        ? ` · what-if ${whatIf.action}`
+        : ` · what-if (${mode})`,
     };
+  }
+
+  function humanizePatternToken(token) {
+    return String(token || '').replace(/_/g, ' ');
+  }
+
+  function patternInsightsForReplayPoint(point, tf) {
+    const all = point?.patternInsights || [];
+    if (!all.length) return [];
+    return all.filter((insight) => {
+      const insightTf = String(insight.timeframe || '').toLowerCase();
+      if (insightTf === tf) return true;
+      if (tf === '5m' && insightTf === '5m') return true;
+      if (tf === '15m' && (insightTf === '15m' || insight.type === 'chart')) return true;
+      if (tf === '1h' && insightTf === '1h') return true;
+      return false;
+    });
+  }
+
+  function buildPatternContextFromReplayPoint(point, tf) {
+    if (!point) return null;
+    const insights = patternInsightsForReplayPoint(point, tf);
+    const chartInsight = insights.find((i) => i.type === 'chart');
+    const candleInsight = insights.find((i) => i.type === 'candlestick');
+    const parts = [];
+    if (candleInsight) parts.push(candleInsight.pattern);
+    if (chartInsight) parts.push(chartInsight.pattern);
+    const overlays = [];
+    const support = point.levels?.support;
+    const resistance = point.levels?.resistance;
+    const neckline = point.confluenceContext?.chartPatternNeckline;
+    if (support > 0) {
+      overlays.push({ kind: 'support', price: support, label: 'Support', tone: 'bull' });
+    }
+    if (resistance > 0) {
+      overlays.push({ kind: 'resistance', price: resistance, label: 'Resistance', tone: 'bear' });
+    }
+    if (neckline > 0) {
+      overlays.push({
+        kind: 'neckline',
+        price: neckline,
+        label: chartInsight?.status === 'forming' ? 'Neckline ~' : 'Neckline',
+        tone: chartInsight?.tone || 'neutral',
+        dashed: chartInsight?.status === 'forming',
+      });
+    }
+    const markers = [];
+    if (point.t) {
+      if (candleInsight) {
+        markers.push({ t: point.t, label: candleInsight.pattern, tone: candleInsight.tone });
+      }
+      if (chartInsight) {
+        markers.push({ t: point.t, label: chartInsight.pattern, tone: chartInsight.tone });
+      }
+    }
+    return {
+      label: parts.join(' · '),
+      markers,
+      overlays,
+      session: buildIstSessionBounds(point.t),
+    };
+  }
+
+  function tradeOverlaysFromReplayPoint(point) {
+    const setup = point?.tradeSetup;
+    if (!setup) return [];
+    const overlays = [];
+    if (setup.entry > 0) {
+      overlays.push({ kind: 'entry', price: setup.entry, label: 'Entry', tone: 'neutral' });
+    }
+    if (setup.stopLoss > 0) {
+      overlays.push({
+        kind: 'support',
+        price: setup.stopLoss,
+        label: 'Stop loss',
+        tone: 'bear',
+        dashed: true,
+      });
+    }
+    for (const tp of setup.takeProfits || []) {
+      if (tp.price > 0) {
+        overlays.push({
+          kind: 'resistance',
+          price: tp.price,
+          label: `TP ${tp.multiplier}R`,
+          tone: 'bull',
+          dashed: true,
+        });
+      }
+    }
+    const exitPrice = point.tradeOutcome?.exitPrice;
+    if (exitPrice > 0) {
+      overlays.push({
+        kind: 'neckline',
+        price: exitPrice,
+        label: 'Exit',
+        tone: 'neutral',
+        dashed: true,
+      });
+    }
+    return overlays;
+  }
+
+  function setActiveChartTf(tf) {
+    if (!charts[tf]) return;
+    activeChartTf = tf;
+    document.querySelectorAll('.chart-tf-btn').forEach((btn) => {
+      const on = btn.dataset.chartTf === tf;
+      btn.classList.toggle('active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    document.querySelectorAll('.chart-container[data-chart-tf]').forEach((el) => {
+      el.classList.toggle('active', el.dataset.chartTf === tf);
+    });
+    if (currentMode === 'replay' && replayPoints.length) {
+      const idx = Number(els.replaySlider?.value ?? replayPoints.length - 1);
+      const point = replayPoints[Math.max(0, Math.min(idx, replayPoints.length - 1))];
+      renderPatternInsights(patternInsightsForReplayPoint(point, tf));
+      renderPatternContext(buildPatternContextFromReplayPoint(point, tf));
+    }
+    destroySpotChart();
+    if (activeTab === 'charts') {
+      requestAnimationFrame(() => flushSpotChart());
+    }
+  }
+
+  function resolveReplayDisplay(point) {
+    return resolveReplayDisplayWithMode(point, vetoMode);
   }
 
   function replayGaugesFromPoint(point) {
@@ -2914,6 +3136,9 @@
     renderVetoStrip(index);
     pendingSpotScrubPoint = point;
     pendingSpotScrubAction = chartAction;
+    replayTradeOverlays = tradeOverlaysFromReplayPoint(point);
+    renderPatternInsights(patternInsightsForReplayPoint(point, activeChartTf));
+    renderPatternContext(buildPatternContextFromReplayPoint(point, activeChartTf));
     if (activeTab === 'charts') flushSpotChart();
   }
 
@@ -2943,7 +3168,8 @@
     replayOptionComponents = data.optionComponents || [];
     replayGauges = data.gauges || null;
     replayEntryThreshold = Number(data.entryThreshold) || 60;
-    vetoTimeline = data.vetoTimeline || [];
+    replayBaseVetoTimeline = data.vetoTimeline || [];
+    vetoTimeline = buildVetoTimelineForMode(replayPoints, vetoMode);
     renderVetoBreakup(
       [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup || [],
@@ -2973,6 +3199,12 @@
     spotCandlesPayload = resolveSpotCandles(data);
     updateSpotSeries(spotCandlesPayload);
     updatePnlSeries(data.pnlSeries);
+    if (data.chartSessionLabel && els.spotSessionLabel) {
+      els.spotSessionLabel.textContent = data.chartSessionLabel;
+    }
+    if (data.patternContext) {
+      renderPatternContext(data.patternContext);
+    }
     renderPatternInsights(data.patternInsights);
     applyReplayIndex(replayPoints.length - 1);
     setError('');
@@ -3186,7 +3418,18 @@
       const mode = btn.dataset.vetoMode;
       if (currentMode === 'live') return;
       setVetoModeUi(mode, { replayOverride: mode !== serverVetoMode });
-      applyReplayIndex(Number(els.replaySlider.value));
+      vetoTimeline = buildVetoTimelineForMode(replayPoints, mode);
+      const idx = Number(els.replaySlider.value);
+      renderVetoStrip(idx);
+      applyReplayIndex(idx);
+    });
+  }
+
+  if (els.chartTfTabs) {
+    els.chartTfTabs.addEventListener('click', (e) => {
+      const btn = e.target.closest('.chart-tf-btn');
+      if (!btn?.dataset.chartTf) return;
+      setActiveChartTf(btn.dataset.chartTf);
     });
   }
 

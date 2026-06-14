@@ -40,6 +40,7 @@ import {
   syncLastReplayPointToLive,
   timelineToConvictionSeries,
 } from './deck-replay-utils';
+import { getOrBuildDeckReplayPayload } from './deck-replay-cache';
 import { getIstSessionClock, isIndianMarketOpen } from './signal-tracker';
 import { VetoMode } from './veto-preference';
 import { FlowMode } from '../types/flow-mode';
@@ -164,6 +165,17 @@ export interface DeckReplayPoint {
   vetoBreakup?: DeckVetoBreakupItem[];
   /** Last scrub point overwritten from trade-decision so replay max === live. */
   liveSynced?: boolean;
+  tradeSetup?: {
+    entry: number;
+    stopLoss: number;
+    takeProfits?: Array<{ multiplier: number; price: number }>;
+  };
+  levels?: { support?: number; resistance?: number };
+  confluenceContext?: Record<string, unknown>;
+  candlestick?: Record<string, string>;
+  primaryTimeframe?: string;
+  patternInsights?: DeckPatternInsight[];
+  tradeOutcome?: { exitPrice?: number; status?: string };
 }
 
 export interface DeckVetoPoint {
@@ -278,6 +290,7 @@ export interface DeckLivePayload {
   strategyRecommendation: DeckStrategyPayload;
   patternContext?: DeckPatternContext;
   patternInsights: DeckPatternInsight[];
+  chartSessionLabel?: string;
   openPositions: DeckOpenPositionsPayload;
   marketRegime: DeckMarketRegime;
   managementContext?: PositionManagementContext;
@@ -309,6 +322,8 @@ export interface DeckReplayPayload {
   vetoBreakup: DeckVetoBreakupItem[];
   strategyRecommendation: DeckStrategyPayload;
   patternInsights: DeckPatternInsight[];
+  patternContext?: DeckPatternContext;
+  chartSessionLabel?: string;
   pnlNote?: string;
   managementContext?: PositionManagementContext;
   openPositions?: DeckOpenPositionsPayload;
@@ -531,15 +546,38 @@ type TimelineResponse = {
 function multiCandlesFromTimeline(
   timeline: TimelineResponse | null,
   toMs: number,
-): { c5: DeckCandlePoint[]; c15: DeckCandlePoint[]; c1h: DeckCandlePoint[] } {
+): {
+  c5: DeckCandlePoint[];
+  c15: DeckCandlePoint[];
+  c1h: DeckCandlePoint[];
+  historical?: boolean;
+} {
   const session = buildIstChartSession(toMs);
   const raw = timeline?.spotCandles;
   if (raw) {
-    return {
+    const filtered = {
       c5: filterCandlesToIstSession(raw['5m'] ?? [], session),
       c15: filterCandlesToIstSession(raw['15m'] ?? [], session),
       c1h: filterCandlesToIstSession(raw['1h'] ?? [], session),
     };
+    const hasSession =
+      filtered.c5.length > 0 ||
+      filtered.c15.length > 0 ||
+      filtered.c1h.length > 0;
+    if (hasSession) return filtered;
+
+    const hist5 = raw['5m'] ?? [];
+    const hist15 = raw['15m'] ?? [];
+    const hist1h = raw['1h'] ?? [];
+    if (hist5.length || hist15.length || hist1h.length) {
+      return {
+        c5: hist5,
+        c15: hist15,
+        c1h: hist1h,
+        historical: true,
+      };
+    }
+    return filtered;
   }
   return { c5: [], c15: [], c1h: [] };
 }
@@ -881,6 +919,9 @@ function assembleLivePayloadParts(
     strategyRecommendation,
     patternContext: extractPatternContext(decision, spotSeries),
     patternInsights: extractPatternInsights(decision),
+    chartSessionLabel: multiCandles.historical
+      ? 'Recent history (market closed / pre-open)'
+      : '09:15–15:30 IST',
     openPositions,
     marketRegime: extractMarketRegime(decision, style, {
       flowMode,
@@ -1214,12 +1255,38 @@ export async function buildDeckReplayPayload(
   fastify: FastifyInstance,
   params: { symbol: string; tradingStyle?: string; sessionDate?: string },
 ): Promise<DeckReplayPayload> {
-  const style = parseTradingStyle(params.tradingStyle);
-  const { sessionDate } = getIstSessionClock(
+  const { sessionDate: todaySessionDate } = getIstSessionClock(
     Date.now(),
     'Asia/Kolkata',
   );
-  const date = params.sessionDate ?? sessionDate;
+  const date = params.sessionDate ?? todaySessionDate;
+  const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
+
+  return getOrBuildDeckReplayPayload(
+    fastify,
+    {
+      symbol: params.symbol,
+      tradingStyle: params.tradingStyle,
+      sessionDate: date,
+      vetoMode,
+      flowMode,
+      todaySessionDate,
+    },
+    () =>
+      buildDeckReplayPayloadUncached(fastify, {
+        ...params,
+        sessionDate: date,
+        tradingStyle: params.tradingStyle,
+      }),
+  );
+}
+
+async function buildDeckReplayPayloadUncached(
+  fastify: FastifyInstance,
+  params: { symbol: string; tradingStyle?: string; sessionDate: string },
+): Promise<DeckReplayPayload> {
+  const style = parseTradingStyle(params.tradingStyle);
+  const date = params.sessionDate;
   const { vetoMode, flowMode } = resolveDeckPreferences(fastify);
 
   const sessionEndIso = `${date}T15:30:00+05:30`;
@@ -1268,7 +1335,11 @@ export async function buildDeckReplayPayload(
     optionSnapshots,
     vetoMode,
   );
-  const isCurrentSession = date === sessionDate;
+  const { sessionDate: todaySessionDate } = getIstSessionClock(
+    Date.now(),
+    'Asia/Kolkata',
+  );
+  const isCurrentSession = date === todaySessionDate;
   if (isCurrentSession && replayPoints.length > 0) {
     const indexSymbol = decision.symbol || params.symbol;
     const liveSpot = resolveLiveIndexPrice(
@@ -1296,6 +1367,9 @@ export async function buildDeckReplayPayload(
   );
   const multiCandles = multiCandlesFromTimeline(timelineWithCandles, toMs);
   const spotSeries = timelineToSpotSeries(points);
+  const chartSessionLabel = multiCandles.historical
+    ? 'Recent history (pre / post session)'
+    : '09:15–15:30 IST';
 
   const strategyRecommendation = await extractStrategyRecommendation(
     fastify,
@@ -1345,6 +1419,12 @@ export async function buildDeckReplayPayload(
     vetoBreakup: extractVetoBreakup(decision, vetoMode, flowMode),
     strategyRecommendation,
     patternInsights: extractPatternInsights(decision),
+    patternContext: buildDeckPatternContext(
+      decision._debug?.rawPrice as PriceActionResponse,
+      spotSeries,
+      toMs,
+    ),
+    chartSessionLabel,
     pnlNote:
       'Loading session PnL from Fyers tradebook…',
     managementContext: {

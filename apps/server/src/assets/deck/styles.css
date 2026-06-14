@@ -31,7 +31,7 @@ body {
 }
 
 body.replay-mode {
-  padding-bottom: 72px;
+  padding-bottom: 16px;
 }
 
 .top-bar {
@@ -1079,6 +1079,10 @@ body.flow-option-only .flow-pa-lane {
   background: rgba(34, 197, 94, 0.45);
 }
 
+.veto-seg.bear {
+  background: rgba(239, 68, 68, 0.45);
+}
+
 .veto-seg.vetoed {
   background: rgba(245, 158, 11, 0.75);
 }
@@ -1171,6 +1175,16 @@ body.flow-option-only .flow-pa-lane {
   backdrop-filter: blur(8px);
   max-width: 480px;
   margin: 0 auto;
+}
+
+.replay-dock-inline {
+  position: static;
+  z-index: auto;
+  margin: 0 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  backdrop-filter: none;
 }
 
 .events-panel {
@@ -1800,11 +1814,49 @@ body.flow-option-only .flow-pa-lane {
     transform: rotate(360deg);
   }
 }
+.chart-tf-tabs {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 4px;
+  padding: 0 2px;
+}
+
+.chart-tf-btn {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.chart-tf-btn.active {
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.45);
+  background: rgba(34, 211, 238, 0.08);
+}
+
 .multi-chart-grid {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin-top: 8px;
+}
+
+.multi-chart-grid.single-tf-view .chart-container {
+  display: none;
+}
+
+.multi-chart-grid.single-tf-view .chart-container.active {
+  display: flex;
+}
+
+.multi-chart-grid.single-tf-view .chart-tf-panel {
+  min-height: 280px;
 }
 
 .chart-container {

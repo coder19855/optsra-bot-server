@@ -200,6 +200,11 @@
           <p id="veto-mode-note" class="veto-mode-note hidden"></p>
         </section>
 
+        <div id="replay-dock" class="replay-dock replay-only replay-dock-inline hidden">
+          <div class="replay-meta" id="replay-meta">—</div>
+          <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
+        </div>
+
         <section class="chart-block">
           <div class="chart-title-row">
             <div class="chart-title">
@@ -213,23 +218,28 @@
               </button>
             </div>
           </div>
+          <div class="chart-tf-tabs" id="chart-tf-tabs" role="tablist" aria-label="Chart timeframe">
+            <button type="button" class="chart-tf-btn" data-chart-tf="5m" role="tab" aria-selected="false">5m</button>
+            <button type="button" class="chart-tf-btn active" data-chart-tf="15m" role="tab" aria-selected="true">15m</button>
+            <button type="button" class="chart-tf-btn" data-chart-tf="1h" role="tab" aria-selected="false">1h</button>
+          </div>
           <div id="chart-collapsible" class="chart-collapsible">
-            <div class="multi-chart-grid">
-              <div class="chart-container">
+            <div class="multi-chart-grid single-tf-view">
+              <div class="chart-container" data-chart-tf="5m">
                 <div class="chart-label">5 min</div>
-                <div id="spot-chart-5m" class="chart"></div>
+                <div id="spot-chart-5m" class="chart chart-tf-panel"></div>
               </div>
-              <div class="chart-container">
+              <div class="chart-container active" data-chart-tf="15m">
                 <div class="chart-label">15 min</div>
-                <div id="spot-chart-15m" class="chart"></div>
+                <div id="spot-chart-15m" class="chart chart-tf-panel"></div>
               </div>
-              <div class="chart-container">
+              <div class="chart-container" data-chart-tf="1h">
                 <div class="chart-label">1 hr</div>
-                <div id="spot-chart-1h" class="chart"></div>
+                <div id="spot-chart-1h" class="chart chart-tf-panel"></div>
               </div>
             </div>
           </div>
-          <p id="spot-chart-empty" class="chart-empty hidden">No candle data for this session</p>
+          <p id="spot-chart-empty" class="chart-empty hidden">No candle data for this window — try replay or wait for session</p>
           <p id="spot-chart-error" class="chart-error hidden"></p>
         </section>
 
@@ -257,11 +267,6 @@
       </div>
 
       <p id="error-line" class="error-line hidden"></p>
-    </div>
-
-    <div id="replay-dock" class="replay-dock replay-only hidden">
-      <div class="replay-meta" id="replay-meta">—</div>
-      <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
     </div>
 
     <script src="app.js"></script>

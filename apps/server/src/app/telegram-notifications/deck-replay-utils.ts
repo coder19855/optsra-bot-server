@@ -143,6 +143,89 @@ export function syncLastReplayPointToLive(
   return replayPoints;
 }
 
+function toneForCandlePattern(pattern: string): 'bull' | 'bear' | 'neutral' {
+  if (/bull|hammer|morning|soldiers|piercing/i.test(pattern)) return 'bull';
+  if (/bear|shooting|evening|crows|dark_cloud/i.test(pattern)) return 'bear';
+  return 'neutral';
+}
+
+function toneForChartDirection(dir?: string): 'bull' | 'bear' | 'neutral' {
+  if (dir === 'bullish') return 'bull';
+  if (dir === 'bearish') return 'bear';
+  return 'neutral';
+}
+
+function computeWhatIfForTimelinePoint(
+  p: any,
+  paNeedle: number,
+): { action: string; conviction: number } {
+  let action =
+    p.signal?.structuralAction || p.signal?.action || 'NO-TRADE';
+  if (action === 'NO-TRADE' && Math.abs(paNeedle) >= 0.1) {
+    action = paNeedle > 0 ? 'CE-BUY' : 'PE-BUY';
+  }
+  if (action === 'NO-TRADE') {
+    return { action: 'NO-TRADE', conviction: 0 };
+  }
+  const sigConf = Number(p.signal?.confidence) || 0;
+  const needleConviction = Math.round(
+    Math.min(90, Math.max(20, Math.abs(paNeedle) * 100)),
+  );
+  return {
+    action,
+    conviction: sigConf > 0 ? sigConf : needleConviction,
+  };
+}
+
+export function patternInsightsFromTimelinePoint(p: any): Array<{
+  timeframe: string;
+  pattern: string;
+  status: string;
+  tone: 'bull' | 'bear' | 'neutral';
+  label: string;
+  type: 'chart' | 'candlestick';
+}> {
+  const insights: Array<{
+    timeframe: string;
+    pattern: string;
+    status: string;
+    tone: 'bull' | 'bear' | 'neutral';
+    label: string;
+    type: 'chart' | 'candlestick';
+  }> = [];
+
+  const chartPattern = p.confluenceContext?.chartPattern;
+  if (chartPattern && chartPattern !== 'none') {
+    insights.push({
+      timeframe: p.primaryTimeframe || '15m',
+      pattern: String(chartPattern).replace(/_/g, ' '),
+      status: p.confluenceContext?.chartPatternStatus || 'forming',
+      tone: toneForChartDirection(p.confluenceContext?.chartPatternDirection),
+      label: 'Chart Pattern',
+      type: 'chart',
+    });
+  }
+
+  const candles = p.candlestick;
+  if (candles) {
+    for (const tf of ['5m', '15m', '1h'] as const) {
+      const pat = candles[tf];
+      if (pat && pat !== 'none') {
+        insights.push({
+          timeframe: tf,
+          pattern: String(pat).replace(/_/g, ' '),
+          status: 'confirmed',
+          tone: toneForCandlePattern(String(pat)),
+          label: 'Candlestick',
+          type: 'candlestick',
+        });
+      }
+    }
+  }
+
+  return insights;
+}
+
 export function timelineToConvictionSeries(
   points: Array<any>,
   style: TradingStyle,
@@ -154,6 +237,7 @@ export function timelineToConvictionSeries(
     const paComponents = buildReplayPaComponents(p.timeframeScores ?? {}, p.mtfScore ?? 0, p.aligned ?? 0, primaryTf as any);
     const optionNeedle = computeReplayOptionNeedle(p as any, primaryTf as any);
     const paNeedle = computePaNeedleFromConviction(p.signal?.confidence ?? 0, p.timeframeScores?.[primaryTf] ?? 0);
+    const whatIf = computeWhatIfForTimelinePoint(p, paNeedle);
     const optionComponents = optionSnapshots.length ? buildOptionComponentGauges(optionSnapshots[0].components ?? []) : [];
     return {
       t: p.asOf,
@@ -170,13 +254,20 @@ export function timelineToConvictionSeries(
       vetoed: p.signal?.action === 'NO-TRADE' && Boolean(p.signal?.vetoReason),
       vetoReason: p.signal?.vetoReason,
       structuralAction: p.signal?.structuralAction,
-      whatIfAction: p.signal?.action ?? 'NO-TRADE',
-      whatIfConviction: p.signal?.confidence ?? 0,
+      whatIfAction: whatIf.action,
+      whatIfConviction: whatIf.conviction,
       paComponents,
       paDrilldown: buildPaDrilldownFromTimelinePoint(p as any),
       optionComponents,
       vetoBreakup: extractVetoBreakup({ action: p.signal?.action ?? 'NO-TRADE', conviction: p.signal?.confidence ?? 0 } as any, vetoMode, 'blend'),
       liveSynced: false,
+      tradeSetup: p.tradeSetup,
+      levels: p.levels,
+      confluenceContext: p.confluenceContext,
+      candlestick: p.candlestick,
+      primaryTimeframe: p.primaryTimeframe,
+      patternInsights: patternInsightsFromTimelinePoint(p),
+      tradeOutcome: p.tradeOutcome,
     } as DeckReplayPoint;
   });
 }
