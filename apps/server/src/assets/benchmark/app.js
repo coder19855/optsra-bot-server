@@ -8,12 +8,13 @@
   }
 
   const params = new URLSearchParams(window.location.search);
+  const reportId = params.get('reportId') || '';
   const symbol = params.get('symbol') || 'NSE:NIFTY50-INDEX';
   const style = params.get('style') || 'INTRADAY';
   const days = params.get('days') || '14';
   const aiMode = params.get('aiMode') || 'shadow';
   const maxTrades = params.get('maxTrades') || '';
-  const initData = tg?.initData || '';
+  const initData = tg?.initData || params.get('initData') || '';
 
   const els = {
     app: document.getElementById('app'),
@@ -361,25 +362,61 @@
     els.app.classList.remove('hidden');
   }
 
-  async function load() {
-    els.symbol.textContent = shortSymbol(symbol);
-    els.style.textContent = style;
-    els.days.textContent = `${days}d`;
-    els.ai.textContent = maxTrades
-      ? `${aiModeLabel(aiMode)} · max ${maxTrades}/day`
-      : `${aiModeLabel(aiMode)} · unlimited/day`;
+  function applyReportMeta(report) {
+    const p = report.params || {};
+    els.symbol.textContent = shortSymbol(p.symbol || symbol);
+    els.style.textContent = String(p.tradingStyle || style).toUpperCase();
+    els.days.textContent = `${p.days ?? days}d`;
+    const mode = p.aiMode || aiMode;
+    const cap = p.maxTradesPerDay ?? (maxTrades ? Number(maxTrades) : null);
+    els.ai.textContent =
+      cap != null
+        ? `${aiModeLabel(mode)} · max ${cap}/day`
+        : `${aiModeLabel(mode)} · unlimited/day`;
+  }
 
-    const qs = new URLSearchParams({ symbol, style, days, aiMode });
-    if (maxTrades) qs.set('maxTrades', maxTrades);
+  async function load() {
+    if (!reportId) {
+      els.symbol.textContent = shortSymbol(symbol);
+      els.style.textContent = style;
+      els.days.textContent = `${days}d`;
+      els.ai.textContent = maxTrades
+        ? `${aiModeLabel(aiMode)} · max ${maxTrades}/day`
+        : `${aiModeLabel(aiMode)} · unlimited/day`;
+    }
+
     const headers = {};
     if (initData) headers['x-telegram-init-data'] = initData;
 
+    const loadingText = document.querySelector('.loading-text');
+    const loadingSub = document.querySelector('.loading-sub');
+    if (reportId) {
+      if (loadingText) loadingText.textContent = 'Loading report…';
+      if (loadingSub) loadingSub.textContent = 'Opening cached benchmark results';
+    }
+
     try {
-      const res = await fetch(`/api/benchmark?${qs.toString()}`, { headers });
+      const url = reportId
+        ? `/api/benchmark/report?reportId=${encodeURIComponent(reportId)}`
+        : (() => {
+            const qs = new URLSearchParams({ symbol, style, days, aiMode });
+            if (maxTrades) qs.set('maxTrades', maxTrades);
+            return `/api/benchmark?${qs.toString()}`;
+          })();
+      const res = await fetch(url, { headers });
       const body = await res.json();
-      if (!res.ok) throw new Error(apiErrorMessage(body, res.status));
+      if (!res.ok) {
+        const msg = apiErrorMessage(body, res.status);
+        if (res.status === 401) {
+          throw new Error(
+            `${msg} — tap the 📊 Visual report button in Telegram (not the text link).`,
+          );
+        }
+        throw new Error(msg);
+      }
 
       const report = body;
+      applyReportMeta(report);
       els.generated.textContent = new Date(report.generatedAt).toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
         dateStyle: 'short',

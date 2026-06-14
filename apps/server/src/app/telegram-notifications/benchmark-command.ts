@@ -1,4 +1,8 @@
 import { FastifyInstance } from 'fastify';
+import {
+  createBenchmarkReportId,
+  saveBenchmarkReport,
+} from '../benchmark/benchmark-report-store';
 import { runBenchmark } from '../benchmark/run-benchmark';
 import { BenchmarkAiMode, BenchmarkTradeRow } from '../benchmark/types';
 import { TradingStyle } from '../types/trading-style';
@@ -184,7 +188,10 @@ export async function buildBenchmarkTelegramMessage(
 
     const b = report.aiComparison.baseline;
     const ai = report.aiComparison.withAi;
+    const reportId = createBenchmarkReportId();
+    await saveBenchmarkReport(fastify, reportId, report);
     const reportUrl = buildBenchmarkWebAppUrl({
+      reportId,
       symbol: parsed.symbol,
       tradingStyle: String(parsed.style),
       days: parsed.days,

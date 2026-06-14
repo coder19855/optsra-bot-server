@@ -95,8 +95,6 @@ import {
   isBenchmarkHelpRequest,
   parseBenchmarkCommandArgs,
 } from './benchmark-command';
-import { buildBenchmarkWebAppUrl } from './deck-url';
-
 interface TelegramUpdate {
   update_id: number;
   message?: {
@@ -969,12 +967,7 @@ export class TelegramCommandPoller {
     reply: TelegramSendOptions,
   ): Promise<void> {
     const message = truncateTelegramMessage(result.message);
-    const reportUrl =
-      result.reportUrl ??
-      buildBenchmarkWebAppUrl({
-        symbol: parsed.symbol,
-        tradingStyle: String(parsed.style),
-      });
+    const reportUrl = result.reportUrl;
 
     const withButton: TelegramSendOptions = {
       ...reply,

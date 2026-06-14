@@ -2,8 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { loadBenchmarkReport } from '../benchmark/benchmark-report-store';
+import { serializeBenchmarkReport } from '../benchmark/benchmark-serialize';
 import { runBenchmark } from '../benchmark/run-benchmark';
-import { BenchmarkAiMode, BenchmarkReport } from '../benchmark/types';
+import { BenchmarkAiMode } from '../benchmark/types';
+import { resolveIndexSymbol } from '../telegram-notifications/command-args';
 import {
   isDeckAuthSkipped,
   validateTelegramWebAppInitData,
@@ -80,47 +83,6 @@ function parseTradingStyle(styleQuery?: string): TradingStyle {
   return TradingStyle.Intraday;
 }
 
-function serializeReport(report: BenchmarkReport) {
-  return {
-    ...report,
-    trades: report.trades.map((t) => ({
-      signalAtMs: t.signalAtMs,
-      signalAtISO: t.signalAtISO,
-      sessionDate: t.sessionDate,
-      action: t.action,
-      indexEntry: t.indexEntry,
-      indexExit: t.indexExit,
-      stopLoss: t.stopLoss,
-      takeProfit1: t.takeProfit1,
-      takeProfit2: t.takeProfit2,
-      takeProfit3: t.takeProfit3,
-      exitStatus: t.exitStatus,
-      hitLevel: t.hitLevel,
-      pnlPoints: t.pnlPoints,
-      pnlR: t.pnlR,
-      pnlPercent: t.pnlPercent,
-      barsHeld: t.barsHeld,
-      conviction: t.conviction,
-      convictionWithAi: t.convictionWithAi,
-      pnlInr: t.pnlInr,
-      riskBudgetInr: t.riskBudgetInr,
-      optionSource: t.optionSource,
-      engineVerdict: t.engineVerdict,
-      aiVerdictSummary: t.aiVerdictSummary,
-      aiAnalysis: t.aiAnalysis
-        ? {
-            verdict: t.aiAnalysis.verdict,
-            confidenceAdjustment: t.aiAnalysis.confidenceAdjustment,
-            betaNote: t.aiAnalysis.betaNote,
-          }
-        : undefined,
-      isWin:
-        t.exitStatus === 'TAKE_PROFIT' ||
-        (t.pnlR > 0.05 && t.exitStatus !== 'STOP_LOSS'),
-    })),
-  };
-}
-
 export default async function benchmarkRoutes(fastify: FastifyInstance) {
   const root = resolveBenchmarkAssetRoot();
 
@@ -133,6 +95,22 @@ export default async function benchmarkRoutes(fastify: FastifyInstance) {
 
   fastify.get('/benchmark', async (_request, reply) => {
     return reply.redirect('/benchmark/');
+  });
+
+  fastify.get('/api/benchmark/report', async (request, reply) => {
+    const { reportId } = request.query as { reportId?: string };
+    if (!reportId?.trim()) {
+      return reply.code(400).send({ error: 'reportId is required' });
+    }
+
+    const report = await loadBenchmarkReport(fastify, reportId);
+    if (!report) {
+      return reply
+        .code(404)
+        .send({ error: 'Report not found or expired — run /benchmark again.' });
+    }
+
+    return report;
   });
 
   fastify.get('/api/benchmark', async (request, reply) => {
@@ -172,7 +150,7 @@ export default async function benchmarkRoutes(fastify: FastifyInstance) {
 
     try {
       const report = await runBenchmark(fastify, {
-        symbol: symbol.trim(),
+        symbol: resolveIndexSymbol(symbol.trim()),
         tradingStyle: parseTradingStyle(style),
         days: dayCount,
         aiMode: parseAiMode(aiMode),
@@ -184,7 +162,7 @@ export default async function benchmarkRoutes(fastify: FastifyInstance) {
           ? parseFlowModeQuery(flowMode)
           : fastify.telegramNotifications.getFlowMode(),
       });
-      return serializeReport(report);
+      return serializeBenchmarkReport(report);
     } catch (err) {
       const message = toErrorMessage(err);
       fastify.log.warn({ err }, 'benchmark run failed');
