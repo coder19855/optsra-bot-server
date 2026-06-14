@@ -4,7 +4,11 @@ import { BenchmarkAiMode, BenchmarkTradeRow } from '../benchmark/types';
 import { TradingStyle } from '../types/trading-style';
 import { buildBenchmarkWebAppUrl } from './deck-url';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
-import { parseSymbolStyleCommandArgs, shortIndexLabel } from './command-args';
+import {
+  parseTradingStyleArg,
+  resolveIndexSymbol,
+  shortIndexLabel,
+} from './command-args';
 import { toErrorMessage } from '../error-message';
 import { tradingStyleLabel } from './style-command';
 import { flowModeLabel, FlowMode } from '../types/flow-mode';
@@ -58,7 +62,7 @@ export function formatBenchmarkHelpMessage(params: {
     joinTelegramLines(
       '<b>Symbol &amp; style</b>',
       `<code>/benchmark ${sym} ${styleArg} 30</code> — your watchlist index + style`,
-      `<code>/benchmark BANKNIFTY INTRADAY 14</code> — explicit index`,
+      `<code>/benchmark NIFTY INTRADAY 30</code> — explicit index + style`,
       `<code>/benchmark max2</code> — cap entries (also <code>2</code> after days)`,
     ),
     joinTelegramLines(
@@ -73,6 +77,14 @@ export function formatBenchmarkHelpMessage(params: {
   );
 }
 
+function parseBenchmarkAiMode(token: string): BenchmarkAiMode | null {
+  const p = token.toLowerCase();
+  if (p === 'ai-off' || p === 'noai') return 'off';
+  if (p === 'ai-active' || p === 'ailive') return 'active';
+  if (p === 'ai-shadow' || p === 'aishadow') return 'shadow';
+  return null;
+}
+
 export function parseBenchmarkCommandArgs(
   text: string,
   defaults: { symbol: string; style: TradingStyle },
@@ -83,43 +95,45 @@ export function parseBenchmarkCommandArgs(
   aiMode: BenchmarkAiMode;
   maxTradesPerDay?: number;
 } {
-  const parts = text.trim().split(/\s+/);
+  const parts = text.trim().split(/\s+/).slice(1);
+  let symbol = resolveIndexSymbol(defaults.symbol);
+  let style = defaults.style;
   let days = 14;
   let aiMode: BenchmarkAiMode = 'shadow';
   let maxTradesPerDay: number | undefined;
 
-  for (let i = 1; i < parts.length; i += 1) {
-    const raw = parts[i];
+  for (const raw of parts) {
     const p = raw.toLowerCase();
-    if (p === 'ai-off' || p === 'noai') aiMode = 'off';
-    else if (p === 'ai-active' || p === 'ailive') aiMode = 'active';
-    else if (p === 'ai-shadow' || p === 'aishadow') aiMode = 'shadow';
-    else if (/^max[-:]?\d+$/i.test(raw) || /^\d+max$/i.test(raw)) {
+    const ai = parseBenchmarkAiMode(raw);
+    if (ai) {
+      aiMode = ai;
+      continue;
+    }
+
+    if (/^max[-:]?\d+$/i.test(raw) || /^\d+max$/i.test(raw)) {
       const match =
         raw.match(/^max[-:]?(\d+)$/i) ?? raw.match(/^(\d+)max$/i);
       if (match) {
         maxTradesPerDay = Math.min(20, Math.max(1, Number(match[1])));
       }
-    } else if (/^\d+$/.test(p)) {
+      continue;
+    }
+
+    if (/^\d+$/.test(p)) {
       const n = Number(p);
       if (n >= 3) days = Math.min(60, Math.max(3, n));
       else if (n >= 1 && n <= 10) maxTradesPerDay = n;
+      continue;
     }
-  }
 
-  const tail = parts
-    .filter(
-      (part) =>
-        !/^\d+$/.test(part) &&
-        !part.startsWith('ai') &&
-        !/^max[-:]?\d+$/i.test(part) &&
-        !/^\d+max$/i.test(part),
-    )
-    .join(' ');
-  const { symbol, style } = parseSymbolStyleCommandArgs(
-    `/benchmark ${tail}`.trim(),
-    defaults,
-  );
+    const parsedStyle = parseTradingStyleArg(raw);
+    if (parsedStyle) {
+      style = parsedStyle;
+      continue;
+    }
+
+    symbol = resolveIndexSymbol(raw);
+  }
 
   return { symbol, style, days, aiMode, maxTradesPerDay };
 }

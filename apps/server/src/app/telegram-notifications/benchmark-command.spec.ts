@@ -43,4 +43,26 @@ describe('benchmark command help', () => {
     expect(parsed.maxTradesPerDay).toBe(2);
     expect(parsed.aiMode).toBe('shadow');
   });
+
+  it('normalizes shorthand watchlist symbol for /benchmark 30', () => {
+    const parsed = parseBenchmarkCommandArgs('/benchmark 30', {
+      symbol: 'NIFTY50',
+      style: TradingStyle.Intraday,
+    });
+    expect(parsed.symbol).toBe('NSE:NIFTY50-INDEX');
+  });
+
+  it('parses intraday style without stripping it as an ai token', () => {
+    const parsed = parseBenchmarkCommandArgs(
+      '/benchmark NIFTY50 intraday 30 ai-shadow',
+      {
+        symbol: 'NSE:NIFTY50-INDEX',
+        style: TradingStyle.Scalper,
+      },
+    );
+    expect(parsed.symbol).toBe('NSE:NIFTY50-INDEX');
+    expect(parsed.style).toBe(TradingStyle.Intraday);
+    expect(parsed.days).toBe(30);
+    expect(parsed.aiMode).toBe('shadow');
+  });
 });

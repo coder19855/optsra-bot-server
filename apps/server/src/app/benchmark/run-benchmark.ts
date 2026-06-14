@@ -53,7 +53,12 @@ async function fetchHistory(
   try {
     return await fastify.fyers.getHistory(params);
   } catch (err) {
-    throw new Error(toErrorMessage(err));
+    const detail = toErrorMessage(err);
+    throw new Error(
+      detail.includes(params.symbol)
+        ? detail
+        : `${detail} (symbol: ${params.symbol})`,
+    );
   }
 }
 

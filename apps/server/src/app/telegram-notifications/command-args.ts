@@ -49,7 +49,7 @@ export function parseSymbolStyleCommandArgs(
   if (parts.length === 2) {
     const style = parseTradingStyleArg(parts[1]);
     if (style) {
-      return { symbol: defaults.symbol, style };
+      return { symbol: resolveIndexSymbol(defaults.symbol), style };
     }
     return {
       symbol: resolveIndexSymbol(parts[1]),
@@ -57,7 +57,10 @@ export function parseSymbolStyleCommandArgs(
     };
   }
 
-  return { symbol: defaults.symbol, style: defaults.style };
+  return {
+    symbol: resolveIndexSymbol(defaults.symbol),
+    style: defaults.style,
+  };
 }
 
 export function shortIndexLabel(symbol: string): string {

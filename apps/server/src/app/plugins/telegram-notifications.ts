@@ -13,6 +13,7 @@ import {
 import { formatTelegramAlertMessage } from '../telegram-notifications/message-formatter';
 import { formatPatternBreakoutTelegramMessage } from '../telegram-notifications/pattern-breakout-formatter';
 import { detectChartPatternBreakout } from '../telegram-notifications/pattern-breakout-tracker';
+import { resolveIndexSymbol } from '../telegram-notifications/command-args';
 import { joinTelegramSections } from '../telegram-notifications/message-layout';
 import {
   loadSessionCoachState,
@@ -154,7 +155,7 @@ export default fp(
     const watchedSymbols = parseCsvEnv(
       process.env.TELEGRAM_NOTIFY_SYMBOLS,
       [...TELEGRAM_NOTIFICATION_DEFAULTS.DEFAULT_SYMBOLS],
-    );
+    ).map((symbol) => resolveIndexSymbol(symbol));
     const defaultStylesFromEnv = parseTradingStyles(
       parseCsvEnv(
         process.env.TELEGRAM_NOTIFY_STYLES,
