@@ -1,4 +1,16 @@
-import { withTimeout } from './promise-timeout';
+import { withTimeout, yieldToEventLoop } from './promise-timeout';
+
+describe('yieldToEventLoop', () => {
+  it('resolves on the next event-loop turn', async () => {
+    let ran = false;
+    const p = yieldToEventLoop().then(() => {
+      ran = true;
+    });
+    expect(ran).toBe(false);
+    await p;
+    expect(ran).toBe(true);
+  });
+});
 
 describe('withTimeout', () => {
   it('resolves when the promise settles in time', async () => {

@@ -472,10 +472,16 @@
     }
   }
 
-  function setLoading(on) {
+  function setLoading(on, message) {
     if (!els.loadingOverlay) return;
     els.loadingOverlay.classList.toggle('hidden', !on);
     els.loadingOverlay.setAttribute('aria-busy', on ? 'true' : 'false');
+    const textEl = els.loadingOverlay.querySelector('.loading-text');
+    if (textEl && message) {
+      textEl.textContent = message;
+    } else if (textEl && !on) {
+      textEl.textContent = 'Fetching data…';
+    }
   }
 
   function chartHeight(el, fallback) {
@@ -3065,6 +3071,10 @@
           setError(payload.message || 'Stream update failed');
           return;
         }
+        if (payload.type === 'status') {
+          setLoading(true, payload.message || 'Fetching data…');
+          return;
+        }
         if (payload.type === 'full') {
           applyLive(payload);
           if (deckHasRenderableContent(payload)) {
@@ -3125,9 +3135,26 @@
   }
 
   function bootstrapLiveDeck() {
-    setLoading(true);
+    setLoading(true, 'Fetching data…');
+    let loadingSlowTimer = null;
+    const clearLoadingSlowTimer = () => {
+      if (loadingSlowTimer) {
+        clearTimeout(loadingSlowTimer);
+        loadingSlowTimer = null;
+      }
+    };
+    loadingSlowTimer = setTimeout(() => {
+      if (!hasDisplayedDeck) {
+        setLoading(
+          true,
+          'Still fetching… backtest or heavy replay may be slowing the server',
+        );
+      }
+    }, 12_000);
+
     connectDeckStream({
       onFirstData: () => {
+        clearLoadingSlowTimer();
         setLoading(false);
       },
     });
@@ -3135,6 +3162,7 @@
   }
 
   async function bootstrapReplayDeck() {
+    setLoading(true, 'Fetching data…');
     await refresh();
     void loadReplayTrades();
   }

@@ -73,6 +73,12 @@ export function handleDeckStream(
     }
   };
 
+  writeSse(reply, {
+    type: 'status',
+    message: 'Fetching data…',
+    phase: 'connecting',
+  });
+
   const tickTimer = setInterval(() => {
     void sendTick();
   }, tickMs);

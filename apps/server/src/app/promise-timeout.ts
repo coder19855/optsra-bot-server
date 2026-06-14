@@ -1,3 +1,8 @@
+/** Let timers, I/O, and other requests run (avoids starving the event loop). */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** Reject if `promise` does not settle within `ms` milliseconds. */
 export async function withTimeout<T>(
   promise: Promise<T>,

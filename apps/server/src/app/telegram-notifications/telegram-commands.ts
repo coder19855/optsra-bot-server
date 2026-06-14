@@ -144,6 +144,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Commands that hit Fyers / heavy reads — show an immediate ack in chat. */
+const FETCHING_DATA_COMMANDS = new Set([
+  '/now',
+  '/coach',
+  '/why',
+  '/best-strike',
+  '/beststrike',
+  '/learning',
+  '/news',
+  '/headlines',
+  '/rr',
+  '/riskreward',
+  '/size',
+  '/sizing',
+  '/conviction',
+]);
+
 export class TelegramCommandPoller {
   private offset = 0;
   private stopped = true;
@@ -248,6 +265,25 @@ export class TelegramCommandPoller {
     return chatId != null ? { chatId } : { channel: 'default' };
   }
 
+  private async sendFetchingDataAck(
+    replyChatId: number | undefined,
+    command: string,
+  ): Promise<void> {
+    const hint =
+      command === '/coach'
+        ? 'Building session coach…'
+        : command === '/now'
+          ? 'Loading live reads…'
+          : command === '/why'
+            ? 'Loading signal context…'
+            : 'This usually takes a few seconds';
+
+    await this.deps.sendMessage(
+      joinTelegramLines('⏳ <b>Fetching data…</b>', `<i>${hint}</i>`),
+      { ...this.replyOptions(replyChatId), skipMessageTracking: true },
+    );
+  }
+
   private fyersAuthReplyOptions(chatId?: number): TelegramSendOptions {
     return {
       ...this.replyOptions(chatId),
@@ -272,6 +308,14 @@ export class TelegramCommandPoller {
     const replyChatId = update.message?.chat.id;
 
     void this.sendTyping(replyChatId);
+
+    if (FETCHING_DATA_COMMANDS.has(command)) {
+      try {
+        await this.sendFetchingDataAck(replyChatId, command);
+      } catch (err) {
+        this.fastify.log.debug({ err, command }, 'Fetching data ack failed');
+      }
+    }
 
     try {
       if (command === '/why') {
@@ -858,11 +902,11 @@ export class TelegramCommandPoller {
     try {
       await this.deps.sendMessage(
         joinTelegramLines(
-          '📐 <b>Running backtest…</b>',
-          `${shortIndexLabel(parsed.symbol)} · ${tradingStyleLabel(parsed.style)} · ${parsed.days}d`,
-          '<i>Usually 30–90s — results will appear here.</i>',
+          '⏳ <b>Fetching data…</b>',
+          `📐 Backtest · ${shortIndexLabel(parsed.symbol)} · ${tradingStyleLabel(parsed.style)} · ${parsed.days}d`,
+          '<i>Usually 30–90s. Deck &amp; other commands should stay responsive.</i>',
         ),
-        reply,
+        { ...reply, skipMessageTracking: true },
       );
 
       const sessionReady = await withTimeout(

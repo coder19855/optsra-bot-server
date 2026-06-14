@@ -45,6 +45,10 @@ import {
 import { buildBenchmarkTradeSetup } from './benchmark-trade-setup';
 import { BENCHMARK_DEFAULT_STARTING_CAPITAL_INR } from '../constants/benchmark';
 import { toErrorMessage } from '../error-message';
+import { yieldToEventLoop } from '../promise-timeout';
+
+/** Yield often so deck live, replay, and Telegram stay responsive during replay. */
+const BENCHMARK_YIELD_EVERY = 4;
 
 async function fetchHistory(
   fastify: FastifyInstance,
@@ -230,7 +234,11 @@ export async function runBenchmark(
   const flipPollReads: BenchmarkAnchorRead[] = [];
   const tradeCandidates: TradeCandidate[] = [];
 
-  for (const asOfMs of anchors) {
+  for (let anchorIdx = 0; anchorIdx < anchors.length; anchorIdx++) {
+    if (anchorIdx % BENCHMARK_YIELD_EVERY === 0) {
+      await yieldToEventLoop();
+    }
+    const asOfMs = anchors[anchorIdx];
     const asOfSec = Math.floor(asOfMs / 1000);
     const slice5m = sliceCandlesUpTo(candles5m, asOfSec);
     const slice15m = sliceCandlesUpTo(candles15m, asOfSec);
@@ -290,7 +298,11 @@ export async function runBenchmark(
     });
   }
 
-  for (const asOfMs of flipPollAnchors) {
+  for (let flipIdx = 0; flipIdx < flipPollAnchors.length; flipIdx++) {
+    if (flipIdx % BENCHMARK_YIELD_EVERY === 0) {
+      await yieldToEventLoop();
+    }
+    const asOfMs = flipPollAnchors[flipIdx];
     const asOfSec = Math.floor(asOfMs / 1000);
     const slice5m = sliceCandlesUpTo(candles5m, asOfSec);
     const slice15m = sliceCandlesUpTo(candles15m, asOfSec);
@@ -342,7 +354,11 @@ export async function runBenchmark(
   const activeTrades: BenchmarkTradeRow[] = [];
   let aiCalls = 0;
 
-  for (const candidate of tradeCandidates) {
+  for (let tradeIdx = 0; tradeIdx < tradeCandidates.length; tradeIdx++) {
+    if (tradeIdx % BENCHMARK_YIELD_EVERY === 0) {
+      await yieldToEventLoop();
+    }
+    const candidate = tradeCandidates[tradeIdx];
     const { asOfMs, asOfSec, dayKey, action, conviction, snapshot } = candidate;
 
     if (dayKey !== sessionDayKey) {
