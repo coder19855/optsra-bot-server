@@ -27,3 +27,15 @@ export function joinTelegramLines(
     .filter((line): line is string => Boolean(line))
     .join('\n');
 }
+
+const TELEGRAM_MAX_MESSAGE_LEN = 4096;
+
+/** Keep HTML messages within Telegram's length cap. */
+export function truncateTelegramMessage(
+  text: string,
+  maxLen = TELEGRAM_MAX_MESSAGE_LEN,
+): string {
+  if (text.length <= maxLen) return text;
+  const suffix = '\n\n<i>…message truncated</i>';
+  return text.slice(0, Math.max(0, maxLen - suffix.length)) + suffix;
+}

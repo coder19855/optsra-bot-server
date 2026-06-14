@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import { fyersModel } from 'fyers-api-v3';
+import { withTimeout } from '../promise-timeout';
 import { ResponseStatus } from '../types/common';
 
 export default fp(
@@ -66,7 +67,11 @@ export default fp(
 
       if (options?.verifyWithApi) {
         try {
-          const response = await fyers.get_profile();
+          const response = await withTimeout(
+            fyers.get_profile(),
+            15_000,
+            'Fyers get_profile',
+          );
           return response.s === ResponseStatus.ok;
         } catch (error) {
           console.error('Fyers API session verification failed:', error);

@@ -280,7 +280,13 @@ export default fp(
           ),
         };
       }
-      const res = await axios.post(url, payload);
+      const res = await axios.post(url, payload, { timeout: 30_000 });
+      if (res.data?.ok === false) {
+        const desc =
+          (res.data?.description as string | undefined) ??
+          'Telegram sendMessage failed';
+        throw new Error(desc);
+      }
       const messageId = res.data?.result?.message_id as number | undefined;
       if (
         messageId != null &&

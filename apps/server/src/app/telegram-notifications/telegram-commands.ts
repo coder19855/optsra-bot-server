@@ -51,7 +51,14 @@ import { formatFyersUsageTelegramMessage } from './fyers-usage-formatter';
 import { mergeDeckKeyboard } from './deck-keyboard';
 import { parseClearCommandLimit } from './telegram-message-journal';
 import { formatTelegramStatusMessage } from './status-formatter';
-import { joinTelegramLines, joinTelegramSections } from './message-layout';
+import {
+  joinTelegramLines,
+  joinTelegramSections,
+  truncateTelegramMessage,
+} from './message-layout';
+import { withTimeout } from '../promise-timeout';
+import { toErrorMessage } from '../error-message';
+import { shortIndexLabel } from './command-args';
 import { buildNowTelegramMessage } from './now-command';
 import {
   formatVoicePreviewMessage,
@@ -86,6 +93,7 @@ import {
   buildBenchmarkTelegramMessage,
   formatBenchmarkHelpMessage,
   isBenchmarkHelpRequest,
+  parseBenchmarkCommandArgs,
 } from './benchmark-command';
 import { buildBenchmarkWebAppUrl } from './deck-url';
 
@@ -814,25 +822,54 @@ export class TelegramCommandPoller {
       this.deps.watchedSymbols[0] ?? 'NSE:NIFTY50-INDEX';
     const defaultStyle =
       this.deps.watchedStyles[0] ?? TradingStyle.Intraday;
+    const reply = this.replyOptions(replyChatId);
 
     if (isBenchmarkHelpRequest(text)) {
-      await this.deps.sendMessage(
-        formatBenchmarkHelpMessage({
-          symbol: defaultSymbol,
-          style: defaultStyle,
-          vetoMode: this.fastify.telegramNotifications.getVetoMode(),
-          flowMode: this.fastify.telegramNotifications.getFlowMode(),
-        }),
-        this.replyOptions(replyChatId),
-      );
+      try {
+        await this.deps.sendMessage(
+          formatBenchmarkHelpMessage({
+            symbol: defaultSymbol,
+            style: defaultStyle,
+            vetoMode: this.fastify.telegramNotifications.getVetoMode(),
+            flowMode: this.fastify.telegramNotifications.getFlowMode(),
+          }),
+          reply,
+        );
+      } catch (err) {
+        this.fastify.log.warn({ err }, 'benchmark help send failed');
+        await this.deps.sendMessage(
+          joinTelegramLines(
+            '📐 <b>Benchmark</b>',
+            'Try <code>/benchmark 30 2</code> — 30-day replay (~1–2 min).',
+            'More: <code>/benchmark help</code>',
+          ),
+          reply,
+        );
+      }
       return;
     }
 
+    const parsed = parseBenchmarkCommandArgs(text, {
+      symbol: defaultSymbol,
+      style: defaultStyle,
+    });
+
     this.benchmarkInFlight = true;
     try {
-      const sessionReady = await this.fastify.ensureFyersSession({
-        verifyWithApi: true,
-      });
+      await this.deps.sendMessage(
+        joinTelegramLines(
+          '📐 <b>Running backtest…</b>',
+          `${shortIndexLabel(parsed.symbol)} · ${tradingStyleLabel(parsed.style)} · ${parsed.days}d`,
+          '<i>Usually 30–90s — results will appear here.</i>',
+        ),
+        reply,
+      );
+
+      const sessionReady = await withTimeout(
+        this.fastify.ensureFyersSession({ verifyWithApi: true }),
+        20_000,
+        'Fyers session check',
+      );
       if (!sessionReady) {
         await this.deps.sendMessage(
           FYERS_AUTH_ERROR_REPLY,
@@ -841,37 +878,78 @@ export class TelegramCommandPoller {
         return;
       }
 
-      const result = await buildBenchmarkTelegramMessage(this.fastify, {
-        text,
-        defaultSymbol,
-        defaultStyle,
-      });
+      const result = await withTimeout(
+        buildBenchmarkTelegramMessage(this.fastify, {
+          text,
+          defaultSymbol,
+          defaultStyle,
+        }),
+        180_000,
+        'Benchmark replay',
+      );
 
       if (result.error) {
         const opts = isFyersAuthError(result.error)
           ? this.fyersAuthReplyOptions(replyChatId)
-          : this.replyOptions(replyChatId);
+          : reply;
         await this.deps.sendMessage(`⚠️ ${result.error}`, opts);
         return;
       }
 
-      const reportUrl =
-        result.reportUrl ??
-        buildBenchmarkWebAppUrl({
-          symbol: defaultSymbol,
-          tradingStyle: String(defaultStyle),
-        });
+      if (!result.message?.trim()) {
+        await this.deps.sendMessage(
+          '⚠️ Benchmark finished but produced no summary — try a shorter window (e.g. <code>/benchmark 14</code>).',
+          reply,
+        );
+        return;
+      }
 
-      const sendOpts: TelegramSendOptions = {
-        ...this.replyOptions(replyChatId),
-        inlineKeyboard: reportUrl
-          ? [[{ text: '📊 Visual report', webAppUrl: reportUrl }]]
-          : undefined,
-      };
-      await this.deps.sendMessage(result.message, sendOpts);
+      await this.sendBenchmarkResultMessage(result, parsed, reply);
+    } catch (err) {
+      this.fastify.log.warn({ err }, 'benchmark command failed');
+      const opts = isFyersAuthError(toErrorMessage(err))
+        ? this.fyersAuthReplyOptions(replyChatId)
+        : reply;
+      await this.deps.sendMessage(`⚠️ ${toErrorMessage(err)}`, opts);
     } finally {
       this.benchmarkInFlight = false;
     }
+  }
+
+  private async sendBenchmarkResultMessage(
+    result: { message: string; reportUrl?: string | null },
+    parsed: {
+      symbol: string;
+      style: TradingStyle;
+    },
+    reply: TelegramSendOptions,
+  ): Promise<void> {
+    const message = truncateTelegramMessage(result.message);
+    const reportUrl =
+      result.reportUrl ??
+      buildBenchmarkWebAppUrl({
+        symbol: parsed.symbol,
+        tradingStyle: String(parsed.style),
+      });
+
+    const withButton: TelegramSendOptions = {
+      ...reply,
+      inlineKeyboard: reportUrl
+        ? [[{ text: '📊 Visual report', webAppUrl: reportUrl }]]
+        : undefined,
+    };
+
+    try {
+      await this.deps.sendMessage(message, withButton);
+      return;
+    } catch (err) {
+      this.fastify.log.warn(
+        { err, reportUrl },
+        'benchmark result send failed — retrying without web app button',
+      );
+    }
+
+    await this.deps.sendMessage(message, reply);
   }
 
   private async handleOutcomes(replyChatId?: number): Promise<void> {
