@@ -34,8 +34,21 @@ export interface SnapshotInput {
   candles5m: FyersAPI.Candle[];
   candles15m: FyersAPI.Candle[];
   candles1h: FyersAPI.Candle[];
+  /** Inclusive end indices for timeline walks (avoids repeated binary search). */
+  candleEnd5m?: number;
+  candleEnd15m?: number;
+  candleEnd1h?: number;
   /** Wall-clock ms for session-bias (live = now; timeline = anchor asOf) */
   asOfMs?: number;
+}
+
+function sliceThrough(
+  candles: FyersAPI.Candle[],
+  endIndex?: number,
+): FyersAPI.Candle[] {
+  if (endIndex == null) return candles;
+  if (endIndex < 0) return [];
+  return candles.slice(0, endIndex + 1);
 }
 
 const countRecentStructure = (
@@ -49,8 +62,21 @@ export function buildPriceActionSnapshot(
   input: SnapshotInput,
 ): PriceActionResponse | null {
   const { ta, momentum } = deps;
-  const { symbol, tradingStyle, candles5m, candles15m, candles1h, asOfMs } =
-    input;
+  const {
+    symbol,
+    tradingStyle,
+    candles5m: raw5m,
+    candles15m: raw15m,
+    candles1h: raw1h,
+    candleEnd5m,
+    candleEnd15m,
+    candleEnd1h,
+    asOfMs,
+  } = input;
+
+  const candles5m = sliceThrough(raw5m, candleEnd5m);
+  const candles15m = sliceThrough(raw15m, candleEnd15m);
+  const candles1h = sliceThrough(raw1h, candleEnd1h);
 
   if (
     candles5m.length < 5 ||

@@ -61,6 +61,21 @@ export function sliceCandlesUpTo(
   return result >= 0 ? candles.slice(0, result + 1) : [];
 }
 
+/** Walk forward on sorted candles — O(1) amortized per timeline anchor. */
+export function advanceCandleEndIndex(
+  candles: FyersAPI.Candle[],
+  prevEnd: number,
+  asOfSec: number,
+): number {
+  if (!candles.length || candles[0][0] > asOfSec) return -1;
+
+  let end = prevEnd < 0 ? 0 : prevEnd;
+  while (end < candles.length - 1 && candles[end + 1][0] <= asOfSec) {
+    end += 1;
+  }
+  return candles[end][0] <= asOfSec ? end : -1;
+}
+
 function getIstMinutes(epochSec: number): number {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: TIMELINE_DEFAULTS.IST_TIMEZONE,

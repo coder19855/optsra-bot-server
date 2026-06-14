@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
+import { isBenchmarkReplayActive } from '../benchmark/benchmark-runtime';
 import {
   TELEGRAM_API_BASE,
   TELEGRAM_NOTIFICATION_DEFAULTS,
@@ -841,65 +842,71 @@ export default fp(
       }
 
       if (!options?.coachOnly && (marketOpen || options?.force)) {
-        const pollContext = createPollMarketDataContext();
+        if (isBenchmarkReplayActive()) {
+          fastify.log.debug(
+            'Telegram market poll skipped — benchmark replay in progress',
+          );
+        } else {
+          const pollContext = createPollMarketDataContext();
 
-        if (!alertsPaused) {
-          const spotBySymbol: Record<string, number> = {};
+          if (!alertsPaused) {
+            const spotBySymbol: Record<string, number> = {};
 
-          for (const symbol of watchedSymbols) {
-            for (const style of activeWatchedStyles) {
-              try {
-                const result = await evaluateAndNotify(symbol, style, {
-                  ...options,
-                  pollContext,
-                });
-                spotBySymbol[symbol] = result.snapshot.lastPrice;
-              } catch (err) {
-                const msg = err instanceof Error ? err.message : String(err);
-                lastPollError = msg;
-                fastify.log.error(
-                  { err, symbol, style },
-                  'Telegram notification poll failed for watch item',
-                );
+            for (const symbol of watchedSymbols) {
+              for (const style of activeWatchedStyles) {
+                try {
+                  const result = await evaluateAndNotify(symbol, style, {
+                    ...options,
+                    pollContext,
+                  });
+                  spotBySymbol[symbol] = result.snapshot.lastPrice;
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  lastPollError = msg;
+                  fastify.log.error(
+                    { err, symbol, style },
+                    'Telegram notification poll failed for watch item',
+                  );
+                }
               }
             }
+
+            try {
+              await updateOpenSignalOutcomes(fastify, {
+                symbols: watchedSymbols,
+                spotBySymbol,
+              });
+              const outcomeSymbols = await loadOpenOutcomeOptionSymbols(fastify);
+              notifyOpenOutcomeSymbols(outcomeSymbols);
+            } catch (err) {
+              fastify.log.warn({ err }, 'Signal outcome tracker update failed');
+            }
+          } else {
+            fastify.log.debug(
+              'Telegram signal poll skipped — alerts paused by user',
+            );
           }
 
           try {
-            await updateOpenSignalOutcomes(fastify, {
-              symbols: watchedSymbols,
-              spotBySymbol,
+            const tpStyle = activeWatchedStyles[0] ?? TradingStyle.Intraday;
+            const tpResult = await evaluateOpenPositionTpAlerts(fastify, {
+              watchedSymbols,
+              tradingStyle: tpStyle,
+              tpMemory,
+              voice: voicePreferenceState.voice,
+              sendMessage: (text) =>
+                sendTelegramMessage(text, { channel: 'tp' }),
+              force: options?.force,
+              pollContext,
             });
-            const outcomeSymbols = await loadOpenOutcomeOptionSymbols(fastify);
-            notifyOpenOutcomeSymbols(outcomeSymbols);
+            openPositionsMonitored = tpResult.monitored;
+            openPositionsTracked = tpResult.tracked;
+            if (tpResult.notified > 0) {
+              lastTpAlertAt = new Date();
+            }
           } catch (err) {
-            fastify.log.warn({ err }, 'Signal outcome tracker update failed');
+            fastify.log.error({ err }, 'Telegram open-position TP monitor failed');
           }
-        } else {
-          fastify.log.debug(
-            'Telegram signal poll skipped — alerts paused by user',
-          );
-        }
-
-        try {
-          const tpStyle = activeWatchedStyles[0] ?? TradingStyle.Intraday;
-          const tpResult = await evaluateOpenPositionTpAlerts(fastify, {
-            watchedSymbols,
-            tradingStyle: tpStyle,
-            tpMemory,
-            voice: voicePreferenceState.voice,
-            sendMessage: (text) =>
-              sendTelegramMessage(text, { channel: 'tp' }),
-            force: options?.force,
-            pollContext,
-          });
-          openPositionsMonitored = tpResult.monitored;
-          openPositionsTracked = tpResult.tracked;
-          if (tpResult.notified > 0) {
-            lastTpAlertAt = new Date();
-          }
-        } catch (err) {
-          fastify.log.error({ err }, 'Telegram open-position TP monitor failed');
         }
       }
 

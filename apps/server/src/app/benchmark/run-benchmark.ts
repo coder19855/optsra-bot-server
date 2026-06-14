@@ -1,17 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import { FyersAPI } from 'fyers-api-v3';
-import { FLIP_POLL_INTERVAL_MINUTES } from '../constants/trade-rr';
+import { resolveBenchmarkFlipPollMinutes } from '../constants/benchmark';
 import { SESSION_TRADE_COOLDOWN_MINUTES, TIMELINE_DEFAULTS } from '../constants/technical-analysis';
 import { getStyleScoringConfig } from '../trading-style';
 import { buildPriceActionSnapshot } from '../technical-analysis/snapshot';
 import {
+  advanceCandleEndIndex,
   buildTimelineAnchors,
   computeWindow,
   getIstSessionKey,
   parseEpochMs,
   resolveSimulationUntilSec,
   sliceCandlesAfter,
-  sliceCandlesUpTo,
   toIso,
 } from '../technical-analysis/timeline-utils';
 import { ResponseStatus } from '../types';
@@ -45,10 +45,11 @@ import {
 import { buildBenchmarkTradeSetup } from './benchmark-trade-setup';
 import { BENCHMARK_DEFAULT_STARTING_CAPITAL_INR } from '../constants/benchmark';
 import { toErrorMessage } from '../error-message';
+import {
+  beginBenchmarkReplay,
+  endBenchmarkReplay,
+} from './benchmark-runtime';
 import { yieldToEventLoop } from '../promise-timeout';
-
-/** Yield often so deck live, replay, and Telegram stay responsive during replay. */
-const BENCHMARK_YIELD_EVERY = 4;
 
 async function fetchHistory(
   fastify: FastifyInstance,
@@ -135,6 +136,18 @@ export async function runBenchmark(
   fastify: FastifyInstance,
   input: BenchmarkParams,
 ): Promise<BenchmarkReport> {
+  beginBenchmarkReplay();
+  try {
+    return await executeBenchmarkReplay(fastify, input);
+  } finally {
+    endBenchmarkReplay();
+  }
+}
+
+async function executeBenchmarkReplay(
+  fastify: FastifyInstance,
+  input: BenchmarkParams,
+): Promise<BenchmarkReport> {
   const sessionReady = await fastify.ensureFyersSession();
   if (!sessionReady) {
     throw new Error('Fyers session expired — log in to run benchmark.');
@@ -211,20 +224,22 @@ export async function runBenchmark(
   const candles15m = res15m.candles;
   const candles1h = res1h.candles;
 
-  const anchors = buildTimelineAnchors(
+  const entryAnchors = buildTimelineAnchors(
     candles5m,
     fromMs,
     toMs,
     intervalMinutes,
     onlySession,
   );
-  const flipPollAnchors = buildTimelineAnchors(
+  const flipPollMinutes = resolveBenchmarkFlipPollMinutes();
+  const replayAnchors = buildTimelineAnchors(
     candles5m,
     fromMs,
     toMs,
-    FLIP_POLL_INTERVAL_MINUTES,
+    flipPollMinutes,
     onlySession,
   );
+  const entryAnchorMs = new Set(entryAnchors);
 
   const deps = {
     ta: fastify.technicalAnalysisPlugin,
@@ -233,91 +248,32 @@ export async function runBenchmark(
 
   const flipPollReads: BenchmarkAnchorRead[] = [];
   const tradeCandidates: TradeCandidate[] = [];
+  let end5m = -1;
+  let end15m = -1;
+  let end1h = -1;
 
-  for (let anchorIdx = 0; anchorIdx < anchors.length; anchorIdx++) {
-    if (anchorIdx % BENCHMARK_YIELD_EVERY === 0) {
-      await yieldToEventLoop();
-    }
-    const asOfMs = anchors[anchorIdx];
+  for (let anchorIdx = 0; anchorIdx < replayAnchors.length; anchorIdx++) {
+    await yieldToEventLoop();
+
+    const asOfMs = replayAnchors[anchorIdx];
     const asOfSec = Math.floor(asOfMs / 1000);
-    const slice5m = sliceCandlesUpTo(candles5m, asOfSec);
-    const slice15m = sliceCandlesUpTo(candles15m, asOfSec);
-    const slice1h = sliceCandlesUpTo(candles1h, asOfSec);
+    end5m = advanceCandleEndIndex(candles5m, end5m, asOfSec);
+    end15m = advanceCandleEndIndex(candles15m, end15m, asOfSec);
+    end1h = advanceCandleEndIndex(candles1h, end1h, asOfSec);
 
-    if (slice5m.length < TIMELINE_DEFAULTS.MIN_CANDLES_FOR_ANALYSIS) {
+    if (end5m + 1 < TIMELINE_DEFAULTS.MIN_CANDLES_FOR_ANALYSIS) {
       continue;
     }
 
     const snapshot = buildPriceActionSnapshot(deps, {
       symbol,
       tradingStyle: activeStyle,
-      candles5m: slice5m,
-      candles15m: slice15m,
-      candles1h: slice1h,
-      asOfMs,
-    });
-
-    if (!snapshot) continue;
-
-    const dayKey = getIstSessionKey(asOfSec);
-    const sessionSnaps = snapshotsForSession(snapshots, dayKey);
-    const nearestSnap = nearestOptionChainSnapshot(sessionSnaps, asOfMs);
-    const optionSource = nearestSnap ? 'snapshot' : 'neutral_fallback';
-    const optionData = nearestSnap
-      ? snapshotToOptionMetrics(nearestSnap, symbol)
-      : neutralOptionMetrics(symbol, snapshot.lastPrice);
-
-    const decision = fastify.decisionEngine.computeTradeDecision(
-      snapshot as PriceActionResponse,
-      optionData,
-      activeStyle,
-      { vetoMode, flowMode },
-    );
-
-    if (decision.action !== 'CE-BUY' && decision.action !== 'PE-BUY') {
-      continue;
-    }
-
-    if (decision.conviction < enterThreshold) {
-      continue;
-    }
-
-    if (!snapshot.tradeSetup) continue;
-
-    tradeCandidates.push({
-      asOfMs,
-      asOfSec,
-      dayKey,
-      action: decision.action,
-      conviction: decision.conviction,
-      bias: decision.bias,
-      snapshot,
-      optionSource,
-      optionData,
-      nearestSnap,
-    });
-  }
-
-  for (let flipIdx = 0; flipIdx < flipPollAnchors.length; flipIdx++) {
-    if (flipIdx % BENCHMARK_YIELD_EVERY === 0) {
-      await yieldToEventLoop();
-    }
-    const asOfMs = flipPollAnchors[flipIdx];
-    const asOfSec = Math.floor(asOfMs / 1000);
-    const slice5m = sliceCandlesUpTo(candles5m, asOfSec);
-    const slice15m = sliceCandlesUpTo(candles15m, asOfSec);
-    const slice1h = sliceCandlesUpTo(candles1h, asOfSec);
-
-    if (slice5m.length < TIMELINE_DEFAULTS.MIN_CANDLES_FOR_ANALYSIS) {
-      continue;
-    }
-
-    const snapshot = buildPriceActionSnapshot(deps, {
-      symbol,
-      tradingStyle: activeStyle,
-      candles5m: slice5m,
-      candles15m: slice15m,
-      candles1h: slice1h,
+      candles5m,
+      candles15m,
+      candles1h,
+      candleEnd5m: end5m,
+      candleEnd15m: end15m,
+      candleEnd1h: end1h,
       asOfMs,
     });
     if (!snapshot) continue;
@@ -342,6 +298,24 @@ export async function runBenchmark(
       action: decision.action,
       conviction: decision.conviction,
     });
+
+    if (!entryAnchorMs.has(asOfMs)) continue;
+    if (decision.action !== 'CE-BUY' && decision.action !== 'PE-BUY') continue;
+    if (decision.conviction < enterThreshold) continue;
+    if (!snapshot.tradeSetup) continue;
+
+    tradeCandidates.push({
+      asOfMs,
+      asOfSec,
+      dayKey,
+      action: decision.action,
+      conviction: decision.conviction,
+      bias: decision.bias,
+      snapshot,
+      optionSource: nearestSnap ? 'snapshot' : 'neutral_fallback',
+      optionData,
+      nearestSnap,
+    });
   }
 
   const tradeCooldownMs = SESSION_TRADE_COOLDOWN_MINUTES * 60 * 1000;
@@ -355,9 +329,7 @@ export async function runBenchmark(
   let aiCalls = 0;
 
   for (let tradeIdx = 0; tradeIdx < tradeCandidates.length; tradeIdx++) {
-    if (tradeIdx % BENCHMARK_YIELD_EVERY === 0) {
-      await yieldToEventLoop();
-    }
+    await yieldToEventLoop();
     const candidate = tradeCandidates[tradeIdx];
     const { asOfMs, asOfSec, dayKey, action, conviction, snapshot } = candidate;
 
@@ -534,7 +506,7 @@ export async function runBenchmark(
       : 'Unlimited entries per session day.';
 
   const flipNote = signalFlipExit
-    ? 'Signal-flip exit: once 1:1.5+ is locked, 2 consecutive opposite polls (5m replay / 60s live) exit at market.'
+    ? `Signal-flip exit: once 1:1.5+ is locked, 2 consecutive opposite polls (${flipPollMinutes}m replay / 60s live) exit at market.`
     : 'Signal-flip exit disabled for this run.';
 
   return {
