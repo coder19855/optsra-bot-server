@@ -28,7 +28,6 @@ import { ResponseStatus } from '../types';
 import {
   TechnicalAnalysisTimelineResponse,
   TimelinePoint,
-  TradeAction,
 } from '../types/technical-analysis';
 import { getStyleScoringConfig, TradingStyle } from '../trading-style';
 
