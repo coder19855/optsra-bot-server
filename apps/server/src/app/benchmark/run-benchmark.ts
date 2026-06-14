@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { FyersAPI } from 'fyers-api-v3';
 import { FLIP_POLL_INTERVAL_MINUTES } from '../constants/trade-rr';
 import { SESSION_TRADE_COOLDOWN_MINUTES, TIMELINE_DEFAULTS } from '../constants/technical-analysis';
 import { getStyleScoringConfig } from '../trading-style';
@@ -43,6 +44,18 @@ import {
 } from './capital-curve';
 import { buildBenchmarkTradeSetup } from './benchmark-trade-setup';
 import { BENCHMARK_DEFAULT_STARTING_CAPITAL_INR } from '../constants/benchmark';
+import { toErrorMessage } from '../error-message';
+
+async function fetchHistory(
+  fastify: FastifyInstance,
+  params: FyersAPI.HistoryQueryRequest,
+): Promise<FyersAPI.HistoryResponse> {
+  try {
+    return await fastify.fyers.getHistory(params);
+  } catch (err) {
+    throw new Error(toErrorMessage(err));
+  }
+}
 
 function parseTradingStyle(styleQuery?: string): TradingStyle {
   const styleStr = (styleQuery || 'INTRADAY').toUpperCase();
@@ -140,7 +153,7 @@ export async function runBenchmark(
   const toEpochSeconds = (ms: number) => Math.floor(ms / 1000).toString();
 
   const [res5m, res15m, res1h, snapshots] = await Promise.all([
-    fastify.fyers.getHistory({
+    fetchHistory(fastify, {
       symbol,
       resolution: '5',
       range_from: toEpochSeconds(fetchFromMs),
@@ -149,7 +162,7 @@ export async function runBenchmark(
       oi_flag: 0,
       date_format: 0,
     }),
-    fastify.fyers.getHistory({
+    fetchHistory(fastify, {
       symbol,
       resolution: '15',
       range_from: toEpochSeconds(fetchFromMs),
@@ -158,7 +171,7 @@ export async function runBenchmark(
       oi_flag: 0,
       date_format: 0,
     }),
-    fastify.fyers.getHistory({
+    fetchHistory(fastify, {
       symbol,
       resolution: '60',
       range_from: toEpochSeconds(fetchFromMs),
@@ -176,7 +189,13 @@ export async function runBenchmark(
     res1h.s !== ResponseStatus.ok ||
     !res5m.candles?.length
   ) {
-    throw new Error('Failed to fetch candle history for benchmark window.');
+    const detail = [res5m, res15m, res1h]
+      .filter((res) => res.s !== ResponseStatus.ok)
+      .map((res) => toErrorMessage(res))
+      .find(Boolean);
+    throw new Error(
+      detail ?? 'Failed to fetch candle history for benchmark window.',
+    );
   }
 
   const candles5m = res5m.candles;

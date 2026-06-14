@@ -5,6 +5,7 @@ import { TradingStyle } from '../types/trading-style';
 import { buildBenchmarkWebAppUrl } from './deck-url';
 import { joinTelegramLines, joinTelegramSections } from './message-layout';
 import { parseSymbolStyleCommandArgs } from './command-args';
+import { toErrorMessage } from '../error-message';
 
 export function parseBenchmarkCommandArgs(
   text: string,
@@ -144,7 +145,7 @@ export async function buildBenchmarkTelegramMessage(
 
     return { message: summary, reportUrl };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { message: '', error: msg };
+    fastify.log.warn({ err }, 'benchmark telegram message failed');
+    return { message: '', error: toErrorMessage(err) };
   }
 }

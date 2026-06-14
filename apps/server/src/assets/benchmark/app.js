@@ -334,6 +334,22 @@
       .replace(/>/g, '&gt;');
   }
 
+  function apiErrorMessage(body, status) {
+    if (body == null) return `HTTP ${status}`;
+    if (typeof body === 'string' && body.trim()) return body.trim();
+    if (typeof body.error === 'string' && body.error.trim()) return body.error.trim();
+    if (typeof body.message === 'string' && body.message.trim()) return body.message.trim();
+    if (typeof body.reason === 'string' && body.reason.trim()) return body.reason.trim();
+    if (body.error != null && typeof body.error === 'object') {
+      return apiErrorMessage(body.error, status);
+    }
+    try {
+      return JSON.stringify(body);
+    } catch {
+      return `HTTP ${status}`;
+    }
+  }
+
   function showError(msg) {
     els.error.textContent = msg;
     els.error.classList.remove('hidden');
@@ -361,7 +377,7 @@
     try {
       const res = await fetch(`/api/benchmark?${qs.toString()}`, { headers });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(apiErrorMessage(body, res.status));
 
       const report = body;
       els.generated.textContent = new Date(report.generatedAt).toLocaleString('en-IN', {

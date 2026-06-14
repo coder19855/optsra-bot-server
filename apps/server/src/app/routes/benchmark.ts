@@ -12,6 +12,7 @@ import { resolveAllowedTelegramUserIds } from '../telegram-notifications/telegra
 import { TradingStyle } from '../types/trading-style';
 import { parseFlowModeQuery } from '../types/flow-mode';
 import { VetoMode } from '../types/veto-mode';
+import { toErrorMessage } from '../error-message';
 
 function resolveBenchmarkAssetRoot(): string {
   const candidates = [
@@ -185,7 +186,7 @@ export default async function benchmarkRoutes(fastify: FastifyInstance) {
       });
       return serializeReport(report);
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = toErrorMessage(err);
       fastify.log.warn({ err }, 'benchmark run failed');
       return reply.code(502).send({ error: message });
     }
