@@ -83,7 +83,8 @@
     marketRegimeLabel: document.getElementById('market-regime-label'),
     marketRegimeConfirm: document.getElementById('market-regime-confirm'),
     marketRegimeHint: document.getElementById('market-regime-hint'),
-    vetoSection: document.getElementById('veto-section'),
+    vetoPanel: document.getElementById('veto-panel'),
+    vetoTimelineWrap: document.getElementById('veto-timeline-wrap'),
     vetoStrip: document.getElementById('veto-strip'),
     vetoModeOptions: document.getElementById('veto-mode-options'),
     vetoModeNote: document.getElementById('veto-mode-note'),
@@ -398,9 +399,6 @@
     document.querySelectorAll('.tab-panel').forEach((panel) => {
       panel.classList.toggle('active', panel.id === `tab-${tabId}`);
     });
-    if (els.vetoDock) {
-      els.vetoDock.classList.toggle('hidden', tabId === 'veto' || tabId === 'strategy');
-    }
     if (tabId === 'charts') {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -473,6 +471,27 @@
         els.vetoModeNote.classList.add('hidden');
         els.vetoModeNote.textContent = '';
       }
+    }
+  }
+
+  function syncVetoPanelVisibility() {
+    if (els.vetoTimelineWrap) {
+      els.vetoTimelineWrap.classList.toggle('hidden', !vetoTimeline.length);
+    }
+    if (els.replayDock) {
+      els.replayDock.classList.toggle('hidden', currentMode !== 'replay');
+    }
+  }
+
+  function setVetoTimeline(nextTimeline, activeIndex) {
+    vetoTimeline = nextTimeline || [];
+    syncVetoPanelVisibility();
+    if (vetoTimeline.length) {
+      renderVetoStrip(
+        activeIndex == null ? Math.max(0, vetoTimeline.length - 1) : activeIndex,
+      );
+    } else if (els.vetoStrip) {
+      els.vetoStrip.innerHTML = '';
     }
   }
 
@@ -2606,21 +2625,13 @@
         els.optionComponentsNote.textContent = '';
       }
     }
-    if (els.vetoSection) {
-      vetoTimeline = data.vetoTimeline || [];
-      if (vetoTimeline.length) {
-        els.vetoSection.classList.remove('hidden');
-        els.vetoSection.classList.remove('replay-only');
-        renderVetoStrip(vetoTimeline.length - 1);
-      } else {
-        els.vetoSection.classList.add('hidden');
-      }
-    }
+    setVetoTimeline(data.vetoTimeline || [], (data.vetoTimeline || []).length - 1);
     if (els.vetoModeOptions) {
       els.vetoModeOptions.querySelectorAll('.veto-mode-btn').forEach((btn) => {
         btn.disabled = true;
       });
     }
+    syncVetoPanelVisibility();
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
@@ -2660,21 +2671,13 @@
     renderOpenPositions(data.openPositions);
     renderManagementContext(data.managementContext || null);
     renderMarketRegime(data.marketRegime);
-    if (els.vetoSection) {
-      vetoTimeline = data.vetoTimeline || [];
-      if (vetoTimeline.length) {
-        els.vetoSection.classList.remove('hidden');
-        els.vetoSection.classList.remove('replay-only');
-        renderVetoStrip(vetoTimeline.length - 1);
-      } else {
-        els.vetoSection.classList.add('hidden');
-      }
-    }
+    setVetoTimeline(data.vetoTimeline || [], (data.vetoTimeline || []).length - 1);
     if (els.vetoModeOptions) {
       els.vetoModeOptions.querySelectorAll('.veto-mode-btn').forEach((btn) => {
         btn.disabled = true;
       });
     }
+    syncVetoPanelVisibility();
     deckEvents = buildEventsFromPayload(data);
     renderEvents(deckEvents);
     spotCandlesPayload = resolveSpotCandles(data);
@@ -3149,12 +3152,8 @@
     els.live.classList.add('hidden');
     els.status.textContent = `Session replay · ${data.trades?.length || 0} trade(s)`;
     els.pnlSection.classList.remove('hidden');
-    els.replayDock?.classList.remove('hidden');
     document.body.classList.add('replay-mode');
-    if (els.vetoSection) {
-      els.vetoSection.classList.remove('hidden');
-      els.vetoSection.classList.add('replay-only');
-    }
+    currentMode = 'replay';
     serverVetoMode = data.vetoMode || 'strict';
     setVetoModeUi(serverVetoMode);
     setFlowModeUi(data.flowMode || 'blend');
@@ -3169,7 +3168,8 @@
     replayGauges = data.gauges || null;
     replayEntryThreshold = Number(data.entryThreshold) || 60;
     replayBaseVetoTimeline = data.vetoTimeline || [];
-    vetoTimeline = buildVetoTimelineForMode(replayPoints, vetoMode);
+    setVetoTimeline(buildVetoTimelineForMode(replayPoints, vetoMode), replayPoints.length - 1);
+    syncVetoPanelVisibility();
     renderVetoBreakup(
       [els.vetoBreakup, els.vetoBreakupTab],
       data.vetoBreakup || [],
@@ -3249,8 +3249,8 @@
       if (data.mode === 'replay') applyReplay(data);
       else {
         document.body.classList.remove('replay-mode');
-        els.replayDock?.classList.add('hidden');
         applyLive(data);
+        syncVetoPanelVisibility();
       }
       if (deckHasRenderableContent(data)) {
         hasDisplayedDeck = true;
@@ -3418,10 +3418,8 @@
       const mode = btn.dataset.vetoMode;
       if (currentMode === 'live') return;
       setVetoModeUi(mode, { replayOverride: mode !== serverVetoMode });
-      vetoTimeline = buildVetoTimelineForMode(replayPoints, mode);
-      const idx = Number(els.replaySlider.value);
-      renderVetoStrip(idx);
-      applyReplayIndex(idx);
+      setVetoTimeline(buildVetoTimelineForMode(replayPoints, mode), Number(els.replaySlider.value));
+      applyReplayIndex(Number(els.replaySlider.value));
     });
   }
 

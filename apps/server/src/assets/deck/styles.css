@@ -734,6 +734,51 @@ body.replay-mode {
   color: #fca5a5;
 }
 
+.veto-panel {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 10px 12px 0;
+  overflow: hidden;
+}
+
+.veto-panel-subhead {
+  font-size: 0.68rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.veto-timeline-wrap {
+  margin-bottom: 10px;
+}
+
+.veto-panel .veto-mode-bar {
+  margin-bottom: 8px;
+}
+
+.veto-panel .veto-mode-note {
+  margin: -2px 0 8px;
+}
+
+.veto-panel .replay-dock-inline {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(10, 12, 16, 0.35);
+}
+
+.veto-panel .veto-dock {
+  margin: 0 -12px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
 .veto-dock {
   margin-bottom: 12px;
   border: 1px solid var(--border);
